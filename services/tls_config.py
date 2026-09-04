@@ -11,9 +11,11 @@ strict and leaves urllib3 warnings untouched.
 import os
 import ssl
 from typing import Optional
-from dotenv import load_dotenv
-
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 import urllib3
 
