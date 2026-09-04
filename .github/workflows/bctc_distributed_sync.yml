@@ -11,6 +11,9 @@ on:
     # Chạy tự động vào 01:00 sáng Chủ Nhật hàng tuần (Giờ VN = 18:00 UTC Thứ 7)
     - cron: '0 18 * * 6'
 
+permissions:
+  contents: write
+
 jobs:
   distributed_crawl:
     name: Worker ${{ matrix.worker_id }} (Cụm 20 Máy Ảo)
@@ -51,13 +54,17 @@ jobs:
           retention-days: 7
 
   merge_and_publish:
-    name: Hợp nhất 20 Shard thành Data Lake Tổng
+    name: Hợp nhất 20 Shard & Tự động Đổ Dữ Liệu vào Repo
     needs: distributed_crawl
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -69,15 +76,24 @@ jobs:
         with:
           path: ./all_shards
 
-      - name: Merge Shards to extracted_bctc_lake.json
+      - name: Merge Shards to data/pdf_lake/extracted_bctc_lake.json
         run: |
           python scripts/merge_shards.py \
             --input-dir ./all_shards \
-            --output-file ./extracted_bctc_lake.json
+            --output-file ./data/pdf_lake/extracted_bctc_lake.json \
+            --base-lake ./data/pdf_lake/extracted_bctc_lake.json
 
-      - name: Publish Unified Data Lake Artifact
+      - name: Auto-Commit & Push thẳng vào Repo
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/pdf_lake/extracted_bctc_lake.json
+          git commit -m "chore(data): auto-update extracted_bctc_lake.json from 20-worker supercluster [skip ci]" || echo "No changes to commit"
+          git push origin main
+
+      - name: Publish Unified Data Lake Artifact Backup
         uses: actions/upload-artifact@v4
         with:
           name: extracted_bctc_lake_latest
-          path: ./extracted_bctc_lake.json
+          path: ./data/pdf_lake/extracted_bctc_lake.json
           retention-days: 30
