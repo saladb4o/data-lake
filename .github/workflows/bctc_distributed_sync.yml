@@ -29,12 +29,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pdfplumber beautifulsoup4 requests vnstock PyMuPDF
+          pip install -r requirements.txt
 
       - name: Run Crawler Shard ${{ matrix.worker_id }}/20
         run: |
