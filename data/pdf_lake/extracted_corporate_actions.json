@@ -1,0 +1,1109 @@
+{
+  "SHS_resolution_61414": {
+    "doc_id": "SHS_resolution_61414",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT cung cấp dịch vụ LKCK và môi giới chứng khoán cho SHB",
+    "date": "01/07/2026 00:00",
+    "timestamp": 1782838800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/010726/shs-cbtt-quyet-dinh-cua-h-qt-ve-viec-cung-cap-dich-vu-luu-ky-chung-khoan-va-moi-gioi-chung-khoan-cho-shb-0-622250.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_cung_cấp_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_cung_cấp_.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 10,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526936.6822193
+  },
+  "SHS_resolution_94147": {
+    "doc_id": "SHS_resolution_94147",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT phát hành riêng lẻ 500 tỷ đồng trái phiếu lần 1 năm 2026",
+    "date": "30/06/2026 00:00",
+    "timestamp": 1782752400,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/300626/shs-nghi-quyet-h-qt-ve-viec-phat-hanh-rieng-le-trai-phieu-shs-lan-1-nam-2026-0-621993.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_phát_hành.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_phát_hành.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 34,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526939.0370922
+  },
+  "SHS_resolution_13739": {
+    "doc_id": "SHS_resolution_13739",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT mua bảo hiểm của DBV",
+    "date": "28/07/2026 00:00",
+    "timestamp": 1785171600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/280726/shs-cbtt-quyet-dinh-cua-h-qt-ve-viec-thong-qua-giao-dich-giua-shs-va-dbv-0-626884.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_mua_bảo_h.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_mua_bảo_h.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 11,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526935.6411867
+  },
+  "SHS_resolution_80391": {
+    "doc_id": "SHS_resolution_80391",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT ký các hợp đồng giao dịch TPCP với SHB",
+    "date": "23/06/2026 00:00",
+    "timestamp": 1782147600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/230626/shs-cbtt-quyet-dinh-thong-qua-viec-ky-ket-cac-hop-dong-tai-lieu-giao-dich-giua-shs-va-shb-0-620912.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_ký_các_hợ.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_ký_các_hợ.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 11,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526939.0745487
+  },
+  "SHS_resolution_69747": {
+    "doc_id": "SHS_resolution_69747",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT sửa đổi phương án phát hành, sử dụng vốn, của đợt chào bán trái phiếu năm 2026",
+    "date": "01/07/2026 00:00",
+    "timestamp": 1782838800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/010726/shs-nghi-quyet-hoi-dong-quan-tri-0-622271.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_sửa_đổi_p.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_sửa_đổi_p.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 14,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526937.572324
+  },
+  "SHS_resolution_80902": {
+    "doc_id": "SHS_resolution_80902",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT thông qua hồ chào bán trái phiếu năm 2026",
+    "date": "01/07/2026 00:00",
+    "timestamp": 1782838800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/010726/shs-nghi-quyet-hoi-dong-quan-tri-0-622270.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_thông_qua.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_thông_qua.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 8,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526939.004318
+  },
+  "SHS_resolution_78058": {
+    "doc_id": "SHS_resolution_78058",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Nghị quyết HĐQT vay 2.600 tỷ đồng của ABBank",
+    "date": "19/06/2026 00:00",
+    "timestamp": 1781802000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/190626/shs-cbtt-quyet-dinh-cua-h-qt-ve-viec-vay-von-tai-ngan-hang-tmcp-an-binh-0-620535.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_vay_2_600.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Nghị_quyết_HĐQT_vay_2_600.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 8,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526940.3634896
+  },
+  "SHS_resolution_31373": {
+    "doc_id": "SHS_resolution_31373",
+    "symbol": "SHS",
+    "category": "resolution",
+    "title": "SHS: Sửa đổi Quyết định thành lập VPĐD Hải Phòng",
+    "date": "05/06/2026 00:00",
+    "timestamp": 1780592400,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/050626/shs-cbtt-quyet-dinh-cua-ubck-ve-viec-sua-doi-quyet-dinh-chap-thuan-thanh-lap-van-phong-dai-dien-hai-phong-0-618667.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Sửa_đổi_Quyết_định_thành_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_RESOLUTION_2026_SHS__Sửa_đổi_Quyết_định_thành_.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 6,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526941.865853
+  },
+  "SHS_governance_19050": {
+    "doc_id": "SHS_governance_19050",
+    "symbol": "SHS",
+    "category": "governance",
+    "title": "SHS: Báo cáo quản trị công ty bán niên 2026",
+    "date": "06/08/2026 00:00",
+    "timestamp": 1785949200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/060826/shs-bao-cao-quan-tri-cong-ty-ban-nien-2026-0-629580.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_GOVERNANCE_2026_SHS__Báo_cáo_quản_trị_công_ty_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\SHS\\SHS_GOVERNANCE_2026_SHS__Báo_cáo_quản_trị_công_ty_.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 55,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "SCANNED_IMAGE",
+        "period": "Bán niên",
+        "board_members": [
+          {
+            "title": "HDQT, Tong Giam doc (TGD) (cung voi Ban TGD).",
+            "name": "HDQT, Tong Giam doc (TGD) (cung voi Ban TGD)."
+          }
+        ],
+        "related_party_transactions": [],
+        "insider_transactions": []
+      }
+    },
+    "processed_at": 1788526963.5019956
+  },
+  "PVS_resolution_46105": {
+    "doc_id": "PVS_resolution_46105",
+    "symbol": "PVS",
+    "category": "resolution",
+    "title": "PVS: Nghị quyết HĐQT triển khai trả cổ tức năm 2025 bằng cp (100:20)",
+    "date": "11/08/2026 00:00",
+    "timestamp": 1786381200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/110826/pvs-nghi-quyet-hoi-dong-quan-tri-0-630322.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_RESOLUTION_2026_PVS__Nghị_quyết_HĐQT_triển_kha.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_RESOLUTION_2026_PVS__Nghị_quyết_HĐQT_triển_kha.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 21,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": "10/08/2026",
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526968.1892123
+  },
+  "PVS_resolution_39440": {
+    "doc_id": "PVS_resolution_39440",
+    "symbol": "PVS",
+    "category": "resolution",
+    "title": "PVS: Thay đổi nhân sự theo Nghị quyết ĐHCĐ thường niên năm 2026",
+    "date": "26/06/2026 00:00",
+    "timestamp": 1782406800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/260626/pvs-thay-doi-nhan-su-0-621559.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_RESOLUTION_2026_PVS__Thay_đổi_nhân_sự_theo_Ngh.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_RESOLUTION_2026_PVS__Thay_đổi_nhân_sự_theo_Ngh.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 4,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526969.1377206
+  },
+  "PVS_resolution_67064": {
+    "doc_id": "PVS_resolution_67064",
+    "symbol": "PVS",
+    "category": "resolution",
+    "title": "PVS: Nghị quyết ĐHCĐ thường niên năm 2026",
+    "date": "23/06/2026 00:00",
+    "timestamp": 1782147600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/230626/pvs-nghi-quyet-ai-hoi-dong-co-dong-thuong-nien-nam-2026-0-620950.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_RESOLUTION_2026_PVS__Nghị_quyết_ĐHCĐ_thường_ni.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_RESOLUTION_2026_PVS__Nghị_quyết_ĐHCĐ_thường_ni.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 221,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526976.2374146
+  },
+  "PVS_governance_58447": {
+    "doc_id": "PVS_governance_58447",
+    "symbol": "PVS",
+    "category": "governance",
+    "title": "PVS: Báo cáo quản trị công ty bán niên 2026",
+    "date": "03/08/2026 00:00",
+    "timestamp": 1785690000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/030826/pvs-bao-cao-quan-tri-cong-ty-ban-nien-2026-0-628657.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_GOVERNANCE_2026_PVS__Báo_cáo_quản_trị_công_ty_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_GOVERNANCE_2026_PVS__Báo_cáo_quản_trị_công_ty_.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "NATIVE",
+      "total_pages": 98,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "NATIVE",
+        "period": "Bán niên",
+        "board_members": [
+          {
+            "title": "- Ông Tổng Giám đốc (b/c)/",
+            "name": "- Ông Tổng Giám đốc (b/c)/"
+          },
+          {
+            "title": "TUQ.TỔNG GIÁM ĐỐC",
+            "name": "TUQ.TỔNG GIÁM ĐỐC"
+          }
+        ],
+        "related_party_transactions": [],
+        "insider_transactions": []
+      }
+    },
+    "processed_at": 1788526979.162081
+  },
+  "PVS_dividend_98309": {
+    "doc_id": "PVS_dividend_98309",
+    "symbol": "PVS",
+    "category": "dividend",
+    "title": "PVS: 15.9.2026, chốt DS trả cổ tức năm 2025 bằng cp (100:20)",
+    "date": "27/08/2026 00:00",
+    "timestamp": 1787763600,
+    "pdf_url": "https://cafefnew.mediacdn.vn/download/270826/pvs-cong-bo-thong-tin-thong-bao-ve-phat-hanh-co-phieu-de-tra-co-tuc-nam-2025-thong-bao-ve-ngay-dang-ky-cuoi-cung-de-thuc-hien-quyen-nhan-co-tuc-nam-20-0-632741.pdf?v=1787800813120",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_DIVIDEND_2026_PVS__15_9_2026__chốt_DS_trả_cổ.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_DIVIDEND_2026_PVS__15_9_2026__chốt_DS_trả_cổ.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 10,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526981.3041856
+  },
+  "PVS_dividend_55416": {
+    "doc_id": "PVS_dividend_55416",
+    "symbol": "PVS",
+    "category": "dividend",
+    "title": "PVS: Tỷ lệ sở hữu nước ngoài được phép tối đa là 49%",
+    "date": "25/08/2026 00:00",
+    "timestamp": 1787590800,
+    "pdf_url": "https://cafefnew.mediacdn.vn/download/250826/pvs-cong-bo-thong-tin-ty-le-so-huu-nuoc-ngoai-toi-da-cua-tong-cong-ty-co-phan-dich-vu-ky-thuat-dau-khi-viet-nam-0-632448.pdf?v=1787626941655",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_DIVIDEND_2026_PVS__Tỷ_lệ_sở_hữu_nước_ngoài_đ.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_DIVIDEND_2026_PVS__Tỷ_lệ_sở_hữu_nước_ngoài_đ.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 4,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526983.2342007
+  },
+  "PVS_dividend_91651": {
+    "doc_id": "PVS_dividend_91651",
+    "symbol": "PVS",
+    "category": "dividend",
+    "title": "PVS: UBCKNN đã nhận tài liệu trả cổ tức bằng cp",
+    "date": "20/08/2026 00:00",
+    "timestamp": 1787158800,
+    "pdf_url": "https://cafefnew.mediacdn.vn/download/210826/pvs-cong-bo-thong-tin-cong-van-so-8036-cua-uy-ban-chung-khoan-nha-nuoc-0-631916.pdf?v=1787280235938",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_DIVIDEND_2026_PVS__UBCKNN_đã_nhận_tài_liệu_t.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PVS\\PVS_DIVIDEND_2026_PVS__UBCKNN_đã_nhận_tài_liệu_t.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 4,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "STOCK",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526984.3193316
+  },
+  "CEO_resolution_92070": {
+    "doc_id": "CEO_resolution_92070",
+    "symbol": "CEO",
+    "category": "resolution",
+    "title": "CEO: Nghị quyết HĐQT góp vốn thành lập công ty con",
+    "date": "02/07/2026 00:00",
+    "timestamp": 1782925200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/020726/ceo-nghi-quyet-hoi-dong-quan-tri-0-622756.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_góp_vốn_t.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_góp_vốn_t.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 9,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [
+          {
+            "description": "V/v: gop von thanh lap Cong ty con - Cong ty co phan Dau tur Giao duc Sao Khue",
+            "capital_contribution_vnd": null,
+            "target_ownership_pct": null,
+            "page": 1
+          },
+          {
+            "description": "Cong ty xem xét va thong qua viec gop von thanh lap Cong ty con voi cac noi dung",
+            "capital_contribution_vnd": null,
+            "target_ownership_pct": null,
+            "page": 1
+          }
+        ],
+        "bond_and_credit_limits": [],
+        "resolution_date": "25/06/2026",
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526996.967031
+  },
+  "CEO_resolution_6197": {
+    "doc_id": "CEO_resolution_6197",
+    "symbol": "CEO",
+    "category": "resolution",
+    "title": "CEO: Nghị quyết HĐQT thông qua tổng mức đầu tư phần dự án KĐT mới CEO Mê Linh",
+    "date": "12/06/2026 00:00",
+    "timestamp": 1781197200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/160626/ceo-nghi-quyet-hoi-dong-quan-tri-0-619518.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_thông_qua.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_thông_qua.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788526997.618914
+  },
+  "CEO_resolution_54742": {
+    "doc_id": "CEO_resolution_54742",
+    "symbol": "CEO",
+    "category": "resolution",
+    "title": "CEO: Nghị quyết HĐQT vay 2.740 tỷ đồng của Agribank cho dự án KĐT mới CEO Mê Linh",
+    "date": "12/06/2026 00:00",
+    "timestamp": 1781197200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/140626/ceo-nghi-quyet-hoi-dong-quan-tri-0-619518.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_vay_2_740.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_vay_2_740.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 3,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527015.8583155
+  },
+  "CEO_resolution_32498": {
+    "doc_id": "CEO_resolution_32498",
+    "symbol": "CEO",
+    "category": "resolution",
+    "title": "CEO: Đính chính thông tin tại Biên bản, Nghị quyết ĐHĐCĐ thường niên năm 2026",
+    "date": "08/06/2026 14:19",
+    "timestamp": 1780903140,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/080626/ceo-inh-chinh-thong-tin-tai-bien-ban-nghi-quyet-h-c-thuong-nien-nam-2026-0-618830.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Đính_chính_thông_tin_tại_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Đính_chính_thông_tin_tại_.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 16,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527032.8360827
+  },
+  "CEO_resolution_32033": {
+    "doc_id": "CEO_resolution_32033",
+    "symbol": "CEO",
+    "category": "resolution",
+    "title": "CEO: Bổ sung nội dung của Nghị quyết ĐHCĐ thường niên năm 2026",
+    "date": "25/05/2026 00:00",
+    "timestamp": 1779642000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/250526/ceo-bo-sung-noi-dung-tai-nghi-quyet-h-c-thuong-nien-nam-2026-0-616692.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Bổ_sung_nội_dung_của_Nghị.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Bổ_sung_nội_dung_của_Nghị.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 9,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527050.815957
+  },
+  "CEO_resolution_19952": {
+    "doc_id": "CEO_resolution_19952",
+    "symbol": "CEO",
+    "category": "resolution",
+    "title": "CEO: Nghị quyết HĐQT trả cổ tức năm 2025 bằng cp (100:5)",
+    "date": "14/05/2026 00:00",
+    "timestamp": 1778691600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/140526/ceo-nghi-quyet-hoi-dong-quan-tri-0-615346.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_trả_cổ_tứ.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_RESOLUTION_2026_CEO__Nghị_quyết_HĐQT_trả_cổ_tứ.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 3,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527063.1176164
+  },
+  "CEO_governance_77471": {
+    "doc_id": "CEO_governance_77471",
+    "symbol": "CEO",
+    "category": "governance",
+    "title": "CEO: Báo cáo quản trị công ty bán niên 2026",
+    "date": "31/07/2026 00:00",
+    "timestamp": 1785430800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/310726/ceo-bao-cao-quan-tri-cong-ty-ban-nien-2026-0-627893.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_GOVERNANCE_2026_CEO__Báo_cáo_quản_trị_công_ty_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_GOVERNANCE_2026_CEO__Báo_cáo_quản_trị_công_ty_.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 41,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "SCANNED_IMAGE",
+        "period": "Năm",
+        "board_members": [],
+        "related_party_transactions": [],
+        "insider_transactions": []
+      }
+    },
+    "processed_at": 1788527084.6103957
+  },
+  "CEO_dividend_52639": {
+    "doc_id": "CEO_dividend_52639",
+    "symbol": "CEO",
+    "category": "dividend",
+    "title": "CEO: 28.7.2026, giao dịch 28.359.680 cổ phiếu trả cổ tức năm 2025",
+    "date": "21/07/2026 00:00",
+    "timestamp": 1784566800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/210726/ceo-ngay-28-07-2026-thong-bao-ngay-giao-dich-dau-tien-co-phieu-thay-doi-dang-ky-niem-yet-0-625307.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__28_7_2026__giao_dịch_28_3.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__28_7_2026__giao_dịch_28_3.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 1,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527085.2850962
+  },
+  "CEO_dividend_55531": {
+    "doc_id": "CEO_dividend_55531",
+    "symbol": "CEO",
+    "category": "dividend",
+    "title": "CEO: Niêm yết 28.359.680 cổ phiếu trả cổ tức năm 2025",
+    "date": "14/07/2026 00:00",
+    "timestamp": 1783962000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/140726/ceo-quyet-dinh-chap-thuan-thay-doi-dang-ky-niem-yet-0-624294.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__Niêm_yết_28_359_680_cổ_ph.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__Niêm_yết_28_359_680_cổ_ph.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 2,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "SCANNED_IMAGE",
+        "payout_form": "STOCK",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527095.7573273
+  },
+  "CEO_dividend_18960": {
+    "doc_id": "CEO_dividend_18960",
+    "symbol": "CEO",
+    "category": "dividend",
+    "title": "CEO: Đã trả cổ tức năm 2025 bằng 28.359.680 cổ phiếu",
+    "date": "22/06/2026 00:00",
+    "timestamp": 1782061200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/220626/ceo-bao-cao-ket-qua-phat-hanh-co-phieu-de-tra-co-tuc-nam-2025-0-620681.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__Đã_trả_cổ_tức_năm_2025_bằ.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__Đã_trả_cổ_tức_năm_2025_bằ.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527096.3359478
+  },
+  "CEO_dividend_67939": {
+    "doc_id": "CEO_dividend_67939",
+    "symbol": "CEO",
+    "category": "dividend",
+    "title": "CEO: Trả cổ tức năm 2025 bằng cp (100:5)",
+    "date": "27/05/2026 00:00",
+    "timestamp": 1779814800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/270526/ceo-thong-bao-phat-hanh-co-phieu-de-tra-co-tuc-nam-2025-0-617186.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__Trả_cổ_tức_năm_2025_bằng_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__Trả_cổ_tức_năm_2025_bằng_.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527097.61729
+  },
+  "CEO_dividend_30773": {
+    "doc_id": "CEO_dividend_30773",
+    "symbol": "CEO",
+    "category": "dividend",
+    "title": "CEO: 10.6.2026, chốt DS trả cổ tức năm 2025 bằng cp (100:5)",
+    "date": "27/05/2026 00:00",
+    "timestamp": 1779814800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/270526/ceo-thong-bao-ngay-dang-ky-cuoi-cung-de-chot-quyen-tra-co-tuc-nam-2025-0-617188.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__10_6_2026__chốt_DS_trả_cổ.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\CEO\\CEO_DIVIDEND_2026_CEO__10_6_2026__chốt_DS_trả_cổ.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "NATIVE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527100.2378333
+  },
+  "FPT_resolution_49701": {
+    "doc_id": "FPT_resolution_49701",
+    "symbol": "FPT",
+    "category": "resolution",
+    "title": "FPT: Nghị quyết HĐQT triển khai phương án phát hành cổ phiếu để tăng vốn cổ phần từ nguồn vốn chủ sở hữu",
+    "date": "03/08/2026 00:00",
+    "timestamp": 1785690000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/030826/fpt-nghi-quyet-h-qt-ve-viec-trien-khai-phuong-an-phat-hanh-co-phieu-de-tang-von-co-phan-tu-nguon-von-chu-so-huu-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_RESOLUTION_2026_FPT__Nghị_quyết_HĐQT_triển_kha.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_RESOLUTION_2026_FPT__Nghị_quyết_HĐQT_triển_kha.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 3,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": "31/07/2026",
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527118.5923574
+  },
+  "FPT_resolution_95723": {
+    "doc_id": "FPT_resolution_95723",
+    "symbol": "FPT",
+    "category": "resolution",
+    "title": "FPT: Nghị quyết HĐQT thông qua việc tăng vốn điều lệ cho Công ty Cổ phần FPT",
+    "date": "10/07/2026 00:00",
+    "timestamp": 1783616400,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/100726/fpt-nghi-quyet-h-qt-so-01-07-2026-ngay-09-07-2026-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_RESOLUTION_2026_FPT__Nghị_quyết_HĐQT_thông_qua.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_RESOLUTION_2026_FPT__Nghị_quyết_HĐQT_thông_qua.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 5,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": "09/07/2026",
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527127.951038
+  },
+  "FPT_governance_77813": {
+    "doc_id": "FPT_governance_77813",
+    "symbol": "FPT",
+    "category": "governance",
+    "title": "FPT: Báo cáo tình hình Quản trị công ty 6 tháng đầu năm 2026",
+    "date": "31/07/2026 10:51",
+    "timestamp": 1785469860,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/310726/fpt-bao-cao-tinh-hinh-quan-tri-cong-ty-6-thang-dau-nam-2026-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_GOVERNANCE_2026_FPT__Báo_cáo_tình_hình_Quản_tr.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_GOVERNANCE_2026_FPT__Báo_cáo_tình_hình_Quản_tr.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 89,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "SCANNED_IMAGE",
+        "period": "Bán niên",
+        "board_members": [
+          {
+            "title": "va Tong Giam doc",
+            "name": "va Tong Giam doc"
+          },
+          {
+            "title": "- Thong qua Don tir nhiem thanh vien HDQT FPT nhiem",
+            "name": "- Thong qua Don tir nhiem thanh vien HDQT FPT nhiem"
+          },
+          {
+            "title": "thanh vien HDQT FPT nhiem ky 2022-2027.",
+            "name": "thanh vien HDQT FPT nhiem ky 2022-2027."
+          },
+          {
+            "title": "thanh vien HDQT",
+            "name": "thanh vien HDQT"
+          }
+        ],
+        "related_party_transactions": [],
+        "insider_transactions": []
+      }
+    },
+    "processed_at": 1788527143.0805113
+  },
+  "FPT_dividend_204": {
+    "doc_id": "FPT_dividend_204",
+    "symbol": "FPT",
+    "category": "dividend",
+    "title": "FPT: Điều lệ Công ty được cập nhật sau phát hành ESOP",
+    "date": "13/07/2026 00:00",
+    "timestamp": 1783875600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/130726/fpt-ieu-le-cong-ty-duoc-cap-nhat-sau-phat-hanh-esop-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_DIVIDEND_2026_FPT__Điều_lệ_Công_ty_được_cập_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\FPT\\FPT_DIVIDEND_2026_FPT__Điều_lệ_Công_ty_được_cập_.pdf",
+      "detected_category": "DIVIDEND",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 52,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "dividend_data": {
+        "report_type": "DIVIDEND",
+        "document_type": "SCANNED_IMAGE",
+        "payout_form": "CASH",
+        "dividend_rate_pct": null,
+        "cash_value_per_share_vnd": null,
+        "stock_split_ratio": null,
+        "ex_dividend_date": null,
+        "record_date": null,
+        "payment_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527151.7832725
+  },
+  "HPG_resolution_86319": {
+    "doc_id": "HPG_resolution_86319",
+    "symbol": "HPG",
+    "category": "resolution",
+    "title": "HPG: Nghị quyết HĐQT về việc góp vốn thành lập CTCP Tập đoàn Tương lai Sông Hồng",
+    "date": "27/07/2026 00:00",
+    "timestamp": 1785085200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/270726/hpg-nghi-quyet-h-qt-ve-viec-gop-von-thanh-lap-ctcp-tap-doan-tuong-lai-song-hong-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\HPG\\HPG_RESOLUTION_2026_HPG__Nghị_quyết_HĐQT_về_việc_g.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\HPG\\HPG_RESOLUTION_2026_HPG__Nghị_quyết_HĐQT_về_việc_g.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 5,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [
+          {
+            "description": "Dieu 1. Thong qua viec Cong ty Co phan Tap doan Hoa Phat tham gia mua co phan ch",
+            "capital_contribution_vnd": null,
+            "target_ownership_pct": null,
+            "page": 1
+          }
+        ],
+        "bond_and_credit_limits": [],
+        "resolution_date": "22/07/2026",
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788527164.8470092
+  },
+  "HPG_governance_21446": {
+    "doc_id": "HPG_governance_21446",
+    "symbol": "HPG",
+    "category": "governance",
+    "title": "HPG: Báo cáo tình hình quản trị 6 tháng đầu năm 2026",
+    "date": "30/07/2026 14:51",
+    "timestamp": 1785397860,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/300726/hpg-bao-cao-tinh-hinh-quan-tri-6-thang-dau-nam-2026-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\HPG\\HPG_GOVERNANCE_2026_HPG__Báo_cáo_tình_hình_quản_tr.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\HPG\\HPG_GOVERNANCE_2026_HPG__Báo_cáo_tình_hình_quản_tr.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 35,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "SCANNED_IMAGE",
+        "period": "Bán niên",
+        "board_members": [
+          {
+            "title": "Thanh vien HDQT",
+            "name": "Thanh vien HDQT"
+          }
+        ],
+        "related_party_transactions": [],
+        "insider_transactions": []
+      }
+    },
+    "processed_at": 1788527185.3596637
+  },
+  "HPG_governance_44535": {
+    "doc_id": "HPG_governance_44535",
+    "symbol": "HPG",
+    "category": "governance",
+    "title": "HPG: Báo cáo tình hình Quản trị công ty 6 tháng đầu năm 2026",
+    "date": "29/07/2026 00:00",
+    "timestamp": 1785258000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/290726/hpg-bao-cao-tinh-hinh-quan-tri-cong-ty-6-thang-dau-nam-2026-0.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\HPG\\HPG_GOVERNANCE_2026_HPG__Báo_cáo_tình_hình_Quản_tr.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\HPG\\HPG_GOVERNANCE_2026_HPG__Báo_cáo_tình_hình_Quản_tr.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 35,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "SCANNED_IMAGE",
+        "period": "Bán niên",
+        "board_members": [
+          {
+            "title": "Thanh vien HDQT",
+            "name": "Thanh vien HDQT"
+          }
+        ],
+        "related_party_transactions": [],
+        "insider_transactions": []
+      }
+    },
+    "processed_at": 1788527193.5612667
+  }
+}

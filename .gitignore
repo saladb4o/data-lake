@@ -1,0 +1,45 @@
+# Secrets
+.env
+.env.*
+
+# Dependencies & Temp
+node_modules/
+Temp/
+tmp_review/
+gauntlet_out/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Large data lake files (synced via Google Drive instead of git)
+data/*.json
+data/*.bak
+data/**/*.pdf
+data/exports/
+
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary files & Scratch
+scratch/
+temp_pdf_scratch/
+*.tmp
+*.tmp_*
+output/
+all_shards/
+*.xlsx
+
+# IDE
+.vscode/
+.idea/
+*.swp

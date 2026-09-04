@@ -1,0 +1,815 @@
+Return code: 1
+
+=== STDOUT ===
+============================= test session starts =============================
+platform win32 -- Python 3.13.2, pytest-9.0.3, pluggy-1.6.0 -- C:\Users\Admin\AppData\Local\Programs\Python\Python313\python.exe
+cachedir: .pytest_cache
+metadata: {'Python': '3.13.2', 'Platform': 'Windows-11-10.0.26200-SP0', 'Packages': {'pytest': '9.0.3', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.13.0', 'langsmith': '0.8.2', 'asyncio': '1.3.0', 'cov': '7.1.0', 'json-report': '1.5.0', 'metadata': '3.1.1', 'mock': '3.15.1', 'typeguard': '4.4.3'}}
+rootdir: C:\Users\Admin\Documents\Vibecoding vnstock
+configfile: pytest.ini
+plugins: anyio-4.13.0, langsmith-0.8.2, asyncio-1.3.0, cov-7.1.0, json-report-1.5.0, metadata-3.1.1, mock-3.15.1, typeguard-4.4.3
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 283 items
+
+tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_wacc_zero_and_negative_inputs PASSED [  0%]
+tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_risk_firewall_zero_division_and_negative_equity FAILED [  0%]
+tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_all_22_models_with_adversarial_data FAILED [  1%]
+tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_dcf_super_growth_and_terminal_growth_exceeds_wacc FAILED [  1%]
+tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_sensitivity_grid_with_singular_coordinates FAILED [  1%]
+tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_adaptive_weighting_with_zero_and_infinite_errors FAILED [  2%]
+tests/test_adversarial_stress.py::TestCorruptedPayloadImmunity::test_completely_empty_and_null_dict FAILED [  2%]
+tests/test_adversarial_stress.py::TestCorruptedPayloadImmunity::test_corrupted_types_and_strings FAILED [  2%]
+tests/test_adversarial_stress.py::TestConcurrencyAndBurstSimulations::test_concurrent_valuation_evaluations PASSED [  3%]
+tests/test_adversarial_stress.py::TestConcurrencyAndBurstSimulations::test_concurrent_fair_value_backtests PASSED [  3%]
+tests/test_adversarial_stress.py::TestConcurrencyAndBurstSimulations::test_fastapi_burst_requests PASSED [  3%]
+tests/test_adversarial_stress.py::TestMissingDataLakeFallbacks::test_valuation_engine_missing_historical_and_model_lake FAILED [  4%]
+tests/test_adversarial_stress.py::TestMissingDataLakeFallbacks::test_fair_value_backtest_missing_price_database FAILED [  4%]
+tests/test_adversarial_stress.py::TestMissingDataLakeFallbacks::test_corrupted_screener_snapshot_fallback PASSED [  4%]
+tests/test_benchmark_service.py::TestTradingViewFastPath::test_success_source_tradingview_schema PASSED [  5%]
+tests/test_benchmark_service.py::TestTradingViewFastPath::test_trim_to_lookback_days PASSED [  5%]
+tests/test_benchmark_service.py::TestTradingViewFastPath::test_tv_only_used_for_daily_interval PASSED [  6%]
+tests/test_benchmark_service.py::TestVnstockFallback::test_tv_failure_falls_back_to_vci PASSED [  6%]
+tests/test_benchmark_service.py::TestVnstockFallback::test_all_sources_fail_returns_clean_error_dict PASSED [  6%]
+tests/test_benchmark_service.py::TestVnstockFallback::test_raising_sources_never_raise_out PASSED [  7%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_symbol_error[] PASSED [  7%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_symbol_error[   ] PASSED [  7%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_symbol_error[NOTREAL] PASSED [  8%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_symbol_error[fpt] PASSED [  8%]
+tests/test_benchmark_service.py::TestValidation::test_error_lists_supported_symbols PASSED [  8%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_interval_error[2H] PASSED [  9%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_interval_error[weekly] PASSED [  9%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_interval_error[] PASSED [  9%]
+tests/test_benchmark_service.py::TestValidation::test_unsupported_interval_error[5m] PASSED [ 10%]
+tests/test_benchmark_service.py::TestValidation::test_invalid_lookback_error[0] PASSED [ 10%]
+tests/test_benchmark_service.py::TestValidation::test_invalid_lookback_error[-5] PASSED [ 10%]
+tests/test_benchmark_service.py::TestValidation::test_invalid_lookback_error[abc] PASSED [ 11%]
+tests/test_benchmark_service.py::TestValidation::test_invalid_lookback_error[None] PASSED [ 11%]
+tests/test_benchmark_service.py::TestValidation::test_lowercase_symbol_and_interval_accepted PASSED [ 12%]
+tests/test_benchmark_service.py::TestValidation::test_result_is_cached PASSED [ 12%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_valuation_comprehensive_hpg_blended PASSED [ 12%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_valuation_comprehensive_hpg_omnibus PASSED [ 13%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_valuation_comprehensive_multi_symbols PASSED [ 13%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_backtest_mode1_pure_valuation PASSED [ 13%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_backtest_mode2_pure_screening PASSED [ 14%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_backtest_mode3_hybrid_funnel PASSED [ 14%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_data_lake_status PASSED [ 14%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_alerts PASSED [ 15%]
+tests/test_empirical_backend_benchmarks.py::TestCachedEndpointsLatency::test_latency_screener_quant_export_csv PASSED [ 15%]
+tests/test_fair_value_backtest.py::TestFairValueBacktestModes::test_mode_1_pure_valuation PASSED [ 15%]
+tests/test_fair_value_backtest.py::TestFairValueBacktestModes::test_mode_2_pure_screening PASSED [ 16%]
+tests/test_fair_value_backtest.py::TestFairValueBacktestModes::test_mode_3_hybrid_funnel PASSED [ 16%]
+tests/test_fair_value_backtest.py::TestFairValueBacktestModes::test_tournament_matrix_generation PASSED [ 16%]
+tests/test_fair_value_backtest.py::TestFairValueBacktestModes::test_backtest_blended_vs_omnibus_modes PASSED [ 17%]
+tests/test_fetchers.py::test_tradingview_success_maps_columns_and_uppercases PASSED [ 17%]
+tests/test_fetchers.py::test_tradingview_empty_input_short_circuits PASSED [ 18%]
+tests/test_fetchers.py::test_tradingview_retry_then_success PASSED       [ 18%]
+tests/test_fetchers.py::test_tradingview_exhausted_retries_returns_empty_and_logs PASSED [ 18%]
+tests/test_fetchers.py::test_tradingview_malformed_json_handled PASSED   [ 19%]
+tests/test_fetchers.py::test_tradingview_wrong_shape_handled PASSED      [ 19%]
+tests/test_fetchers.py::test_tradingview_http_500_retries_then_gives_up PASSED [ 19%]
+tests/test_fetchers.py::test_tradingview_non_retryable_404_no_retry PASSED [ 20%]
+tests/test_fetchers.py::test_tradingview_skips_malformed_items_but_keeps_good_ones PASSED [ 20%]
+tests/test_fetchers.py::test_vnstock_success_extracts_metrics PASSED     [ 20%]
+tests/test_fetchers.py::test_vnstock_non_200_returns_empty PASSED        [ 21%]
+tests/test_fetchers.py::test_vnstock_exhausted_connection_errors_returns_empty_and_logs PASSED [ 21%]
+tests/test_fetchers.py::test_vnstock_malformed_json_returns_empty PASSED [ 21%]
+tests/test_fetchers.py::test_vnstock_wrong_type_payload_returns_empty PASSED [ 22%]
+tests/test_fetchers.py::test_yfinance_valid_meta_extracts_price PASSED   [ 22%]
+tests/test_fetchers.py::test_yfinance_empty_chart_result_returns_empty PASSED [ 22%]
+tests/test_fetchers.py::test_yfinance_missing_chart_key_returns_empty PASSED [ 23%]
+tests/test_fetchers.py::test_yfinance_non_200_returns_empty PASSED       [ 23%]
+tests/test_fetchers.py::test_yfinance_retry_then_success PASSED          [ 24%]
+tests/test_fetchers.py::test_yfinance_meta_without_price_returns_empty PASSED [ 24%]
+tests/test_fetchers.py::test_retry_helper_returns_response_on_success PASSED [ 24%]
+tests/test_fetchers.py::test_retry_helper_never_raises_on_request_exception PASSED [ 25%]
+tests/test_gate3_no_silent_fills.py::test_gate3_rich_input_witnesses_flagged PASSED [ 25%]
+tests/test_gate3_no_silent_fills.py::test_gate3_empty_input_fail_closed PASSED [ 25%]
+tests/test_gate3_no_silent_fills.py::test_gate3_normalized_metadata_covers_scalars_and_witnesses PASSED [ 26%]
+tests/test_gate3_no_silent_fills.py::test_gate3_normalized_empty_sources_cover_witnesses PASSED [ 26%]
+tests/test_global_and_events.py::test_global_commodities_overview PASSED [ 26%]
+tests/test_global_and_events.py::test_etf_rebalancing_overview PASSED    [ 27%]
+tests/test_global_and_events.py::test_market_wide_events_calendar PASSED [ 27%]
+tests/test_global_and_events.py::test_market_upgrade_tracker PASSED      [ 27%]
+tests/test_imputation.py::test_full_tv_core_fields_reported PASSED       [ 28%]
+tests/test_imputation.py::test_full_tv_derived_fields_flagged_as_triangulated PASSED [ 28%]
+tests/test_imputation.py::test_placeholder_constants_always_tier_zero PASSED [ 28%]
+tests/test_imputation.py::test_sparse_data_firebreak PASSED              [ 29%]
+tests/test_imputation.py::test_sector_median_fills_flagged PASSED        [ 29%]
+tests/test_imputation.py::test_equity_triangulated_from_assets_and_liabilities PASSED [ 30%]
+tests/test_imputation.py::test_key_set_invariant_full_data PASSED        [ 30%]
+tests/test_imputation.py::test_key_set_invariant_sparse_data PASSED      [ 30%]
+tests/test_imputation.py::test_no_silent_fills_across_paths PASSED       [ 31%]
+tests/test_imputation.py::test_legacy_return_keys_preserved PASSED       [ 31%]
+tests/test_imputation.py::test_all_empty_inputs_have_no_triangulated_tiers PASSED [ 31%]
+tests/test_imputation.py::test_min_propagation_mixed_real_synthetic PASSED [ 32%]
+tests/test_imputation.py::test_min_propagation_fabricated_witness_caps_market_cap PASSED [ 32%]
+tests/test_institutional_valuation_integration.py::test_valuation_strategies_catalog_present PASSED [ 32%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode1_pure_factor PASSED [ 33%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode2_pure_valuation_blended PASSED [ 33%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode2_pure_valuation_omnibus_submodes[smape] PASSED [ 33%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode2_pure_valuation_omnibus_submodes[male] PASSED [ 34%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode2_pure_valuation_omnibus_submodes[wmape] PASSED [ 34%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode2_pure_valuation_omnibus_submodes[rmsle] PASSED [ 34%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode2_pure_valuation_omnibus_submodes[ivw] PASSED [ 35%]
+tests/test_institutional_valuation_integration.py::test_run_institutional_mode3_arbitrary_hybrid_pairs PASSED [ 35%]
+tests/test_institutional_valuation_integration.py::test_run_valuation_parameter_sensitivity_hybrid PASSED [ 36%]
+tests/test_institutional_valuation_integration.py::test_run_valuation_monte_carlo PASSED [ 36%]
+tests/test_institutional_valuation_integration.py::test_api_valuation_comprehensive_modes_and_metrics PASSED [ 36%]
+tests/test_institutional_valuation_integration.py::test_api_quant_institutional_run_endpoint PASSED [ 37%]
+tests/test_macro_dual_mode.py::TestMacroDualMode::test_01_macro_board_summary PASSED [ 37%]
+tests/test_macro_dual_mode.py::TestMacroDualMode::test_02_macro_detail_usdvnd PASSED [ 37%]
+tests/test_macro_dual_mode.py::TestMacroDualMode::test_03_macro_detail_cpi_and_gdp PASSED [ 38%]
+tests/test_macro_dual_mode.py::TestMacroDualMode::test_04_macro_documents_library PASSED [ 38%]
+tests/test_macro_dual_mode.py::TestMacroDualMode::test_05_macro_global_search_aliases PASSED [ 38%]
+tests/test_macro_dual_mode.py::TestMacroDualMode::test_06_all_9_indicators_deep_validation PASSED [ 39%]
+tests/test_macro_monetary.py::test_sbv_monetary_policy_data PASSED       [ 39%]
+tests/test_macro_monetary.py::test_gso_macroeconomic_data PASSED         [ 39%]
+tests/test_macro_monetary.py::test_macro_monetary_comprehensive_overview PASSED [ 40%]
+tests/test_macro_monetary.py::test_macro_monetary_api_endpoint PASSED    [ 40%]
+tests/test_macro_monetary.py::test_global_commodities_instant_performance PASSED [ 40%]
+tests/test_normalizer.py::test_full_tv_is_imputed_map_and_core_fields_false PASSED [ 41%]
+tests/test_normalizer.py::test_empty_sources_honest_discard PASSED       [ 41%]
+tests/test_normalizer.py::test_mixed_sources_honest_flags_and_golden_keys PASSED [ 42%]
+tests/test_normalizer.py::test_price_only_source_honest_flag_consistency PASSED [ 42%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_1_blended_pe_null_and_zero_safety PASSED [ 42%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_2_ps_margin_adjusted_loss_making PASSED [ 43%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_3_p_fcf_negative_cashflow PASSED [ 43%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_4_pb_rhodes_kropf_negative_equity PASSED [ 43%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_5_p_tbv_zero_tangible_book PASSED [ 44%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_6_ev_ebitda_negative_ebitda_and_high_debt PASSED [ 44%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_7_p_cf_negative_cfo PASSED [ 44%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_8_p_affo_negative_affo PASSED [ 45%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_9_dcf_2stage_mckinsey_negative_ebit PASSED [ 45%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_10_rim_edwards_bell_ohlson_loss_making PASSED [ 45%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_11_greenwald_epv_zero_revenue PASSED [ 46%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_12_graham_growth_negative_eps_and_bvps PASSED [ 46%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_13_rule_of_40_hyper_decay PASSED [ 46%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_14_acquirers_multiple_negative_ebit PASSED [ 47%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_15_buffett_owners_earnings_zero_capex_missing_ppe PASSED [ 47%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_16_pharma_rnpv_empty_pipeline PASSED [ 48%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_17_bank_equity_cash_flow_zero_rwa PASSED [ 48%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_18_reit_affo_dcf_negative_noi PASSED [ 48%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_19_telecom_unbundled_sotp_zero_rab PASSED [ 49%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_20_industrial_apv_distressed_z_score PASSED [ 49%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_21_consumer_eva_mva_negative_eva PASSED [ 49%]
+tests/test_null_safety_stress_adversarial.py::TestValuationModelsSuiteDirectStress::test_model_22_utilities_3stage_ddm_zero_dividends PASSED [ 50%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_with_none_fundamental_data PASSED [ 50%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_with_empty_dict PASSED [ 50%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_with_all_keys_explicit_none PASSED [ 51%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_missing_rwa_specifically PASSED [ 51%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_missing_capex_and_ppe_specifically PASSED [ 51%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_missing_affo_and_pipeline_specifically PASSED [ 52%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_missing_rab_telecom PASSED [ 52%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_across_all_18_icb_sectors PASSED [ 53%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_across_all_omnibus_metrics_cold_start PASSED [ 53%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_with_nan_and_inf_values FAILED [ 53%]
+tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_serialization_to_dict PASSED [ 54%]
+tests/test_orchestrator_scoring.py::test_i1_offline_sync_scores_and_publishes_quintiles PASSED [ 54%]
+tests/test_orchestrator_scoring.py::test_i1b_clone_block_separates_after_sync PASSED [ 54%]
+tests/test_orchestrator_scoring.py::test_i2_empty_inputs_cannot_produce_high_tier_eps PASSED [ 55%]
+tests/test_orchestrator_scoring.py::test_i2b_invented_price_poisons_price_derived_fields PASSED [ 55%]
+tests/test_orchestrator_scoring.py::test_i2c_real_price_keeps_full_provenance PASSED [ 55%]
+tests/test_quant_scoring.py::test_t1_no_mass_ties_after_scoring PASSED   [ 56%]
+tests/test_quant_scoring.py::test_t2_every_quintile_populated_and_balanced PASSED [ 56%]
+tests/test_quant_scoring.py::test_t2b_q1_is_actually_the_top_of_the_ranking PASSED [ 56%]
+tests/test_quant_scoring.py::test_t3_scoring_twice_is_identical PASSED   [ 57%]
+tests/test_quant_scoring.py::test_t4_midrank_ties_get_average_rank PASSED [ 57%]
+tests/test_quant_scoring.py::test_t4_midrank_single_low_value PASSED     [ 57%]
+tests/test_quant_scoring.py::test_t4_midrank_higher_end PASSED           [ 58%]
+tests/test_quant_scoring.py::test_t4_lower_is_better_mirror PASSED       [ 58%]
+tests/test_quant_scoring.py::test_t4_all_tied_population_scores_neutral_midpoint PASSED [ 59%]
+tests/test_quant_scoring.py::test_t4_single_observation_is_neutral PASSED [ 59%]
+tests/test_quant_scoring.py::test_t5_percentiles_bounded PASSED          [ 59%]
+tests/test_quant_scoring.py::test_t5_monotonic_higher_is_better PASSED   [ 60%]
+tests/test_quant_scoring.py::test_t5_monotonic_lower_is_better PASSED    [ 60%]
+tests/test_quant_scoring.py::test_t5_nan_and_none_filtered_from_population PASSED [ 60%]
+tests/test_quant_scoring.py::test_t5_empty_or_invalid_inputs_are_neutral PASSED [ 61%]
+tests/test_quant_scoring.py::test_empty_universe_is_silent_noop PASSED   [ 61%]
+tests/test_quant_scoring.py::test_small_universe_n_lt_five_does_not_crash PASSED [ 61%]
+tests/test_quant_scoring.py::test_missing_and_nan_fields_contribute_neutral_50 PASSED [ 62%]
+tests/test_quant_scoring.py::test_composite_always_in_unit_interval_bounds PASSED [ 62%]
+tests/test_quant_scoring.py::test_published_percentiles_shape_exact PASSED [ 62%]
+tests/test_quant_scoring.py::test_quintile_metadata_matches_production_labels PASSED [ 63%]
+tests/test_quant_scoring.py::test_t6_hostile_universe_clones_separate PASSED [ 63%]
+tests/test_quant_scoring.py::test_t6_hostile_composites_bounded_and_finite PASSED [ 63%]
+tests/test_quant_scoring.py::test_t7_non_dict_record_rejected_naming_symbol PASSED [ 64%]
+tests/test_quant_scoring.py::test_t7_corrupt_metadata_treated_as_missing PASSED [ 64%]
+tests/test_quant_scoring.py::test_t7_bool_values_are_neutral_not_zero_or_one PASSED [ 65%]
+tests/test_quant_scoring.py::test_t9_fcf_yield_resolves_to_exactly_one_distinct_value PASSED [ 65%]
+tests/test_quant_scoring.py::test_t9_sector_degenerate_block_disperses_below_two_percent PASSED [ 65%]
+tests/test_quant_scoring.py::test_t9_fully_informationally_identical_records_may_still_tie PASSED [ 66%]
+tests/test_quant_scoring.py::test_t10_p2_prime_mirror_block_disperses_below_two_percent PASSED [ 66%]
+tests/test_quant_scoring.py::test_t10_mirror_detection_unit_dividend_mirrors_roic PASSED [ 66%]
+tests/test_quant_scoring.py::test_t10_lexicographic_floor_disperses_differing_raw_tuples PASSED [ 67%]
+tests/test_quant_scoring.py::test_t10_identical_raw_tuples_stay_legitimately_tied PASSED [ 67%]
+tests/test_quant_scoring.py::test_t8_1526_records_under_five_seconds PASSED [ 67%]
+tests/test_rrg_service.py::TestComputeRsSeries::test_length_matches_input PASSED [ 68%]
+tests/test_rrg_service.py::TestComputeRsSeries::test_smoothing_reduces_noise PASSED [ 68%]
+tests/test_rrg_service.py::TestComputeRsSeries::test_equal_length_required PASSED [ 68%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[105.0-105.0-Leading] PASSED [ 69%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[105.0-100.0-Weakening] PASSED [ 69%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[105.0-95.0-Weakening] PASSED [ 69%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[95.0-95.0-Lagging] PASSED [ 70%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[100.0-95.0-Lagging] PASSED [ 70%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[95.0-105.0-Improving] PASSED [ 71%]
+tests/test_rrg_service.py::TestClassifyQuadrant::test_obvious_cases[100.0-101.0-Improving] PASSED [ 71%]
+tests/test_rrg_service.py::TestComputeRrgSeries::test_identical_sector_ratio_is_100 PASSED [ 71%]
+tests/test_rrg_service.py::TestComputeRrgSeries::test_output_lengths_aligned PASSED [ 72%]
+tests/test_rrg_service.py::TestComputeRrgSeries::test_outperformer_above_100 PASSED [ 72%]
+tests/test_rrg_service.py::TestComputeRrgSeries::test_enhanced_method_scales PASSED [ 72%]
+tests/test_rrg_service.py::TestBuildRrgMatrix::test_leading_and_lagging_quadrants PASSED [ 73%]
+tests/test_rrg_service.py::TestBuildRrgMatrix::test_tail_length_and_shape PASSED [ 73%]
+tests/test_rrg_service.py::TestBuildRrgMatrix::test_date_alignment_with_extra_days PASSED [ 73%]
+tests/test_rrg_service.py::TestBuildRrgMatrix::test_error_for_too_short_sector PASSED [ 74%]
+tests/test_rrg_service.py::TestBuildRrgMatrix::test_no_sectors_ok PASSED [ 74%]
+tests/test_rrg_service.py::TestBuildRrgMatrix::test_enhanced_matrix_runs PASSED [ 74%]
+tests/test_sector_index_service.py::TestTradingViewFastPath::test_success_schema_and_source PASSED [ 75%]
+tests/test_sector_index_service.py::TestTradingViewFastPath::test_trimmed_to_lookback PASSED [ 75%]
+tests/test_sector_index_service.py::TestTradingViewFastPath::test_resample_weekly_buckets PASSED [ 75%]
+tests/test_sector_index_service.py::TestFallbackPath::test_timeout_falls_back_to_quarterly_lake PASSED [ 76%]
+tests/test_sector_index_service.py::TestFallbackPath::test_tv_none_falls_back_for_unmapped_sector PASSED [ 76%]
+tests/test_sector_index_service.py::TestFallbackPath::test_result_is_cached_but_independent_keys PASSED [ 77%]
+tests/test_sector_index_service.py::TestGetSectorConstituents::test_nonempty_from_industries_dataset PASSED [ 77%]
+tests/test_sector_index_service.py::TestGetSectorConstituents::test_screener_fallback_when_no_icb_match PASSED [ 77%]
+tests/test_sector_index_service.py::TestSnapshot::test_snapshot_shape PASSED [ 78%]
+tests/test_sectors_api_contract.py::TestResponseSchema::test_top_level_keys_and_defaults PASSED [ 78%]
+tests/test_sectors_api_contract.py::TestResponseSchema::test_explicit_params_echoed PASSED [ 78%]
+tests/test_sectors_api_contract.py::TestResponseSchema::test_invalid_interval_coerced_to_1W PASSED [ 79%]
+tests/test_sectors_api_contract.py::TestResponseSchema::test_invalid_method_coerced_to_jdk PASSED [ 79%]
+tests/test_sectors_api_contract.py::TestResponseSchema::test_enhanced_method_passes_through PASSED [ 79%]
+tests/test_sectors_api_contract.py::TestPointsContract::test_point_schema_quadrant_enum_tail PASSED [ 80%]
+tests/test_sectors_api_contract.py::TestPointsContract::test_tail_clamped_to_max_60 PASSED [ 80%]
+tests/test_sectors_api_contract.py::TestPointsContract::test_tail_clamped_to_min_1 PASSED [ 80%]
+tests/test_sectors_api_contract.py::TestPointsContract::test_sector_names_wired_from_registry PASSED [ 81%]
+tests/test_sectors_api_contract.py::TestCaching::test_second_hit_served_from_cache_without_recompute PASSED [ 81%]
+tests/test_tls_ssl_context.py::test_article_reader_context_verifies_by_default PASSED [ 81%]
+tests/test_tls_ssl_context.py::test_stock_service_rss_context_verifies_by_default PASSED [ 82%]
+tests/test_tls_ssl_context.py::test_tls_ssl_context_helper_is_cached_and_strict PASSED [ 82%]
+tests/test_tls_ssl_context.py::test_no_hardcoded_cert_none_left_in_services_sources PASSED [ 83%]
+tests/test_tls_ssl_context.py::test_article_reader_insecure_optin_flips_to_cert_none PASSED [ 83%]
+tests/test_tls_ssl_context.py::test_stock_service_rss_context_insecure_optin_flips_to_cert_none PASSED [ 83%]
+tests/test_universe_cache.py::test_sync_failure_no_snapshot_raises_and_cache_not_populated PASSED [ 84%]
+tests/test_universe_cache.py::test_sync_failure_with_fresh_valid_snapshot_serves_snapshot PASSED [ 84%]
+tests/test_universe_cache.py::test_fresh_snapshot_served_without_sync PASSED [ 84%]
+tests/test_universe_cache.py::test_schema_old_snapshot_treated_as_stale_and_raises PASSED [ 85%]
+tests/test_universe_cache.py::test_overage_snapshot_treated_as_stale_and_raises PASSED [ 85%]
+tests/test_universe_cache.py::test_cache_key_is_v2_and_success_populates_cache PASSED [ 85%]
+tests/test_universe_cache.py::test_no_v1_cache_key_remains_in_source PASSED [ 86%]
+tests/test_universe_cache.py::test_corrupt_snapshot_rejected_with_logged_reason PASSED [ 86%]
+tests/test_universe_cache.py::test_stale_snapshot_rejected_with_logged_reason PASSED [ 86%]
+tests/test_universe_cache.py::test_snapshot_missing_composite_rejected_as_old_schema PASSED [ 87%]
+tests/test_universe_cache.py::test_snapshot_non_numeric_composite_rejected[None] PASSED [ 87%]
+tests/test_universe_cache.py::test_snapshot_non_numeric_composite_rejected[73] PASSED [ 87%]
+tests/test_universe_cache.py::test_snapshot_non_numeric_composite_rejected[True] PASSED [ 88%]
+tests/test_universe_cache.py::test_snapshot_valid_schema_with_composite_served PASSED [ 88%]
+tests/test_universe_cache.py::test_simple_cache_invalidate_drops_entry_and_is_noop_on_missing PASSED [ 89%]
+tests/test_universe_cache.py::test_orchestrator_uses_invalidate_not_private_store_pop PASSED [ 89%]
+tests/test_universe_cache.py::test_fresh_session_verifies_by_default_after_importing_services PASSED [ 89%]
+tests/test_universe_cache.py::test_tls_verify_true_by_default FAILED     [ 90%]
+tests/test_universe_cache.py::test_tls_default_true_and_insecure_env_flips_false FAILED [ 90%]
+tests/test_universe_cache.py::test_fresh_session_verify_default_on_and_env_flips_off FAILED [ 90%]
+tests/test_universe_cache.py::test_atomic_write_target_preserved_when_dump_crashes PASSED [ 91%]
+tests/test_universe_cache.py::test_atomic_write_publishes_via_replace PASSED [ 91%]
+tests/test_valuation_endpoints.py::test_api_get_comprehensive_valuation PASSED [ 91%]
+tests/test_valuation_endpoints.py::test_api_get_fair_value_backtest_presets PASSED [ 92%]
+tests/test_valuation_endpoints.py::test_api_run_fair_value_backtest PASSED [ 92%]
+tests/test_valuation_engine.py::TestWACCEngine::test_wacc_calculation_large_cap PASSED [ 92%]
+tests/test_valuation_engine.py::TestWACCEngine::test_wacc_small_cap_high_distress PASSED [ 93%]
+tests/test_valuation_engine.py::TestRiskFirewallEngine::test_altman_z_double_prime_safe PASSED [ 93%]
+tests/test_valuation_engine.py::TestRiskFirewallEngine::test_beneish_m_score_detection PASSED [ 93%]
+tests/test_valuation_engine.py::TestRiskFirewallEngine::test_four_quadrant_matrix PASSED [ 94%]
+tests/test_valuation_engine.py::TestRiskFirewallEngine::test_rhodes_kropf_decomposition PASSED [ 94%]
+tests/test_valuation_engine.py::TestRiskFirewallEngine::test_dynamic_margin_of_safety PASSED [ 95%]
+tests/test_valuation_engine.py::TestValuationEngineSuite::test_all_22_models_calculated PASSED [ 95%]
+tests/test_valuation_engine.py::TestValuationEngineSuite::test_comprehensive_valuation_flow PASSED [ 95%]
+tests/test_valuation_engine.py::TestValuationEngineSuite::test_edge_case_negative_earnings_and_fcf PASSED [ 96%]
+tests/test_valuation_engine.py::TestValuationEngineSuite::test_wacc_negative_ebit_damodaran_rating PASSED [ 96%]
+tests/test_valuation_engine.py::TestValuationEngineSuite::test_modern_graham_negative_eps_zero PASSED [ 96%]
+tests/test_valuation_engine.py::TestValuationEngineSuite::test_modern_graham_revised_growth PASSED [ 97%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_iqr_outlier_rejection PASSED [ 97%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_error_metrics_calculation PASSED [ 97%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_scale_free_ivw_evidence_ramp PASSED [ 98%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_rule_of_65_super_stock PASSED [ 98%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_rhodes_kropf_vb_value_trap_detection PASSED [ 98%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_buffett_owners_earnings_capex_decomposition PASSED [ 99%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_blended_mode_vs_omnibus_mode PASSED [ 99%]
+tests/test_valuation_engine.py::TestAdaptiveWeighting::test_omnibus_metrics_all_supported PASSED [100%]
+
+================================== FAILURES ===================================
+_ TestExtremeValuationInputs.test_risk_firewall_zero_division_and_negative_equity _
+
+self = <tests.test_adversarial_stress.TestExtremeValuationInputs object at 0x0000020D51A7D950>
+
+    def test_risk_firewall_zero_division_and_negative_equity(self):
+        engine = RiskFirewallEngine()
+    
+        # Negative equity and zero total assets
+>       res1 = engine.evaluate(
+            total_assets=0.0,
+            working_capital=-100e9,
+            retained_earnings=-200e9,
+            ebit=-50e9,
+            market_cap=100e9,
+            total_liabilities=500e9,
+            revenue=0.0,
+            book_equity=-400e9,
+            price=10000.0,
+            bvps=-5000.0,
+            downside_beta=0.0,
+        )
+E       TypeError: RiskFirewallEngine.evaluate() got an unexpected keyword argument 'total_assets'
+
+tests\test_adversarial_stress.py:110: TypeError
+_____ TestExtremeValuationInputs.test_all_22_models_with_adversarial_data _____
+
+self = <tests.test_adversarial_stress.TestExtremeValuationInputs object at 0x0000020D5184DE00>
+
+    def test_all_22_models_with_adversarial_data(self):
+        models = ValuationModelsSuite()
+    
+        # Extremely distressed / negative / zero data payload
+        distressed_data = {
+            "symbol": "DISTRESSED",
+            "price": -1000.0, # Negative price
+            "shares_out": 0.0, # Zero shares
+            "market_cap": -50e9,
+            "revenue": -10e9,
+            "ebit": -20e9,
+            "ebitda": -15e9,
+            "net_income": -30e9,
+            "eps": -5000.0,
+            "bvps": -2000.0,
+            "tbvps": -3000.0,
+            "cfo": -25e9,
+            "fcf": -35e9,
+            "affo": -20e9,
+            "dividend_per_share": -500.0,
+            "total_assets": -100e9,
+            "total_liabilities": 500e9,
+            "interest_bearing_debt": 400e9,
+            "cash": -50e9,
+            "capex": -10e9,
+            "gross_ppe": 0.0,
+            "working_capital": -100e9,
+            "retained_earnings": -200e9,
+            "roic": -50.0,
+            "roe": -80.0,
+            "net_margin": -100.0,
+            "beta": -1.5,
+            "downside_beta": 0.0,
+            "rwa": 0.0,
+            "nii": -50e9,
+            "car_ratio": -5.0,
+            "regulated_asset_base": -10e9,
+            "netco_ebitda": -5e9,
+            "serveco_ebitda": -5e9,
+            "pipeline_success_rate": -0.5,
+            "peak_sales": -100e9,
+        }
+    
+        # Run all 22 models directly
+        for method_name in dir(models):
+            if method_name.startswith("model_"):
+                method = getattr(models, method_name)
+                try:
+>                   res = method(
+                        data=distressed_data,
+                        wacc=0.10,
+                        cost_of_equity=0.12,
+                        cost_of_debt=0.08,
+                        tax_rate=0.20,
+                        terminal_growth=0.035,
+                    )
+E                   TypeError: ValuationModelsSuite.model_10_rim_edwards_bell_ohlson() got an unexpected keyword argument 'data'
+
+tests\test_adversarial_stress.py:194: TypeError
+
+During handling of the above exception, another exception occurred:
+
+self = <tests.test_adversarial_stress.TestExtremeValuationInputs object at 0x0000020D5184DE00>
+
+    def test_all_22_models_with_adversarial_data(self):
+        models = ValuationModelsSuite()
+    
+        # Extremely distressed / negative / zero data payload
+        distressed_data = {
+            "symbol": "DISTRESSED",
+            "price": -1000.0, # Negative price
+            "shares_out": 0.0, # Zero shares
+            "market_cap": -50e9,
+            "revenue": -10e9,
+            "ebit": -20e9,
+            "ebitda": -15e9,
+            "net_income": -30e9,
+            "eps": -5000.0,
+            "bvps": -2000.0,
+            "tbvps": -3000.0,
+            "cfo": -25e9,
+            "fcf": -35e9,
+            "affo": -20e9,
+            "dividend_per_share": -500.0,
+            "total_assets": -100e9,
+            "total_liabilities": 500e9,
+            "interest_bearing_debt": 400e9,
+            "cash": -50e9,
+            "capex": -10e9,
+            "gross_ppe": 0.0,
+            "working_capital": -100e9,
+            "retained_earnings": -200e9,
+            "roic": -50.0,
+            "roe": -80.0,
+            "net_margin": -100.0,
+            "beta": -1.5,
+            "downside_beta": 0.0,
+            "rwa": 0.0,
+            "nii": -50e9,
+            "car_ratio": -5.0,
+            "regulated_asset_base": -10e9,
+            "netco_ebitda": -5e9,
+            "serveco_ebitda": -5e9,
+            "pipeline_success_rate": -0.5,
+            "peak_sales": -100e9,
+        }
+    
+        # Run all 22 models directly
+        for method_name in dir(models):
+            if method_name.startswith("model_"):
+                method = getattr(models, method_name)
+                try:
+                    res = method(
+                        data=distressed_data,
+                        wacc=0.10,
+                        cost_of_equity=0.12,
+                        cost_of_debt=0.08,
+                        tax_rate=0.20,
+                        terminal_growth=0.035,
+                    )
+                    assert isinstance(res, ModelValuationOutput)
+                    assert not math.isnan(res.fair_value_per_share)
+                    assert not math.isinf(res.fair_value_per_share)
+                    assert res.fair_value_per_share >= 0.0, f"{method_name} produced negative fair value: {res.fair_value_per_share}"
+                except Exception as e:
+>                   pytest.fail(f"Adversarial data crashed {method_name}: {e}")
+E                   Failed: Adversarial data crashed model_10_rim_edwards_bell_ohlson: ValuationModelsSuite.model_10_rim_edwards_bell_ohlson() got an unexpected keyword argument 'data'
+
+tests\test_adversarial_stress.py:207: Failed
+_ TestExtremeValuationInputs.test_dcf_super_growth_and_terminal_growth_exceeds_wacc _
+
+self = <tests.test_adversarial_stress.TestExtremeValuationInputs object at 0x0000020D5184E060>
+
+    def test_dcf_super_growth_and_terminal_growth_exceeds_wacc(self):
+        """DCF growth rate higher than WACC (g >= WACC) must be bounded and not blow up to infinity/negatives."""
+        models = ValuationModelsSuite()
+        normal_data = {
+            "symbol": "SUPER_GROWTH",
+            "price": 50000.0,
+            "shares_out": 100_000_000,
+            "market_cap": 5000e9,
+            "revenue": 10000e9,
+            "ebit": 2000e9,
+            "ebitda": 2500e9,
+            "net_income": 1500e9,
+            "eps": 15000.0,
+            "bvps": 30000.0,
+            "cfo": 1800e9,
+            "fcf": 1200e9,
+            "capex": 600e9,
+            "roic": 25.0,
+            "retained_earnings": 3000e9,
+            "total_assets": 8000e9,
+            "total_liabilities": 3000e9,
+            "interest_bearing_debt": 1000e9,
+            "cash": 1500e9,
+        }
+    
+        # Terminal growth (g=15%) > WACC (10%)
+>       res = models.model_9_dcf_2stage_mckinsey(
+            data=normal_data,
+            wacc=0.10,
+            cost_of_equity=0.12,
+            cost_of_debt=0.07,
+            tax_rate=0.20,
+            terminal_growth=0.15, # Adversarial terminal growth
+        )
+E       TypeError: ValuationModelsSuite.model_9_dcf_2stage_mckinsey() got an unexpected keyword argument 'data'
+
+tests\test_adversarial_stress.py:235: TypeError
+_ TestExtremeValuationInputs.test_sensitivity_grid_with_singular_coordinates __
+
+self = <tests.test_adversarial_stress.TestExtremeValuationInputs object at 0x0000020D4ECFD130>
+
+    def test_sensitivity_grid_with_singular_coordinates(self):
+        """5x5 Sensitivity Grid where WACC <= terminal growth across cells."""
+        scenario_engine = ScenarioEngine()
+        models = ValuationModelsSuite()
+        sample_data = {
+            "symbol": "TEST",
+            "price": 20000.0,
+            "shares_out": 10_000_000,
+            "market_cap": 200e9,
+            "revenue": 500e9,
+            "ebit": 50e9,
+            "ebitda": 70e9,
+            "net_income": 35e9,
+            "eps": 3500.0,
+            "bvps": 15000.0,
+            "cfo": 40e9,
+            "fcf": 25e9,
+            "capex": 15e9,
+            "roic": 12.0,
+            "retained_earnings": 80e9,
+            "total_assets": 300e9,
+            "total_liabilities": 100e9,
+            "interest_bearing_debt": 50e9,
+            "cash": 30e9,
+        }
+    
+>       grid = scenario_engine.generate_sensitivity_grid(
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            base_wacc=0.04, # Very low WACC
+            base_terminal_g=0.05, # g > WACC
+            valuation_func=lambda w, g: models.model_9_dcf_2stage_mckinsey(
+                sample_data, wacc=w, cost_of_equity=w + 0.02, cost_of_debt=w - 0.02, tax_rate=0.20, terminal_growth=g
+            ).fair_value_per_share,
+        )
+E       AttributeError: 'ScenarioEngine' object has no attribute 'generate_sensitivity_grid'
+
+tests\test_adversarial_stress.py:274: AttributeError
+_ TestExtremeValuationInputs.test_adaptive_weighting_with_zero_and_infinite_errors _
+
+self = <tests.test_adversarial_stress.TestExtremeValuationInputs object at 0x0000020D516E9BF0>
+
+    def test_adaptive_weighting_with_zero_and_infinite_errors(self):
+        weighting = AdaptiveWeightingEngine()
+    
+        # All model errors are zero
+        zero_errors = {
+            "blended_pe": 0.0,
+            "dcf_2stage_mckinsey": 0.0,
+            "rim_edwards_bell_ohlson": 0.0,
+        }
+>       w_zero = weighting.calculate_ivw_weights(zero_errors)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'AdaptiveWeightingEngine' object has no attribute 'calculate_ivw_weights'. Did you mean: 'calculate_weights'?
+
+tests\test_adversarial_stress.py:299: AttributeError
+______ TestCorruptedPayloadImmunity.test_completely_empty_and_null_dict _______
+
+self = <tests.test_adversarial_stress.TestCorruptedPayloadImmunity object at 0x0000020D51A7D810>
+
+    def test_completely_empty_and_null_dict(self):
+        engine = ValuationEngine()
+    
+        # Completely empty dict
+>       res_empty = engine.evaluate(symbol="EMPTY_SYM", fundamental_data={})
+                    ^^^^^^^^^^^^^^^
+E       AttributeError: 'ValuationEngine' object has no attribute 'evaluate'
+
+tests\test_adversarial_stress.py:325: AttributeError
+________ TestCorruptedPayloadImmunity.test_corrupted_types_and_strings ________
+
+self = <tests.test_adversarial_stress.TestCorruptedPayloadImmunity object at 0x0000020D51A7DA90>
+
+    def test_corrupted_types_and_strings(self):
+        engine = ValuationEngine()
+        corrupted = {
+            "symbol": "CORRUPTED",
+            "price": "N/A",
+            "market_cap": "None",
+            "shares_out": "-",
+            "revenue": "Unknown",
+            "ebit": [],
+            "ebitda": {},
+            "net_income": "0.0",
+            "eps": None,
+            "bvps": "invalid",
+            "total_assets": "1000B",
+            "total_liabilities": "NaN",
+        }
+>       res = engine.evaluate(symbol="CORRUPTED", fundamental_data=corrupted)
+              ^^^^^^^^^^^^^^^
+E       AttributeError: 'ValuationEngine' object has no attribute 'evaluate'
+
+tests\test_adversarial_stress.py:391: AttributeError
+_ TestMissingDataLakeFallbacks.test_valuation_engine_missing_historical_and_model_lake _
+
+self = <tests.test_adversarial_stress.TestMissingDataLakeFallbacks object at 0x0000020D51A7DE50>
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020D3D361220>
+
+    def test_valuation_engine_missing_historical_and_model_lake(self, monkeypatch):
+        """When disk lake fails to find historical models, engine must fallback to sector priors."""
+        engine = ValuationEngine()
+    
+>       with patch("services.valuation_engine.disk_lake.read_json", return_value=None):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests\test_adversarial_stress.py:477: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\AppData\Local\Programs\Python\Python313\Lib\unittest\mock.py:1479: in __enter__
+    self.target = self.getter()
+                  ^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+name = 'services.valuation_engine.disk_lake'
+
+    def resolve_name(name):
+        """
+        Resolve a name to an object.
+    
+        It is expected that `name` will be a string in one of the following
+        formats, where W is shorthand for a valid Python identifier and dot stands
+        for a literal period in these pseudo-regexes:
+    
+        W(.W)*
+        W(.W)*:(W(.W)*)?
+    
+        The first form is intended for backward compatibility only. It assumes that
+        some part of the dotted name is a package, and the rest is an object
+        somewhere within that package, possibly nested inside other objects.
+        Because the place where the package stops and the object hierarchy starts
+        can't be inferred by inspection, repeated attempts to import must be done
+        with this form.
+    
+        In the second form, the caller makes the division point clear through the
+        provision of a single colon: the dotted name to the left of the colon is a
+        package to be imported, and the dotted name to the right is the object
+        hierarchy within that package. Only one import is needed in this form. If
+        it ends with the colon, then a module object is returned.
+    
+        The function will return an object (which might be a module), or raise one
+        of the following exceptions:
+    
+        ValueError - if `name` isn't in a recognised format
+        ImportError - if an import failed when it shouldn't have
+        AttributeError - if a failure occurred when traversing the object hierarchy
+                         within the imported package to get to the desired object.
+        """
+        global _NAME_PATTERN
+        if _NAME_PATTERN is None:
+            # Lazy import to speedup Python startup time
+            import re
+            dotted_words = r'(?!\d)(\w+)(\.(?!\d)(\w+))*'
+            _NAME_PATTERN = re.compile(f'^(?P<pkg>{dotted_words})'
+                                       f'(?P<cln>:(?P<obj>{dotted_words})?)?$',
+                                       re.UNICODE)
+    
+        m = _NAME_PATTERN.match(name)
+        if not m:
+            raise ValueError(f'invalid format: {name!r}')
+        gd = m.groupdict()
+        if gd.get('cln'):
+            # there is a colon - a one-step import is all that's needed
+            mod = importlib.import_module(gd['pkg'])
+            parts = gd.get('obj')
+            parts = parts.split('.') if parts else []
+        else:
+            # no colon - have to iterate to find the package boundary
+            parts = name.split('.')
+            modname = parts.pop(0)
+            # first part *must* be a module/package.
+            mod = importlib.import_module(modname)
+            while parts:
+                p = parts[0]
+                s = f'{modname}.{p}'
+                try:
+                    mod = importlib.import_module(s)
+                    parts.pop(0)
+                    modname = s
+                except ImportError:
+                    break
+        # if we reach this point, mod is the module, already imported, and
+        # parts is the list of parts in the object hierarchy to be traversed, or
+        # an empty list if just the module is wanted.
+        result = mod
+        for p in parts:
+>           result = getattr(result, p)
+                     ^^^^^^^^^^^^^^^^^^
+E           AttributeError: module 'services.valuation_engine' has no attribute 'disk_lake'
+
+..\..\AppData\Local\Programs\Python\Python313\Lib\pkgutil.py:528: AttributeError
+_ TestMissingDataLakeFallbacks.test_fair_value_backtest_missing_price_database _
+
+self = <tests.test_adversarial_stress.TestMissingDataLakeFallbacks object at 0x0000020D51A7DF90>
+
+    def test_fair_value_backtest_missing_price_database(self):
+        """When price database is completely empty or missing, backtest returns safe zero metrics without crashing."""
+        with patch("services.fair_value_backtest_service._load_real_price_database", return_value={}):
+            res = fv_backtest_service.run_backtest(
+                mode=BacktestMode.HYBRID_FUNNEL,
+                screening_strategy="peter_lynch_garp",
+                start_year=2024,
+                end_year=2025,
+            )
+            assert isinstance(res, BacktestResultPayload)
+>           assert res.metrics["total_trades"] == 0
+E           assert 24 == 0
+
+tests\test_adversarial_stress.py:494: AssertionError
+_ TestValuationEngineComprehensiveNullSafety.test_valuation_with_nan_and_inf_values _
+
+self = <tests.test_null_safety_stress_adversarial.TestValuationEngineComprehensiveNullSafety object at 0x0000020D504346E0>
+engine = <services.valuation_engine.ValuationEngine object at 0x0000020D528809D0>
+
+    def test_valuation_with_nan_and_inf_values(self, engine):
+        data = {
+            "symbol": "TEST_NAN",
+            "price": 20000.0,
+            "market_cap": float("nan"),
+            "shares_out": float("inf"),
+            "revenue": float("-inf"),
+            "ebit": float("nan"),
+            "ebitda": float("nan"),
+            "net_income": float("nan"),
+            "eps": float("nan"),
+            "bvps": float("nan"),
+            "roe": float("nan"),
+            "roic": float("nan"),
+            "beta": float("nan"),
+        }
+        val = engine.get_comprehensive_valuation("TEST_NAN", fundamental_data=data)
+>       assert val.composite_fair_value > 0
+E       AssertionError: assert 0.0 > 0
+E        +  where 0.0 = ValuationMatrixResult(symbol='TEST_NAN', company_name='TEST_NAN', exchange='HOSE', current_price=20000.0, composite_fair_value=0.0, composite_upside_pct=-100.0, valuation_status='OVERVALUED', margin_of_safety_pct=30.0, models=[ModelValuationOutput(model_id='blended_pe', model_name='Blended P/E with CAPE', category='relative', fair_value=0.0, upside_pct=-100.0, weight=0.0455, active=True, status='ACTIVE', error_metrics={}, diagnostics={}), ModelValuationOutput(model_id='ps_margin_adj', model_name='Margin-Adjusted P/S', category='relative', fair_value=0.0, upside_pct=-100.0, weight=0.0455, active=True, status='ACTIVE', error_metrics={}, diagnostics={}), ModelValuationOutput(model_id='p_fcf', model_name='Price-to-FCF Yield', category='relative', fair_value=0.0, upside_pct=-100.0, weight=0.0455, active=True, status='ACTIVE', error_metrics={}, diagnostics={}), ModelValuationOutput(model_id='pb_rhodes_kropf', model_name='P/B with Rhodes-Kropf Filter', category='relative', fair_value=0.0, upside_pct=-100.0, weight=0.0455, active=True, status='ACTIVE', error_metrics={}, diagnostics={}), ModelValuationOutput(model_id='p_tbv', model_name='Price-to-Tangible Book (P/TBV)', category='relative...t_pct': {'bear': -2.5, 'base': 0.0, 'bull': 2.5}, 'operating_margin_multiplier': {'bear': 0.85, 'base': 1.0, 'bull': 1.1}}, sensitivity_grid_5x5=[[0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0, 0.0]], sensitivity_headers_wacc=[0.1343, 0.1443, 0.1543, 0.1643, 0.1743], sensitivity_headers_growth=[0.02, 0.0275, 0.035, 0.0425, 0.05]), timestamp='2026-08-28T19:22:16.302044+00:00', valuation_width_pct=0.0, buffett_coupon_spread={'oe_yield_pct': 0.0, 'rf_pct': 5.0, 'coupon_spread_pct': -5.0, 'coupon_status': 'PASS'}, quant_quality_filters={'gpa_ratio_pct': 35.0, 'gpa_pass': True, 'sloan_ratio_pct': -5.0, 'sloan_pass': True, 'shareholder_yield_pct': 0.0, 'shareholder_yield_pass': False, 'roic_wacc_spread_pct': nan, 'roic_wacc_pass': False}, capital_allocation={'asset_growth_yoy': 8.0, 'ebitda_growth_yoy': 10.0, 'status': 'Efficient', 'description': 'Core cash generation (EBITDA) outpaces or matches asset expansion.'}, metadata={'engine_version': '2.2.0-dual-mode', 'composite_mode': 'blended', 'omnibus_metric': 'N/A (Sector Blended)', 'active_model_count': 22, 'total_model_count': 22, 'firewall_passed': True}).composite_fair_value
+
+tests\test_null_safety_stress_adversarial.py:353: AssertionError
+_______________________ test_tls_verify_true_by_default _______________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000020D5CA1B930>
+
+    def test_tls_verify_true_by_default(monkeypatch):
+        captured = {}
+    
+        def fake_request(method, url, timeout=None, **kwargs):
+            captured.update(kwargs)
+            return _FakeResponse()
+    
+        monkeypatch.setattr(uds._HTTP_SESSION, "request", fake_request)
+        resp = uds._request_with_retry("GET", "https://example.invalid/quote")
+        assert resp is not None
+        assert resp.status_code == 200
+>       assert captured.get("verify") is True, (
+            "_request_with_retry must verify TLS certificates by default"
+        )
+E       AssertionError: _request_with_retry must verify TLS certificates by default
+E       assert False is True
+E        +  where False = <built-in method get of dict object at 0x0000020D5B01B180>('verify')
+E        +    where <built-in method get of dict object at 0x0000020D5B01B180> = {'verify': False}.get
+
+tests\test_universe_cache.py:293: AssertionError
+_____________ test_tls_default_true_and_insecure_env_flips_false ______________
+
+    def test_tls_default_true_and_insecure_env_flips_false():
+>       assert _run_tls_probe({}) is True, "TLS verification must default to ON"
+E       AssertionError: TLS verification must default to ON
+E       assert False is True
+E        +  where False = _run_tls_probe({})
+
+tests\test_universe_cache.py:313: AssertionError
+___________ test_fresh_session_verify_default_on_and_env_flips_off ____________
+
+    def test_fresh_session_verify_default_on_and_env_flips_off():
+        assert _run_session_verify_probe({}) is True, (
+            "a fresh requests.Session must verify certificates by default after "
+            "importing both services (no process-wide monkeypatch)"
+        )
+>       assert _run_session_verify_probe({"VNSTOCK_INSECURE_TLS": "1"}) is False, (
+            "VNSTOCK_INSECURE_TLS=1 at import must flip fresh-session verify off"
+        )
+E       AssertionError: VNSTOCK_INSECURE_TLS=1 at import must flip fresh-session verify off
+E       assert True is False
+E        +  where True = _run_session_verify_probe({'VNSTOCK_INSECURE_TLS': '1'})
+
+tests\test_universe_cache.py:346: AssertionError
+============================== warnings summary ===============================
+..\..\AppData\Local\Programs\Python\Python313\Lib\site-packages\starlette\formparsers.py:12
+  Please use `import python_multipart` instead.
+
+..\..\AppData\Local\Programs\Python\Python313\Lib\site-packages\vnstock\core\utils\upgrade.py:381
+  \U0001f4e6 Vnstock 4.0.7 is available\n  Current: 3.5.1 (Python 3.13)\n  Update: pip install vnstock --upgrade\n  Release: https://vnstocks.com/docs/tai-lieu/lich-su-phien-ban
+
+server.py:238
+..\..\AppData\Local\Programs\Python\Python313\Lib\site-packages\fastapi\applications.py:4495
+  
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_risk_firewall_zero_division_and_negative_equity
+FAILED tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_all_22_models_with_adversarial_data
+FAILED tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_dcf_super_growth_and_terminal_growth_exceeds_wacc
+FAILED tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_sensitivity_grid_with_singular_coordinates
+FAILED tests/test_adversarial_stress.py::TestExtremeValuationInputs::test_adaptive_weighting_with_zero_and_infinite_errors
+FAILED tests/test_adversarial_stress.py::TestCorruptedPayloadImmunity::test_completely_empty_and_null_dict
+FAILED tests/test_adversarial_stress.py::TestCorruptedPayloadImmunity::test_corrupted_types_and_strings
+FAILED tests/test_adversarial_stress.py::TestMissingDataLakeFallbacks::test_valuation_engine_missing_historical_and_model_lake
+FAILED tests/test_adversarial_stress.py::TestMissingDataLakeFallbacks::test_fair_value_backtest_missing_price_database
+FAILED tests/test_null_safety_stress_adversarial.py::TestValuationEngineComprehensiveNullSafety::test_valuation_with_nan_and_inf_values
+FAILED tests/test_universe_cache.py::test_tls_verify_true_by_default - Assert...
+FAILED tests/test_universe_cache.py::test_tls_default_true_and_insecure_env_flips_false
+FAILED tests/test_universe_cache.py::test_fresh_session_verify_default_on_and_env_flips_off
+=========== 13 failed, 270 passed, 4 warnings in 135.29s (0:02:15) ============
+
+=== STDERR ===

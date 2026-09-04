@@ -1,0 +1,2690 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vnstock Trading Terminal Pro | Bảng Giá Tinh Gọn, Biểu Đồ & Tin Tức Chứng Khoán</title>
+  <meta name="description" content="Hệ thống bảng giá tinh gọn chuẩn thị trường chứng khoán Việt Nam, biểu đồ kỹ thuật chuyên sâu, tin tức & sự kiện doanh nghiệp, bản đồ nhiệt Treemap và cảnh báo giá từ Vnstock.">
+  
+  <link rel="stylesheet" href="/static/css/style.css?v=9.0.0">
+  <link rel="stylesheet" href="/static/css/treemap.css?v=9.2.1">
+  <script src="/static/js/lightweight-charts.js?v=8.9.0"></script>
+  <script>
+    if (!window.LightweightCharts) {
+      document.write('<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"><\/script>');
+    }
+  </script>
+</head>
+<body>
+
+  <!-- 1. TOP INDEX ANALYTICS & MARKET BREADTH BAR -->
+  <div class="top-analytics-container">
+    <div class="indices-bar" id="indicesCards">
+      <!-- 5 Index Cards populated via JS -->
+    </div>
+    <div class="market-breadth-strip">
+      <div class="breadth-counters">
+        <span style="color:var(--text-muted); font-weight:600;">HOSE:</span>
+        <span class="breadth-badge txt-ceil"><span class="breadth-dot" style="background:#c084fc;"></span> <span id="cntCeil">0</span> Trần</span>
+        <span class="breadth-badge txt-up"><span class="breadth-dot" style="background:#10b981;"></span> <span id="cntAdv">0</span> Tăng</span>
+        <span class="breadth-badge txt-ref"><span class="breadth-dot" style="background:#f59e0b;"></span> <span id="cntRef">0</span> Tham chiếu</span>
+        <span class="breadth-badge txt-down"><span class="breadth-dot" style="background:#ef4444;"></span> <span id="cntDec">0</span> Giảm</span>
+        <span class="breadth-badge txt-floor"><span class="breadth-dot" style="background:#22d3ee;"></span> <span id="cntFlor">0</span> Sàn</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="color:var(--text-muted);">Thanh khoản:</span>
+        <span class="liquidity-pill" id="totalLiquidityBillion">-- tỷ đ</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. APP HEADER & MAIN NAVIGATION TABS -->
+  <header class="app-header">
+    <div class="logo-section">
+      <div class="brand-icon">VN</div>
+      <div class="brand-title">VNSTOCK TERMINAL PRO</div>
+    </div>
+
+    <!-- 6 Mode Navigation Tabs -->
+    <nav class="view-tabs">
+      <button class="view-tab active" data-tab="board">
+        <span>📊</span> Bảng Giá Tinh Gọn
+      </button>
+      <button class="view-tab" data-tab="chart">
+        <span>📈</span> Biểu Đồ & Phân Tích
+      </button>
+      <button class="view-tab" data-tab="quant">
+        <span>🎯</span> Quant Screener (Phân Vị)
+      </button>
+      <button class="view-tab" data-tab="backtest">
+        <span>🚀</span> Backtest Đối Soát
+      </button>
+      <button class="view-tab" data-tab="sectors">
+        <span>🌐</span> Chỉ Số Ngành (ICB)
+      </button>
+      <button class="view-tab" data-tab="news">
+        <span>📰</span> Tin Tức & Sự Kiện
+      </button>
+      <button class="view-tab" data-tab="treemap">
+        <span>🗺️</span> Bản Đồ Treemap
+      </button>
+      <button class="view-tab" data-tab="foreign">
+        <span>🌐</span> Khối Ngoại Mua/Bán
+      </button>
+      <button class="view-tab" data-tab="alerts">
+        <span>🔔</span> Cảnh Báo Giá
+      </button>
+    </nav>
+
+    <div class="header-right">
+      <div class="search-box-wrapper">
+        <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <input type="text" class="search-input" id="searchInput" placeholder="Tìm mã CP [/]" autocomplete="off">
+        <div class="search-dropdown" id="searchDropdown"></div>
+      </div>
+      
+      <!-- Multi-Source Data Lake Live Signal Pill -->
+      <div class="data-lake-status-pill" id="dataLakeHeaderPill" onclick="app.openDataLakeModal()" title="📡 Bấm để xem chi tiết độ phủ kho dữ liệu đa nguồn (100% Thị trường)">
+        <span class="live-status-dot"></span>
+        <span id="dataLakeHeaderCount">1,526 Mã • Đa Nguồn Active</span>
+      </div>
+
+      <div class="mono" id="timeClock" style="font-weight:700; color:var(--text-secondary);">--:--:--</div>
+      <button class="btn-sm" id="btnRefresh" title="Làm mới">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"></path>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- 3. MAIN CONTENT PANELS -->
+  <main style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
+
+    <!-- TAB 1: BẢNG GIÁ TINH GỌN (CLEAN STREAMLINED TRADING BOARD) -->
+    <div class="view-panel active" id="tab_board">
+      <div class="trading-board-controls">
+        <div class="board-group-tabs">
+          <button class="board-tab-btn active" data-group="VN30">VN30</button>
+          <button class="board-tab-btn" data-group="Watchlist">⭐ Watchlist</button>
+          <button class="board-tab-btn" data-group="HOSE">HOSE</button>
+          <button class="board-tab-btn" data-group="HNX">HNX</button>
+          <button class="board-tab-btn" data-group="UPCOM">UPCOM</button>
+          <button class="board-tab-btn" data-group="ETF">🌟 Quỹ ETF</button>
+          <button class="board-tab-btn" data-group="NganHang">🏦 Ngân Hàng</button>
+          <button class="board-tab-btn" data-group="ChungKhoan">📈 Chứng Khoán</button>
+          <button class="board-tab-btn" data-group="BatDongSan">🏢 BĐS</button>
+          <button class="board-tab-btn" data-group="Thep_VatLieu">🏗️ Thép</button>
+          <button class="board-tab-btn" data-group="CongNghe">💻 Công Nghệ</button>
+          <button class="board-tab-btn" data-group="BanLe_TieuDung">🛒 Bán Lẻ</button>
+          <button class="board-tab-btn" data-group="DauKhi_NangLuong">⚡ Dầu Khí</button>
+          <button class="board-tab-btn" data-group="HoaChat_PhanBon">🧪 Hóa Chất</button>
+          <button class="board-tab-btn" data-group="Macro" style="color:#38bdf8; font-weight:700;">🇻🇳 Vĩ Mô & Tiền Tệ</button>
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+          <input type="text" id="boardQuickFilter" class="search-input" placeholder="🔍 Lọc nhanh mã/tên trên bảng..." style="width:210px; font-size:11px; height:28px;">
+          <span id="boardCountBadge" class="breadth-badge" style="font-size:11px; background:rgba(56,189,248,0.12); color:#38bdf8; border:1px solid rgba(56,189,248,0.35); font-weight:700; white-space:nowrap;">-- mã</span>
+        </div>
+      </div>
+
+      <div class="board-table-container">
+        <table class="trading-board-table clean-board-table">
+          <thead>
+            <tr id="stockBoardHeaderRow">
+              <th style="width:36px; text-align:center;">#</th>
+              <th style="width:70px; text-align:left;">Mã CK</th>
+              <th style="text-align:left;">Tên Doanh Nghiệp</th>
+              <th style="width:60px; text-align:center;">Sàn</th>
+              <th style="width:70px; text-align:right;" class="txt-ceil">Giá Trần</th>
+              <th style="width:70px; text-align:right;" class="txt-floor">Giá Sàn</th>
+              <th style="width:70px; text-align:right;" class="txt-ref">Giá TC</th>
+              <th style="width:95px; text-align:right;">Giá Đóng Cửa</th>
+              <th style="width:110px; text-align:right;">Tổng KL</th>
+              <th style="width:110px; text-align:right;">Room</th>
+              <th style="width:85px; text-align:center;">Thao Tác</th>
+            </tr>
+            <tr id="macroBoardHeaderRow" style="display:none;">
+              <th style="width:36px; text-align:center;">#</th>
+              <th style="width:110px; text-align:left;">Mã Chỉ Số</th>
+              <th style="text-align:left;">Tên Chỉ Số Vĩ Mô</th>
+              <th style="width:110px; text-align:center;">Phân Loại</th>
+              <th colspan="3" style="text-align:left; padding-left:12px;">Ngưỡng / Mục Tiêu Quốc Hội & SBV</th>
+              <th style="width:130px; text-align:right;">Giá Trị Hiện Tại</th>
+              <th style="width:85px; text-align:right;">Thay Đổi</th>
+              <th style="width:110px; text-align:center;">Đánh Giá</th>
+              <th style="width:95px; text-align:center;">Thao Tác</th>
+            </tr>
+          </thead>
+          <tbody id="tradingBoardBody">
+            <!-- Populated via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TAB 2: BIỂU ĐỒ & PHÂN TÍCH CHUYÊN SÂU -->
+    <div class="view-panel" id="tab_chart">
+      <div class="chart-view-layout">
+        
+        <!-- LEFT: CHART + TOOLBAR + HUD + STOCK DETAILS TABS -->
+        <div class="chart-view-left">
+          
+          <!-- STOCK HERO -->
+          <div class="stock-hero-box">
+            <div class="hero-left-info">
+              <div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <span class="hero-symbol" id="heroSymbol">FPT</span>
+                  <button class="btn-sm" id="btnWatchlistToggle">☆ Thêm Watchlist</button>
+                </div>
+                <div id="heroName" style="font-size:12px; color:var(--text-secondary);">CTCP FPT</div>
+              </div>
+            </div>
+
+            <div class="hero-prices-group">
+              <span class="hero-price" id="heroPrice">--</span>
+              <span id="heroChangeTag" style="font-weight:700;">--</span>
+            </div>
+
+            <div class="hero-limits">
+              <span>Trần: <strong class="txt-ceil" id="heroCeil">--</strong></span>
+              <span>Sàn: <strong class="txt-floor" id="heroFloor">--</strong></span>
+              <span>TC: <strong class="txt-ref" id="heroRef">--</strong></span>
+            </div>
+          </div>
+
+          <!-- CHART CANVAS -->
+          <div class="chart-container-card">
+            <div class="chart-toolbar">
+              <!-- Nhóm 1: Chu kỳ nến (Resolution / Interval) -->
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-right:4px;">Chu kỳ:</span>
+                <button class="interval-btn" data-itv="1m">1m</button>
+                <button class="interval-btn" data-itv="5m">5m</button>
+                <button class="interval-btn" data-itv="15m">15m</button>
+                <button class="interval-btn" data-itv="1H">1H</button>
+                <button class="interval-btn active" data-itv="1D">1D (Ngày)</button>
+                <button class="interval-btn" data-itv="1W">1W (Tuần)</button>
+                <button class="interval-btn" data-itv="1M">1M (Tháng)</button>
+              </div>
+
+              <!-- Nhóm 2: Khoảng hiển thị (Range Zoom) -->
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-right:4px;">Phạm vi:</span>
+                <button class="range-btn" data-range="1W">1W</button>
+                <button class="range-btn" data-range="1M">1M</button>
+                <button class="range-btn" data-range="3M">3M</button>
+                <button class="range-btn" data-range="6M">6M</button>
+                <button class="range-btn" data-range="1Y">1Y</button>
+                <button class="range-btn active" data-range="ALL">ALL (Toàn bộ)</button>
+              </div>
+
+              <!-- Nhóm 3: Các chỉ báo kỹ thuật -->
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-right:4px;">Chỉ báo:</span>
+                <button class="ind-btn active" data-ind="ma20">MA20</button>
+                <button class="ind-btn active" data-ind="ma50">MA50</button>
+                <button class="ind-btn" data-ind="bollinger">Bollinger</button>
+                <button class="ind-btn active" data-ind="volume">Volume</button>
+                <button class="ind-btn active" data-ind="rsi">RSI(14)</button>
+                <button class="ind-btn active" data-ind="macd">MACD</button>
+                <button class="ind-btn" id="btnLogScale" title="Thang giá log (Logarithmic / Normal)" style="font-weight:700;">LOG</button>
+              </div>
+            </div>
+
+            <!-- HUD TOOLTIP -->
+            <div class="chart-hud">
+              <div>Thời gian: <strong id="hudDate">--</strong></div>
+              <div>Mở: <strong id="hudOpen">--</strong></div>
+              <div>Cao: <strong id="hudHigh">--</strong></div>
+              <div>Thấp: <strong id="hudLow">--</strong></div>
+              <div>Đóng: <strong id="hudClose">--</strong></div>
+              <div>KL: <strong id="hudVolume">--</strong></div>
+            </div>
+
+            <div class="main-chart-wrapper" id="mainChartContainer"></div>
+            <div class="sub-chart-wrapper" id="subChartContainer"></div>
+          </div>
+
+          <!-- STOCK DETAIL SUB-TABS (ĐỘNG LỰC 3 KỊCH BẢN, BCTC, TÀI LIỆU PDF, TIN TỨC, SỰ KIỆN, LÃNH ĐẠO) -->
+          <div class="stock-subtabs-container">
+            <!-- 1. CORPORATE SUBTABS HEADER (STOCK MODE) -->
+            <div class="subtabs-header" id="stockSubtabsHeader">
+              <button class="subtab-btn active" data-subtab="stock_earnings_engine">🎯 Động Lực Lợi Nhuận & 3 Kịch Bản</button>
+              <button class="subtab-btn" data-subtab="stock_quant_valuation" style="color:#facc15; font-weight:800; border-bottom: 2px solid #facc15;">🔬 Định Giá 22 Mô Hình (FFV Pro)</button>
+              <button class="subtab-btn" data-subtab="stock_recommendations">⭐ Khuyến Nghị CTCK & Target Price</button>
+              <button class="subtab-btn" data-subtab="stock_ecosystem">🌐 Hệ Sinh Thái</button>
+              <button class="subtab-btn" data-subtab="stock_peers">🏢 Cùng Ngành (Peers)</button>
+              <button class="subtab-btn" data-subtab="stock_financials">📊 Báo Cáo Tài Chính & Chỉ Số</button>
+              <button class="subtab-btn" data-subtab="stock_reports">📑 Hồ Sơ & File PDF</button>
+              <button class="subtab-btn" data-subtab="stock_news">📰 Tin Tức & Báo Chí</button>
+              <button class="subtab-btn" data-subtab="stock_events">📅 Lịch Sự Kiện & Cổ Tức</button>
+              <button class="subtab-btn" data-subtab="stock_leadership">👥 Lãnh Đạo & Cổ Đông</button>
+            </div>
+
+            <!-- 2. MACRO & INTERMARKET SUBTABS HEADER (MACRO MODE) -->
+            <div class="subtabs-header" id="macroSubtabsHeader" style="display:none;">
+              <button class="subtab-btn active" data-macro-subtab="macro_impact">🎯 Ma Trận Tác Động Ngành & Cổ Phiếu</button>
+              <button class="subtab-btn" data-macro-subtab="macro_series">📊 Diễn Biến & Chuỗi Lịch Sử</button>
+              <button class="subtab-btn" data-macro-subtab="macro_breakdown">🔍 Bóc Tách Cấu Phần & Động Lực</button>
+              <button class="subtab-btn" data-macro-subtab="macro_reports">📑 Báo Cáo Vĩ Mô GSO/SBV & Research (PDF)</button>
+              <button class="subtab-btn" data-macro-subtab="macro_news">📰 Tin Tức & Tín Hiệu Chính Sách</button>
+              <button class="subtab-btn" data-macro-subtab="macro_calendar">📅 Lịch Công Bố & Dự Báo (Calendar)</button>
+            </div>
+            
+            <!-- SUBTAB: ĐỘNG LỰC LỢI NHUẬN & ĐỊNH GIÁ 3 KỊCH BẢN (EARNINGS ENGINE) -->
+            <div class="subtab-content active" id="subtab_stock_earnings_engine">
+              <div class="earnings-engine-container" id="stockEarningsEngineContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang chẩn đoán 5 động lực tăng trưởng & chạy ma trận định giá 4 mô hình × 3 kịch bản...</div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: ĐỊNH GIÁ LƯỢNG TỬ 22 MÔ HÌNH (FFV PRO VALUATION ENGINE) -->
+            <div class="subtab-content" id="subtab_stock_quant_valuation">
+              <!-- Stock Valuation Control Strip (Blended vs Omnibus + Error Metrics) -->
+              <div id="stockValControlStrip" style="background:#0f172a; padding:10px 16px; border-radius:8px; border:1px solid rgba(250,204,21,0.3); margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;">
+                <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                  <span style="font-size:12px; font-weight:800; color:#facc15; display:flex; align-items:center; gap:6px;">
+                    <span>⚙️</span> ĐỘNG CƠ ĐỊNH GIÁ TỔNG HỢP:
+                  </span>
+                  
+                  <div style="display:flex; align-items:center; gap:6px;">
+                    <label style="font-size:11px; color:#94a3b8; font-weight:700;">Chế Độ:</label>
+                    <select id="stockValCompositeModeSelect" class="quant-select-ctrl" style="min-width:185px; color:#facc15; font-weight:700;" onchange="app.handleStockValModeChange(this.value)">
+                      <option value="blended" selected>🏛️ Blended (Cơ Cấu Chuẩn Ngành ICB)</option>
+                      <option value="omnibus">⚙️ Omnibus (Tối Ưu Sai Số Rolling)</option>
+                    </select>
+                  </div>
+
+                  <div id="stockValOmnibusMetricGroup" style="display:none; align-items:center; gap:6px;">
+                    <label style="font-size:11px; color:#c084fc; font-weight:700;">Thước Đo Sai Số:</label>
+                    <select id="stockValOmnibusMetricSelect" class="quant-select-ctrl" style="min-width:160px; color:#c084fc; font-weight:700;" onchange="app.handleStockValMetricChange(this.value)">
+                      <option value="smape" selected>SMAPE (Symmetric %)</option>
+                      <option value="male">MALE (Log Error)</option>
+                      <option value="wmape">WMAPE (Weighted %)</option>
+                      <option value="rmsle">RMSLE (Root Log)</option>
+                      <option value="ivw">IVW (Scale-Free)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <button class="btn-sm" onclick="app.refreshStockQuantValuation()" style="cursor:pointer; display:flex; align-items:center; gap:5px; font-size:11px; padding:5px 12px; background:rgba(56,189,248,0.15); border:1px solid #38bdf8; color:#38bdf8; border-radius:6px; font-weight:700;">
+                    <span>🔄</span> Tính Toán Lại
+                  </button>
+                </div>
+              </div>
+
+              <div class="quant-valuation-container" id="stockQuantValuationContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:24px; text-align:center;">⏳ Đang khởi động Động cơ Định giá 22 Mô hình & Động cơ WACC 5-Factor CAPM...</div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: KHUYẾN NGHỊ CTCK & GIÁ MỤC TIÊU (BROKER RECOMMENDATIONS & TARGET PRICE) -->
+            <div class="subtab-content" id="subtab_stock_recommendations">
+              <div class="recommendations-container" id="stockRecommendationsContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang tổng hợp báo cáo phân tích & định giá từ các CTCK (SSI, MBS, HSC, VND, Vietcap...)...</div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: HỆ SINH THÁI & SỞ HỮU CHÉO (ECOSYSTEM & CROSS-OWNERSHIP) -->
+            <div class="subtab-content" id="subtab_stock_ecosystem">
+              <div class="ecosystem-overview-container" id="stockEcosystemContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang truy vết mạng lưới cổ đông & hệ sinh thái doanh nghiệp...</div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: SO SÁNH ĐỐI THỦ CÙNG NGÀNH (ICB PEERS) -->
+            <div class="subtab-content" id="subtab_stock_peers">
+              <div class="peers-overview-container" id="stockPeersContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang tải dữ liệu so sánh các cổ phiếu cùng ngành ICB...</div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: TIN TỨC DOANH NGHIỆP -->
+            <div class="subtab-content" id="subtab_stock_news">
+              <div class="c-news-action-bar" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:6px 12px; background:var(--bg-card); border-radius:6px; border:1px solid var(--border-subtle);">
+                <div id="companyNewsStatus" style="font-size:12px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+                  <span>📌 Đang lọc từ Ổ dữ liệu chung</span>
+                </div>
+                <button class="btn-sm" id="btnDeepScanCompanyNews" style="display:flex; align-items:center; gap:5px; font-size:11px; padding:4px 10px; cursor:pointer; background:rgba(56, 189, 248, 0.1); border-color:#38bdf8; color:#38bdf8;">
+                  <span>🔍 Quét bổ sung 21+ nguồn báo</span>
+                </button>
+              </div>
+              <div class="news-list" id="stockNewsList"></div>
+            </div>
+
+            <!-- NEW SUBTAB: SỐ LIỆU BÁO CÁO TÀI CHÍNH & CHỈ SỐ (INTERACTIVE FINANCIAL STATEMENTS) -->
+            <div class="subtab-content" id="subtab_stock_financials">
+              <div class="c-financials-control-bar">
+                <div class="fin-tabs-group">
+                  <button class="fin-tab-btn active" data-fin-type="income">📈 Kết Quả KD (KQKD)</button>
+                  <button class="fin-tab-btn" data-fin-type="balance">⚖️ Cân Đối KT (CĐKT)</button>
+                  <button class="fin-tab-btn" data-fin-type="cashflow">💸 Lưu Chuyển TT (LCTT)</button>
+                  <button class="fin-tab-btn" data-fin-type="ratios">🎯 Chỉ Số Tài Chính</button>
+                  <button class="fin-tab-btn" data-fin-type="three_way" style="color:#38bdf8; font-weight:700; border-color:rgba(56,189,248,0.4);">🔮 Dự Phóng 3-Way (Modano 5Y)</button>
+                </div>
+
+                <div class="fin-period-controls" style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+                  <div class="fin-period-switch">
+                    <button class="fin-period-btn active" data-fin-period="quarter">Theo Quý</button>
+                    <button class="fin-period-btn" data-fin-period="year">Theo Năm</button>
+                  </div>
+                  <div class="fin-count-switch" style="display:flex; align-items:center; gap:3px;">
+                    <span style="font-size:11px; color:var(--text-muted); margin-right:2px;">Số kỳ:</span>
+                    <button class="fin-count-btn" data-fin-count="4">4 Kỳ</button>
+                    <button class="fin-count-btn active" data-fin-count="8">8 Kỳ</button>
+                    <button class="fin-count-btn" data-fin-count="12">12 Kỳ</button>
+                    <button class="fin-count-btn" data-fin-count="16">16 Kỳ</button>
+                    <button class="fin-count-btn" data-fin-count="all" title="Lấy toàn bộ lịch sử có sẵn">🌟 Tất Cả (Toàn bộ)</button>
+                  </div>
+                  <span class="fin-model-tag" id="finModelTag">🏢 Doanh nghiệp</span>
+                  <span class="fin-unit-label" id="finUnitLabel">Đơn vị: Tỷ VNĐ</span>
+                  <button id="btnExportModanoExcel" class="btn-export-excel" onclick="app.downloadModanoExcel()" title="Tải xuống toàn bộ mô hình tài chính 5 năm chuẩn Modano tích hợp công thức sống (Live Formulas)" style="cursor:pointer; background:linear-gradient(135deg, #059669 0%, #10b981 100%); color:#fff; border:none; padding:5px 12px; border-radius:6px; font-size:11.5px; font-weight:700; display:inline-flex; align-items:center; gap:6px; box-shadow:0 2px 6px rgba(16,185,129,0.3); transition:all 0.2s ease;">
+                    <span>📥 Xuất Excel Modano (.xlsx)</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="fin-table-wrapper" id="finTableWrapper">
+                <div id="finTableContainer"></div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: BÁO CÁO TÀI CHÍNH & TÀI LIỆU CÔNG BỐ PDF -->
+            <div class="subtab-content" id="subtab_stock_reports">
+              <!-- Search & Modern Year Filter Toolbar -->
+              <div class="c-reports-search-toolbar">
+                <div class="report-search-box">
+                  <span class="search-icon">🔍</span>
+                  <input type="text" id="reportSearchInput" placeholder="Tìm kiếm nội dung, quý, tháng (vd: BCTC Q2, Kiểm toán, Cổ tức, 06/2023...)" autocomplete="off">
+                  <button id="btnClearReportSearch" class="btn-clear-search" style="display:none;" title="Xóa tìm kiếm">✕</button>
+                </div>
+
+                <!-- Modern Year Filter Group -->
+                <div class="report-year-filter-group">
+                  <div class="year-pills-wrap">
+                    <button class="c-year-pill active" data-year="all">Tất Cả</button>
+                    <button class="c-year-pill" data-year="2026">2026</button>
+                    <button class="c-year-pill" data-year="2025">2025</button>
+                    <button class="c-year-pill" data-year="2024">2024</button>
+                  </div>
+                  <div class="year-stepper-box">
+                    <button class="btn-year-arrow" id="btnPrevYear" title="Lùi 1 năm về trước">◀</button>
+                    <input type="number" id="reportYearInput" class="year-custom-input mono" placeholder="Năm..." min="2000" max="2030" title="Nhập năm bất kỳ (vd: 2023, 2021...)">
+                    <button class="btn-year-arrow" id="btnNextYear" title="Tiến 1 năm">▶</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Filter Pills by Report Type -->
+              <div class="c-reports-filter-bar">
+                <button class="c-report-pill active" data-report-type="all">Tất cả <span class="pill-badge" id="pill_cnt_all">0</span></button>
+                <button class="c-report-pill" data-report-type="bctc">📑 BCTC & KQKD <span class="pill-badge" id="pill_cnt_bctc">0</span></button>
+                <button class="c-report-pill" data-report-type="annual">📘 Báo Cáo Thường Niên <span class="pill-badge" id="pill_cnt_annual">0</span></button>
+                <button class="c-report-pill" data-report-type="governance">🏛️ Quản Trị <span class="pill-badge" id="pill_cnt_governance">0</span></button>
+                <button class="c-report-pill" data-report-type="resolution">🗳️ Nghị Quyết & ĐHĐCĐ <span class="pill-badge" id="pill_cnt_resolution">0</span></button>
+                <button class="c-report-pill" data-report-type="dividend">💰 Cổ Tức & Phát Hành <span class="pill-badge" id="pill_cnt_dividend">0</span></button>
+                <button class="c-report-pill" data-report-type="insider">👤 Giao Dịch Cổ Đông <span class="pill-badge" id="pill_cnt_insider">0</span></button>
+              </div>
+
+              <!-- Reports List -->
+              <div class="reports-list" id="stockReportsList"></div>
+
+              <!-- Load More Pagination Button -->
+              <div class="reports-load-more-container" id="reportsLoadMoreContainer" style="display:none; text-align:center; padding:12px 0;">
+                <button id="btnLoadMoreReports" class="btn-load-more-reports">
+                  <span>⏬ Tải thêm tài liệu cũ hơn (Trang tiếp)</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="subtab-content" id="subtab_stock_events">
+              <!-- Event Filter Pills -->
+              <div class="c-events-filter-bar" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border-subtle);">
+                <button class="c-event-pill active" data-event-cat="all">Tất Cả Sự Kiện <span class="pill-badge" id="event_pill_cnt_all">0</span></button>
+                <button class="c-event-pill" data-event-cat="DIVIDEND">💰 Cổ Tức & Chi Trả <span class="pill-badge" id="event_pill_cnt_dividend">0</span></button>
+                <button class="c-event-pill" data-event-cat="ISSUE">🚀 Phát Hành & ESOP <span class="pill-badge" id="event_pill_cnt_issue">0</span></button>
+                <button class="c-event-pill" data-event-cat="MEETING">🗳️ ĐHĐCĐ & Lấy Ý Kiến <span class="pill-badge" id="event_pill_cnt_meeting">0</span></button>
+                <button class="c-event-pill" data-event-cat="RESOLUTION">🏛️ Nghị Quyết & HĐQT <span class="pill-badge" id="event_pill_cnt_resolution">0</span></button>
+              </div>
+              <div class="events-list" id="stockEventsList"></div>
+            </div>
+
+            <div class="subtab-content" id="subtab_stock_leadership">
+              <div class="leadership-grid" id="stockLeadershipGrid"></div>
+            </div>
+
+            <!-- ======================================================== -->
+            <!-- 6 MACRO & INTERMARKET SUBTAB CONTENTS (MACRO MODE) -->
+            <!-- ======================================================== -->
+            <div class="subtab-content" id="subtab_macro_impact">
+              <div class="macro-impact-container" id="macroImpactContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang tải ma trận tác động ngành và danh sách cổ phiếu hưởng lợi...</div>
+              </div>
+            </div>
+
+            <div class="subtab-content" id="subtab_macro_series">
+              <div class="macro-series-container" id="macroSeriesContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang tải chuỗi dữ liệu lịch sử và đối chiếu mục tiêu Quốc hội / SBV...</div>
+              </div>
+            </div>
+
+            <div class="subtab-content" id="subtab_macro_breakdown">
+              <div class="macro-breakdown-container" id="macroBreakdownContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang phân rã cấu phần chỉ số...</div>
+              </div>
+            </div>
+
+            <div class="subtab-content" id="subtab_macro_reports">
+              <div class="c-reports-search-toolbar">
+                <div class="report-search-box">
+                  <span class="search-icon">🔍</span>
+                  <input type="text" id="macroReportSearchInput" placeholder="Tìm báo cáo vĩ mô (vd: GSO, World Bank, IMF, SSI, Vietcap...)" autocomplete="off">
+                </div>
+                <div class="report-year-filter-group">
+                  <div class="year-pills-wrap">
+                    <button class="c-macro-category-pill active" data-macro-cat="all">Tất Cả Nguồn</button>
+                    <button class="c-macro-category-pill" data-macro-cat="Chính Phủ & GSO">🏛️ GSO & SBV</button>
+                    <button class="c-macro-category-pill" data-macro-cat="Tổ Chức Quốc Tế">🌍 World Bank & IMF</button>
+                    <button class="c-macro-category-pill" data-macro-cat="Công Ty Chứng Khoán">📈 CTCK Research</button>
+                    <button class="c-macro-category-pill" data-macro-cat="Quỹ Đầu Tư Lớn">⭐ Dragon Capital</button>
+                  </div>
+                </div>
+              </div>
+              <div class="macro-reports-list" id="macroReportsList"></div>
+            </div>
+
+            <div class="subtab-content" id="subtab_macro_news">
+              <div class="news-list" id="macroNewsList"></div>
+            </div>
+
+            <div class="subtab-content" id="subtab_macro_calendar">
+              <div class="macro-calendar-container" id="macroCalendarContainer"></div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- RIGHT: ORDER BOOK LADDER + FUNDAMENTALS + TECHNICAL SIGNAL -->
+        <div class="chart-view-right">
+          
+          <!-- ORDER BOOK LADDER CARD -->
+          <div class="ladder-card">
+            <div class="ladder-card-title">Sổ Lệnh 3 Cấp Độ (Order Depth)</div>
+            <div id="orderBookLadder"></div>
+          </div>
+
+          <!-- TECHNICAL SIGNAL GAUGE CARD -->
+          <div class="ladder-card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <span class="ladder-card-title" style="margin-bottom:0;">Tín Hiệu Kỹ Thuật</span>
+              <span class="signal-badge" id="signalBadge">ĐANG TẢI</span>
+            </div>
+            <div id="signalDetails" style="font-size:11px; color:var(--text-secondary); line-height:1.4;"></div>
+          </div>
+
+          <!-- FUNDAMENTALS CARD -->
+          <div class="fundamentals-card">
+            <div class="ladder-card-title">Chỉ Số Tài Chính & Định Giá</div>
+            <div class="fundamentals-grid">
+              <div class="f-item"><span class="f-label">Vốn Hóa</span><span class="f-val" id="f_market_cap">--</span></div>
+              <div class="f-item"><span class="f-label">P/E</span><span class="f-val" id="f_pe">--</span></div>
+              <div class="f-item"><span class="f-label">P/B</span><span class="f-val" id="f_pb">--</span></div>
+              <div class="f-item"><span class="f-label">EPS</span><span class="f-val" id="f_eps">--</span></div>
+              <div class="f-item"><span class="f-label">ROE</span><span class="f-val txt-up" id="f_roe">--</span></div>
+              <div class="f-item"><span class="f-label">ROA</span><span class="f-val txt-up" id="f_roa">--</span></div>
+              <div class="f-item" style="grid-column: span 2;"><span class="f-label">52W Range</span><span class="f-val" id="f_range_52w">--</span></div>
+              <div class="f-item" style="grid-column: span 2;"><span class="f-label">Room Ngoại Còn Lại</span><span class="f-val" id="f_room">--</span></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: TIN TỨC & SỰ KIỆN THỊ TRƯỜNG TOÀN CẢNH -->
+    <div class="view-panel" id="tab_news">
+      <div class="market-news-container">
+        
+        <!-- GLOBAL COMMODITIES & INTERMARKET TICKER STRIP -->
+        <div class="global-commodities-strip" id="globalCommoditiesStrip" style="background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:10px 14px; margin-bottom:12px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+            <div style="font-size:12px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+              <span>🌐</span> HÀNG HÓA & VĨ MÔ QUỐC TẾ (REAL-TIME INTERMARKET)
+              <span class="live-status-dot" style="width:6px; height:6px;"></span>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted);" id="globalCommoditiesUpdated">Cập nhật: Đang tải...</div>
+          </div>
+          <div id="globalCommoditiesGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px;">
+            <!-- Populated via JS -->
+            <div style="color:var(--text-muted); font-size:11px;">Đang tải dữ liệu hàng hóa thế giới...</div>
+          </div>
+        </div>
+
+        <!-- MAIN SUB-TAB SWITCHER INSIDE NEWS -->
+        <div style="display:flex; align-items:center; gap:8px; border-bottom:2px solid var(--border-subtle); padding-bottom:8px; margin-bottom:12px; flex-wrap:wrap;">
+          <button class="news-main-subtab-btn active" data-news-subtab="stream" style="padding:7px 16px; font-weight:700; font-size:12px; cursor:pointer; background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); border-radius:6px; display:flex; align-items:center; gap:6px;">
+            <span>📰</span> Dòng Tin Báo Chí 25+ Nguồn & Sở GD
+          </button>
+          <button class="news-main-subtab-btn" data-news-subtab="events_calendar" style="padding:7px 16px; font-weight:700; font-size:12px; cursor:pointer; background:transparent; border:1px solid transparent; color:var(--text-secondary); border-radius:6px; display:flex; align-items:center; gap:6px;">
+            <span>📅</span> Lịch Sự Kiện Toàn Thị Trường (GDKHQ & Cổ Tức)
+          </button>
+          <button class="news-main-subtab-btn" data-news-subtab="upgrade_etf" style="padding:7px 16px; font-weight:700; font-size:12px; cursor:pointer; background:transparent; border:1px solid transparent; color:var(--text-secondary); border-radius:6px; display:flex; align-items:center; gap:6px;">
+            <span>🌟</span> Tiến Độ Nâng Hạng & Cơ Cấu ETF
+          </button>
+          <button class="news-main-subtab-btn" data-news-subtab="macro_monetary" style="padding:7px 16px; font-weight:700; font-size:12px; cursor:pointer; background:transparent; border:1px solid transparent; color:var(--text-secondary); border-radius:6px; display:flex; align-items:center; gap:6px;">
+            <span>🏛️</span> Vĩ Mô & Tiền Tệ (SBV & GSO)
+          </button>
+        </div>
+
+        <!-- SUB-PANEL 1: DÒNG TIN BÁO CHÍ (EXISTING STREAM) -->
+        <div id="news_subpanel_stream">
+          <div class="news-header-strip">
+            <div>
+              <div style="font-size:15px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                <span>📰</span> Dòng Tin Tức Tài Chính & Chứng Khoán 24/7
+              </div>
+              <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
+                Tổng hợp đa nguồn từ CafeF, VietnamBiz, Vietstock, HNX, HOSE, UBCKNN, VnEconomy, VnExpress, Tin Nhanh CK & Dân Trí
+              </div>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:10px;">
+              <input type="text" class="search-input" id="newsKeywordInput" placeholder="🔍 Nhập mã CP (FPT, HPG...) hoặc từ khóa..." style="width:280px;">
+              <button class="btn-sm" id="btnRefreshNews">🔄 Cập nhật tin mới</button>
+            </div>
+          </div>
+
+          <!-- News Sources Bar -->
+          <div class="news-categories-bar" style="border-bottom:1px solid var(--border-subtle); padding-bottom:6px; flex-wrap:wrap;">
+            <span style="font-size:11px; font-weight:700; color:var(--text-muted); align-self:center; margin-right:4px;">Nguồn tin:</span>
+            <button class="news-src-btn active" data-src="all">📰 Tất Cả (25+ Nguồn)</button>
+            <button class="news-src-btn" data-src="CafeF">🟠 CafeF</button>
+            <button class="news-src-btn" data-src="VietnamBiz">🟣 VietnamBiz</button>
+            <button class="news-src-btn" data-src="Vietstock">🔴 Vietstock</button>
+            <button class="news-src-btn" data-src="HOSE">🏛️ HOSE Công Bố</button>
+            <button class="news-src-btn" data-src="HNX">🏛️ HNX Công Bố</button>
+            <button class="news-src-btn" data-src="VnEconomy">🟡 VnEconomy</button>
+            <button class="news-src-btn" data-src="Tin nhanh chứng khoán">⚡ Tin Nhanh CK</button>
+            <button class="news-src-btn" data-src="VnExpress">🔵 VnExpress</button>
+            <button class="news-src-btn" data-src="Dân trí">🟢 Dân Trí</button>
+          </div>
+
+          <!-- News Topics Bar -->
+          <div class="news-categories-bar" style="border-bottom:1px solid var(--border-subtle); padding-bottom:6px; margin-top:6px;">
+            <span style="font-size:11px; font-weight:700; color:var(--text-muted); align-self:center; margin-right:4px;">Chủ đề AI:</span>
+            <button class="news-topic-btn active" data-topic="all">Tất Cả Chủ Đề</button>
+            <button class="news-topic-btn" data-topic="bctc">📊 BCTC & Kết Quả KD</button>
+            <button class="news-topic-btn" data-topic="dividend">🎁 Cổ Tức & Quyền</button>
+            <button class="news-topic-btn" data-topic="insider">👥 Nội Bộ & Quỹ Ngoại</button>
+            <button class="news-topic-btn" data-topic="risk">⚠️ Cảnh Báo & Rủi Ro</button>
+            <button class="news-topic-btn" data-topic="macro">🌐 Vĩ Mô & Lãi Suất</button>
+            <button class="news-topic-btn" data-topic="market">📈 Xu Hướng Thị Trường</button>
+          </div>
+
+          <!-- News Sentiment Filter Bar -->
+          <div class="news-categories-bar" style="margin-top:6px;">
+            <span style="font-size:11px; font-weight:700; color:var(--text-muted); align-self:center; margin-right:4px;">Sắc thái:</span>
+            <button class="news-sentiment-btn active" data-sentiment="all">Tất Cả Sắc Thái</button>
+            <button class="news-sentiment-btn" data-sentiment="BULLISH">🟢 Tích Cực (Bullish)</button>
+            <button class="news-sentiment-btn" data-sentiment="BEARISH">🔴 Tiêu Cực (Bearish)</button>
+            <button class="news-sentiment-btn" data-sentiment="NEUTRAL">⚪ Trung Lập</button>
+          </div>
+
+          <div class="market-news-feed" id="marketNewsFeed">
+            <!-- Populated via JS -->
+          </div>
+
+          <!-- LOAD MORE BUTTON -->
+          <div id="loadMoreNewsContainer" style="display:flex; justify-content:center; align-items:center; margin:20px 0 10px 0;">
+            <button id="btnLoadMoreNews" class="btn-sm" style="padding:10px 24px; font-weight:700; font-size:13px; cursor:pointer; background:var(--bg-card); border:1px solid var(--border-color); color:var(--text-main); border-radius:8px; display:flex; align-items:center; gap:8px;">
+              <span>⏬ Tải thêm 30 tin tiếp theo</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- SUB-PANEL 2: LỊCH SỰ KIỆN TOÀN THỊ TRƯỜNG (MARKET EVENTS CALENDAR) -->
+        <div id="news_subpanel_events_calendar" style="display:none; flex-direction:column; gap:12px;">
+          <div style="background:var(--bg-card); padding:12px 16px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div style="font-size:14px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                <span>📅</span> LỊCH SỰ KIỆN & QUYỀN TOÀN THỊ TRƯỜNG (MARKET ACTION CALENDAR)
+              </div>
+              <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
+                Theo dõi ngày Giao Dịch Không Hưởng Quyền (GDKHQ), chi trả cổ tức tiền mặt / cổ phiếu, họp ĐHĐCĐ & phát hành thêm
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button class="btn-sm" id="btnRefreshMarketCalendar">🔄 Làm Mới Sự Kiện</button>
+            </div>
+          </div>
+
+          <!-- Calendar Controls -->
+          <div style="background:var(--bg-card); padding:10px 14px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+            <span style="font-size:11px; font-weight:700; color:var(--text-muted); margin-right:4px;">Loại sự kiện:</span>
+            <button class="cal-cat-btn active" data-cal-cat="all">🌐 Tất Cả (<span id="calCountAll">0</span>)</button>
+            <button class="cal-cat-btn" data-cal-cat="DIVIDEND">💰 Cổ Tức (<span id="calCountDividend">0</span>)</button>
+            <button class="cal-cat-btn" data-cal-cat="ISSUE">🚀 Phát Hành & ESOP (<span id="calCountIssue">0</span>)</button>
+            <button class="cal-cat-btn" data-cal-cat="MEETING">🗳️ ĐHĐCĐ (<span id="calCountMeeting">0</span>)</button>
+            <button class="cal-cat-btn" data-cal-cat="RESOLUTION">🏛️ Nghị Quyết (<span id="calCountResolution">0</span>)</button>
+          </div>
+
+          <!-- Calendar Events Grid/List -->
+          <div id="marketCalendarEventsList" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(360px, 1fr)); gap:10px;">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+
+        <!-- SUB-PANEL 3: TIẾN ĐỘ NÂNG HẠNG & QUỸ NGOẠI ETF (UPGRADE TRACKER) -->
+        <div id="news_subpanel_upgrade_etf" style="display:none; flex-direction:column; gap:12px;">
+          
+          <!-- Upgrade Status Banner -->
+          <div style="background:linear-gradient(135deg, rgba(56, 189, 248, 0.1), rgba(16, 185, 129, 0.1)); padding:16px 20px; border-radius:8px; border:1px solid rgba(56, 189, 248, 0.3); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div style="font-size:15px; font-weight:800; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+                <span>🚀</span> MA TRẬN TIẾN ĐỘ NÂNG HẠNG TTCK VIỆT NAM (FTSE RUSSELL & MSCI)
+              </div>
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">
+                Mục tiêu hoàn tất: <strong style="color:#10b981;">Tháng 9/2025 - Tháng 3/2026</strong> (Nâng hạng Secondary Emerging Market)
+              </div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px; color:var(--text-muted);">Mức độ sẵn sàng tổng thể</div>
+              <div style="font-size:20px; font-weight:800; color:#10b981;" id="upgradeReadinessScore">82.5%</div>
+            </div>
+          </div>
+
+          <!-- FTSE Criteria Checklist -->
+          <div style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">
+            <div style="font-size:13px; font-weight:800; color:var(--text-primary); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              <span>📋</span> Bảng Đánh Giá Tiêu Chí FTSE Russell (Country Classification)
+            </div>
+            <div id="ftseCriteriaList" style="display:flex; flex-direction:column; gap:8px;">
+              <!-- Populated via JS -->
+            </div>
+          </div>
+
+          <!-- ETF Rebalancing Schedules & Countdown -->
+          <div style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">
+            <div style="font-size:13px; font-weight:800; color:var(--text-primary); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              <span>⏱️</span> Lịch Cơ Cấu & Review Các Quỹ ETF Ngoại (Fubon, VanEck, FTSE, Diamond)
+            </div>
+            <div id="etfRebalanceScheduleGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:10px;">
+              <!-- Populated via JS -->
+            </div>
+          </div>
+
+          <!-- Foreign Institutional Asset Managers -->
+          <div style="background:var(--bg-card); padding:14px; border-radius:8px; border:1px solid var(--border-subtle);">
+            <div style="font-size:13px; font-weight:800; color:var(--text-primary); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              <span>🏛️</span> Các Quỹ Quản Lý Tài Sản Ngoại Lớn Nhất Tại Việt Nam
+            </div>
+            <div id="institutionalFundsGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:10px;">
+              <!-- Populated via JS -->
+            </div>
+          </div>
+
+        </div>
+
+        <!-- SUB-PANEL 4: VĨ MÔ & CHÍNH SÁCH TIỀN TỆ (SBV & GSO DATA LAKE) -->
+        <div id="news_subpanel_macro_monetary" style="display:none; flex-direction:column; gap:14px;">
+          
+          <!-- Banner Header -->
+          <div style="background:var(--bg-card); padding:14px 18px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+            <div>
+              <div style="font-size:15px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+                <span>🏛️</span> VĨ MÔ & CHÍNH SÁCH TIỀN TỆ VIỆT NAM (SBV & GSO OFFICIAL DATA)
+              </div>
+              <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
+                Dữ liệu cấp nguồn trực tiếp từ Ngân Hàng Nhà Nước Việt Nam (sbv.gov.vn) & Tổng Cục Thống Kê (gso.gov.vn)
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="background:rgba(16,185,129,0.12); border:1px solid rgba(16,185,129,0.3); border-radius:6px; padding:6px 12px; text-align:right;">
+                <div style="font-size:10px; color:#10b981; font-weight:700;">ĐÁNH GIÁ VĨ MÔ VN-INDEX</div>
+                <div style="font-size:14px; font-weight:800; color:#10b981;" id="macroScoreValue">8.3 / 10 (TÍCH CỰC 🟢)</div>
+              </div>
+              <button class="btn-sm" id="btnRefreshMacroMonetary">🔄 Cập nhật vĩ mô</button>
+            </div>
+          </div>
+
+          <!-- Section 1: Ngân Hàng Nhà Nước Việt Nam (SBV) -->
+          <div style="background:var(--bg-card); padding:16px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:8px;">
+              <div style="font-size:13.5px; font-weight:800; color:#38bdf8; display:flex; align-items:center; gap:6px;">
+                <span>🏦</span> 1. CHÍNH SÁCH TIỀN TỆ & THANH KHOẢN HỆ THỐNG (SBV)
+              </div>
+              <span style="font-size:11px; color:var(--text-muted);" id="sbvUpdatedTime">Nguồn: sbv.gov.vn</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:12px;" id="sbvCardsGrid">
+              <!-- Populated via JS -->
+              <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang tải dữ liệu chính sách tiền tệ SBV...</div>
+            </div>
+          </div>
+
+          <!-- Section 2: Tổng Cục Thống Kê (GSO) & Báo Cáo Kinh Tế Xã Hội -->
+          <div style="background:var(--bg-card); padding:16px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:8px;">
+              <div style="font-size:13.5px; font-weight:800; color:#10b981; display:flex; align-items:center; gap:6px;">
+                <span>📊</span> 2. CÁC CHỈ SỐ KINH TẾ VĨ MÔ CỐT LÕI (GSO & BỘ KH&ĐT)
+              </div>
+              <span style="font-size:11px; color:var(--text-muted);" id="gsoUpdatedTime">Báo cáo định kỳ ngày 28-29 hàng tháng</span>
+            </div>
+
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:10px;" id="gsoStatsGrid">
+              <!-- Populated via JS -->
+              <div style="color:var(--text-muted); font-size:12px; padding:20px; text-align:center;">⏳ Đang tải dữ liệu kinh tế vĩ mô GSO...</div>
+            </div>
+          </div>
+
+          <!-- Section 3: Bảng Ma Trận Đánh Giá Tác Động Tới Thị Trường Chứng Khoán -->
+          <div style="background:var(--bg-card); padding:16px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:10px;">
+            <div style="font-size:13px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+              <span>🎯</span> 3. MA TRẬN ĐÁNH GIÁ TÁC ĐỘNG TỔNG HỢP LÊN VN-INDEX
+            </div>
+            <div id="macroImpactMatrixList" style="display:flex; flex-direction:column; gap:8px;">
+              <!-- Populated via JS -->
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 3: QUANT SCREENER (XẾP HẠNG PHÂN VỊ & 3 KỊCH BẢN ĐỊNH GIÁ) -->
+    <div class="view-panel" id="tab_quant">
+      <div class="sector-view-container" style="display:flex; flex-direction:column; gap:12px;">
+        
+        <!-- Header Banner -->
+        <div style="background:var(--bg-card); padding:14px 18px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div>
+            <div style="font-size:15px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+              <span>🎯</span> BỘ LỌC ĐỊNH LƯỢNG PHÂN VỊ (MULTI-FACTOR QUANT SCREENER)
+              <span class="badge-tag" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">BASE RATE FRAMEWORK</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
+              Phân loại 5 nhóm Quintiles (Q1 Tinh Hoa → Q5 Rủi Ro), chuẩn hóa 4 trụ cột phân vị và chạy mô hình định giá 3 kịch bản
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="btn-sm" id="btnBacktestFromQuant" title="Chuyển sang phòng thử nghiệm Backtest Studio để đối soát hiệu suất chiến lược / phân vị này" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11.5px; padding:6px 14px; background:linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(14, 165, 233, 0.3)); border:1px solid #38bdf8; color:#38bdf8; border-radius:6px; font-weight:700;">
+              <span>🚀</span> Backtest Chiến Lược / Phân Vị
+            </button>
+            <button class="btn-sm" id="btnExportQuantCsv" title="Tải bảng xếp hạng hiện tại dưới dạng CSV" style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:11px; padding:5px 12px; background:rgba(250, 204, 21, 0.1); border-color:#facc15; color:#facc15; border-radius:6px; font-weight:700;">
+              ⬇ Xuất CSV
+            </button>
+            <button class="btn-sm" id="btnSyncQuantSnapshot" style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:11px; padding:5px 12px; background:rgba(16, 185, 129, 0.1); border-color:#10b981; color:#10b981; border-radius:6px; font-weight:700;">
+              ⚡ Cập nhật Snapshot Phân Vị
+            </button>
+          </div>
+        </div>
+
+        <!-- 4 Summary Stat Cards -->
+        <div class="foreign-stats-grid">
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Tổng Mã Đã Xếp Hạng</span>
+            <span class="f-stat-num mono txt-blue" id="quantTotalRanked">--</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Nhóm Q1: Tinh Hoa (Top 20%)</span>
+            <span class="f-stat-num mono txt-up" id="quantQ1Count">--</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Tăng Trưởng DT 5 Năm (Q1)</span>
+            <span class="f-stat-num mono txt-ceil" id="quantQ1RevGrowth">≥ 50%</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Điểm Composite TB (Q1)</span>
+            <span class="f-stat-num mono txt-ref" id="quantAvgScore">≥ 80.0</span>
+          </div>
+        </div>
+
+        <!-- Factor Weights Transparency (populated from API if present) -->
+        <div id="quantFactorWeights" style="display:none; flex-wrap:wrap; align-items:center; font-size:10.5px; color:var(--text-secondary); background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:6px 12px; margin-top:8px;"></div>
+
+        <!-- Filter & Control Strip -->
+        <div style="background:var(--bg-card); padding:12px 16px; border-radius:8px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:12px;">
+          
+          <!-- Quintiles Filter Pills -->
+          <div class="quant-pills-bar" style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+            <span class="quant-filter-label" style="font-size:11.5px; font-weight:700; color:var(--text-muted); margin-right:4px;">Xếp hạng Phân vị:</span>
+            <button class="quant-q-btn q-all active" data-quant-q="ALL"><span>🌐</span> Tất Cả Phân Vị</button>
+            <button class="quant-q-btn q-1" data-quant-q="Q1"><span>⭐</span> Q1: Tinh Hoa <small>(P80-P100)</small></button>
+            <button class="quant-q-btn q-2" data-quant-q="Q2"><span>🔷</span> Q2: Tốt <small>(P60-P80)</small></button>
+            <button class="quant-q-btn q-3" data-quant-q="Q3"><span>🟨</span> Q3: Trung Bình <small>(P40-P60)</small></button>
+            <button class="quant-q-btn q-4" data-quant-q="Q4"><span>🟧</span> Q4: Yếu <small>(P20-P40)</small></button>
+            <button class="quant-q-btn q-5" data-quant-q="Q5"><span>🟥</span> Q5: Rủi Ro Cao <small>(P0-P20)</small></button>
+          </div>
+
+          <!-- Secondary Filters Row -->
+          <div class="quant-filters-row" style="display:flex; align-items:center; flex-wrap:wrap; gap:12px;">
+            <!-- Strategy Preset Filter -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#38bdf8; font-weight:700; white-space:nowrap;">🎯 Bộ Lọc Mẫu:</label>
+              <select id="quantStrategySelect" class="quant-select-ctrl" style="min-width:185px; border-color:rgba(56,189,248,0.4); font-weight:600;">
+                <option value="ALL">🌐 Tất Cả Cổ Phiếu</option>
+                <optgroup label="👑 7 Trường Phái Huyền Thoại">
+                  <option value="deep_value_klarman">💎 Deep Value (Seth Klarman)</option>
+                  <option value="ps_focus_fisher">📊 P/S Ratio Focus (Ken Fisher)</option>
+                  <option value="contrarian_dreman">🔄 Contrarian (David Dreman)</option>
+                  <option value="growth_philip_fisher">🚀 Growth Investing (Philip Fisher)</option>
+                  <option value="peter_lynch_garp">🎯 GARP (Peter Lynch)</option>
+                  <option value="defensive_graham">🛡️ Defensive (Benjamin Graham)</option>
+                  <option value="value_buffett">🏰 Moat & Value (Warren Buffett)</option>
+                  <option value="buffetts_alpha">🏛️ Buffett's Alpha (QMJ, BAB & Value)</option>
+                  <option value="novy_marx_quality_value">🏛️ Gross Profitability & Value (Novy-Marx)</option>
+                  <option value="gray_quantitative_value_qval">🛡️ Quantitative Value - Q-VAL (Gray)</option>
+                </optgroup>
+                <optgroup label="⚡ Hello Stocks (Gốc - Loại 5 ngành)">
+                  <option value="hello_lower_risk">🌱 Hello - Rủi Ro Thấp (Lower Risk)</option>
+                  <option value="hello_balanced_risk">⚖️ Hello - Cân Bằng (Balanced Risk)</option>
+                  <option value="hello_full_throttle">🔥 Hello - Tăng Tốc (Full Throttle)</option>
+                </optgroup>
+                <optgroup label="✨ Hello Stocks Modified (Mô hình Lai 2 Tầng)">
+                  <option value="hello_lower_risk_mod">🌱 Hello Mod: Rủi Ro Thấp (Compounders)</option>
+                  <option value="hello_balanced_risk_mod">⚖️ Hello Mod: Cân Bằng (GARP & Margin)</option>
+                  <option value="hello_full_throttle_mod">🚀 Hello Mod: Tăng Tốc (Operating Leverage)</option>
+                </optgroup>
+                <optgroup label="🛡️ Mô Hình 3 Tầng: Sinh Tồn & Con Hào Ngành">
+                  <option value="universal_survival_sector_moat">🛡️ Universal Survival & Sector Moat</option>
+                </optgroup>
+                <optgroup label="🧙 Guru Models (Đồng Bộ Backtest)">
+                  <option value="guru_magic_formula_greenblatt">🪄 Magic Formula (Greenblatt)</option>
+                  <option value="guru_piotroski_fscore">📋 Piotroski F-Score</option>
+                  <option value="guru_zweig_conservative_growth">📈 Zweig Conservative Growth</option>
+                  <option value="guru_cornerstone_growth_oshaughnessy">🏛️ Cornerstone Growth (O'Shaughnessy)</option>
+                  <option value="guru_cornerstone_value_oshaughnessy">🏦 Cornerstone Value (O'Shaughnessy)</option>
+                  <option value="guru_neff_total_return">💵 Total Return (John Neff)</option>
+                </optgroup>
+                <optgroup label="⚡ Time Series Momentum (Moskowitz et al. 2012)">
+                  <option value="tsmom_moskowitz">⚡ Time Series Momentum (Moskowitz 2012)</option>
+                </optgroup>
+                <optgroup label="⭐ 5 Nhóm Phân Vị Điểm Quant">
+                  <option value="quant_q1">⭐ Quant Q1: Tinh Hoa (Top 20%)</option>
+                  <option value="quant_q2">🔷 Quant Q2: Tốt (Phân Vị 60-80)</option>
+                  <option value="quant_q3">🟨 Quant Q3: Trung Bình (40-60)</option>
+                  <option value="quant_q4">🟧 Quant Q4: Yếu (Phân Vị 20-40)</option>
+                  <option value="quant_q5">⚠️ Quant Q5: Rủi Ro Cao (Bottom 20%)</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- Sector Filter -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;">Ngành ICB:</label>
+              <select id="quantSectorSelect" class="quant-select-ctrl">
+                <option value="ALL">Tất cả 10 nhóm ngành</option>
+                <option value="VNIT">💻 Công Nghệ (VNIT)</option>
+                <option value="VNFIN">🏦 Tài Chính & Bank (VNFIN)</option>
+                <option value="VNMAT">🏗️ Thép & Vật Liệu (VNMAT)</option>
+                <option value="VNREAL">🏢 Bất Động Sản (VNREAL)</option>
+                <option value="VNCOND">🛒 Bán Lẻ & Tiêu Dùng (VNCOND)</option>
+                <option value="VNCONS">🥛 Tiêu Dùng Thiết Yếu (VNCONS)</option>
+                <option value="VNENE">⚡ Dầu Khí & Năng Lượng (VNENE)</option>
+                <option value="VNUTI">💧 Tiện Ích Điện Nước (VNUTI)</option>
+                <option value="VNIND">🏭 Công Nghiệp & Xây Lắp (VNIND)</option>
+                <option value="VNHEAL">💊 Y Tế & Dược Phẩm (VNHEAL)</option>
+              </select>
+            </div>
+
+            <!-- Exchange Filter -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;">Sàn:</label>
+              <select id="quantExchangeSelect" class="quant-select-ctrl" style="min-width:100px;">
+                <option value="ALL">Tất cả sàn</option>
+                <option value="HOSE">HOSE</option>
+                <option value="HNX">HNX</option>
+                <option value="UPCOM">UPCOM</option>
+              </select>
+            </div>
+
+            <!-- 5Y Revenue Filter -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;">DT 5 Năm:</label>
+              <select id="quantGrowthSelect" class="quant-select-ctrl">
+                <option value="0">Tất cả mức tăng trưởng</option>
+                <option value="50" selected>≥ +50% (Tiêu chuẩn Video)</option>
+                <option value="100">≥ +100% (Siêu Tăng Trưởng)</option>
+                <option value="25">≥ +25% (Tăng Trưởng Khá)</option>
+              </select>
+            </div>
+
+            <!-- Sort By -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;">Sắp xếp:</label>
+              <select id="quantSortSelect" class="quant-select-ctrl">
+                <option value="composite">Điểm Tổng Hợp (Cao → Thấp)</option>
+                <option value="growth">Phân Vị Tăng Trưởng</option>
+                <option value="quality">Phân Vị Chất Lượng (ROE/Biên)</option>
+                <option value="health">Phân Vị Sức Khỏe Nợ</option>
+                <option value="valuation">Phân Vị Định Giá Hấp Dẫn</option>
+                <option value="rev_5y_growth">Tăng Trưởng DT 5 Năm (%)</option>
+                <option value="rev_1y_growth">Tăng Trưởng DT 1 Năm (%)</option>
+                <option value="pat_1y_growth">Tăng Trưởng LNST 1 Năm (%)</option>
+                <option value="roe">ROE (%)</option>
+                <option value="pe">P/E (Thấp → Cao)</option>
+                <option value="pb">P/B (Thấp → Cao)</option>
+                <option value="ps">P/S (Thấp → Cao)</option>
+                <option value="peg">PEG (Thấp → Cao)</option>
+                <option value="dividend_yield">Tỷ Suất Cổ Tức (%)</option>
+                <option value="fcf_ttm">Dòng Tiền Tự Do (FCF)</option>
+                <option value="market_cap">Vốn Hóa Thị Trường</option>
+              </select>
+            </div>
+
+            <!-- Universal Survival Firewall Toggle -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="Bật để loại mã không đạt: ROA≥10%, Current Ratio≥1.5, Quick Ratio≥1.0, ICR≥2.5, Biên LN Hoạt Động dương">
+              <label style="font-size:11px; color:#f59e0b; font-weight:700; white-space:nowrap; cursor:pointer;" for="survivalToggle">🛡️ Firewall:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:36px; height:20px;">
+                <input type="checkbox" id="survivalToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+              <span id="survivalToggleLabel" style="font-size:10px; color:#64748b; font-weight:600;">TẮT</span>
+            </div>
+
+            <!-- Time Series Momentum (TSMOM 12M Trend) Toggle -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="Bật để chỉ chọn cổ phiếu có động lượng 12 tháng dương (R_12M > 0) theo nghiên cứu Moskowitz (2012)">
+              <label style="font-size:11px; color:#06b6d4; font-weight:700; white-space:nowrap; cursor:pointer;" for="tsmomToggle">⚡ TSMOM:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:36px; height:20px;">
+                <input type="checkbox" id="tsmomToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+              <span id="tsmomToggleLabel" style="font-size:10px; color:#64748b; font-weight:600;">TẮT</span>
+            </div>
+
+            <!-- Forensic Accounting (Piotroski F-Score >= 7 & Beneish M-Score < -1.78) Toggle -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="Bật để loại mã có rủi ro gian lận BCTC: Piotroski F-Score ≥ 7/9 & Beneish M-Score < -1.78">
+              <label style="font-size:11px; color:#ec4899; font-weight:700; white-space:nowrap; cursor:pointer;" for="forensicToggle">🔍 Forensic:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:36px; height:20px;">
+                <input type="checkbox" id="forensicToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+              <span id="forensicToggleLabel" style="font-size:10px; color:#64748b; font-weight:600;">TẮT</span>
+            </div>
+
+            <!-- Quick Search in Table -->
+            <div class="quant-search-wrap" style="margin-left:auto;">
+              <input type="text" id="quantSearchInput" class="search-input" placeholder="🔍 Lọc nhanh mã / tên..." style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:170px;">
+            </div>
+          </div>
+
+          <!-- Actions Ribbon: Advanced Criteria + Save / Load Custom Strategies + Quick Backtest Strip Toggle -->
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+              <button class="btn-sm" id="btnAdvancedCriteria" style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:11px; padding:5px 12px; background:rgba(148, 163, 184, 0.1); border-color:#94a3b8; color:#94a3b8; border-radius:6px; font-weight:700;">
+                ⚙️ Tiêu Chí Nâng Cao
+              </button>
+              <button class="btn-sm" id="btnSaveCurrentCriteria" style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:11px; padding:5px 12px; background:rgba(16, 185, 129, 0.12); border-color:#10b981; color:#34d399; border-radius:6px; font-weight:700;" title="Lưu lại bộ tiêu chí và cài đặt lọc hiện tại để sử dụng sau">
+                💾 Lưu Tiêu Chí Này
+              </button>
+              <button class="btn-sm" id="btnOpenSavedCriteria" style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:11px; padding:5px 12px; background:rgba(56, 189, 248, 0.12); border-color:#38bdf8; color:#38bdf8; border-radius:6px; font-weight:700;" title="Xem và tải lại danh sách các chiến lược tùy biến đã lưu">
+                📂 Chiến Lược Đã Lưu <span id="savedCriteriaCountBadge" style="background:#0284c7; color:#fff; font-size:9.5px; padding:1px 6px; border-radius:10px; font-weight:800;">0</span>
+              </button>
+            </div>
+
+            <!-- Quick Backtest Toggle / Action -->
+            <div style="display:flex; align-items:center; gap:8px;">
+              <button class="btn-sm" id="btnToggleScreenerBacktest" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:11.5px; padding:6px 14px; background:linear-gradient(135deg, #0284c7, #38bdf8); color:#0f172a; border:none; border-radius:6px; font-weight:800; box-shadow:0 0 10px rgba(56,189,248,0.35);">
+                <span>⚡</span> Quick Backtest (Đối Soát Nhanh)
+              </button>
+            </div>
+          </div>
+
+          <!-- Advanced Criteria Numeric Filter Inputs -->
+          <div id="advancedCriteriaPanel" style="display:none; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;" for="critMaxPe">P/E ≤</label>
+              <input type="number" step="any" id="critMaxPe" class="search-input" placeholder="P/E ≤" style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:90px;">
+            </div>
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;" for="critMinRoe">ROE ≥ %</label>
+              <input type="number" step="any" id="critMinRoe" class="search-input" placeholder="ROE ≥ %" style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:90px;">
+            </div>
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;" for="critMinDy">Cổ tức ≥ %</label>
+              <input type="number" step="any" id="critMinDy" class="search-input" placeholder="Cổ tức ≥ %" style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:100px;">
+            </div>
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;" for="critMaxDe">D/E ≤</label>
+              <input type="number" step="any" id="critMaxDe" class="search-input" placeholder="D/E ≤" style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:80px;">
+            </div>
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;" for="critMaxPeg">PEG ≤</label>
+              <input type="number" step="any" id="critMaxPeg" class="search-input" placeholder="PEG ≤" style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:80px;">
+            </div>
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:var(--text-muted); font-weight:600; white-space:nowrap;" for="critMinMcap">Vốn hóa ≥ (nghìn tỷ)</label>
+              <input type="number" step="any" id="critMinMcap" class="search-input" placeholder="Vốn hóa ≥ (nghìn tỷ)" style="background:var(--bg-surface); border:1px solid var(--border-subtle); color:var(--text-main); border-radius:6px; padding:6px 10px; font-size:11.5px; width:110px;">
+            </div>
+          </div>
+
+          <!-- SCRENER QUICK BACKTEST CUSTOMIZATION PANEL & KPI RESULTS (NO GRAPH, FAST SUMMARY) -->
+          <div id="screenerBacktestSection" style="display:none; background:#0b1120; border:1px solid rgba(56, 189, 248, 0.25); border-radius:8px; padding:14px 16px; margin-top:4px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:16px;">⚡</span>
+                <strong style="font-size:13px; color:#38bdf8;">TÙY BIẾN ĐỐI SOÁT HIỆU SUẤT (QUICK BACKTEST)</strong>
+                <span style="font-size:11px; color:var(--text-secondary);">Mô phỏng tức thì hiệu suất của bộ lọc/chiến lược hiện tại so với VN-Index</span>
+              </div>
+              <button class="btn-sm" id="btnRunScreenerQuickBt" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:6px 16px; background:linear-gradient(135deg, #10b981, #059669); color:#fff; border:none; border-radius:6px; font-weight:800; box-shadow:0 0 12px rgba(16,185,129,0.4);">
+                <span>▶</span> Chạy Đối Soát Bộ Lọc Này
+              </button>
+            </div>
+
+            <!-- Customization Settings Ribbon -->
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:14px; padding:10px 12px; background:rgba(15, 23, 42, 0.75); border-radius:6px; border:1px solid rgba(255,255,255,0.06);">
+              <!-- Time Horizon -->
+              <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+                <label style="font-size:11px; color:#94a3b8; font-weight:700;">Khung Thời Gian:</label>
+                <div class="backtest-pills-group" id="qsBtHorizonGroup" style="display:inline-flex; gap:3px;">
+                  <button class="bt-pill-btn" data-horizon="1" style="padding:3px 8px; font-size:10.5px;">1 Năm</button>
+                  <button class="bt-pill-btn" data-horizon="3" style="padding:3px 8px; font-size:10.5px;">3 Năm</button>
+                  <button class="bt-pill-btn active" data-horizon="5" style="padding:3px 8px; font-size:10.5px;">5 Năm</button>
+                  <button class="bt-pill-btn" data-horizon="10" style="padding:3px 8px; font-size:10.5px;">10 Năm</button>
+                </div>
+              </div>
+
+              <!-- Rebalance Cadence -->
+              <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+                <label style="font-size:11px; color:#94a3b8; font-weight:700;">Đảo Danh Mục:</label>
+                <select id="qsBtCadenceSelect" class="quant-select-ctrl" style="min-width:125px; padding:4px 8px; font-size:11px;">
+                  <option value="quarterly" selected>📅 Hàng Quý</option>
+                  <option value="semi_annual">📅 Bán Niên (6T)</option>
+                  <option value="annual">📅 Hàng Năm (12T)</option>
+                </select>
+              </div>
+
+              <!-- Holdings Top K -->
+              <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+                <label style="font-size:11px; color:#94a3b8; font-weight:700;">Số Lượng Mã:</label>
+                <select id="qsBtTopKSelect" class="quant-select-ctrl" style="min-width:105px; padding:4px 8px; font-size:11px;">
+                  <option value="5">Top 5 Mã</option>
+                  <option value="10" selected>Top 10 Mã</option>
+                  <option value="15">Top 15 Mã</option>
+                  <option value="20">Top 20 Mã</option>
+                </select>
+              </div>
+
+              <!-- Basket Fill Mode -->
+              <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+                <label style="font-size:11px; color:#94a3b8; font-weight:700;">Chế Độ Rổ:</label>
+                <select id="qsBtFillModeSelect" class="quant-select-ctrl" style="min-width:145px; padding:4px 8px; font-size:11px;">
+                  <option value="strict" selected>🎯 Chuẩn (Đạt đủ tiêu chí)</option>
+                  <option value="fill">🧩 Fill (Lấp gần chuẩn)</option>
+                </select>
+              </div>
+
+              <!-- Initial Capital -->
+              <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+                <label style="font-size:11px; color:#94a3b8; font-weight:700;">Vốn Khởi Điểm:</label>
+                <select id="qsBtCapitalSelect" class="quant-select-ctrl" style="min-width:115px; padding:4px 8px; font-size:11px;">
+                  <option value="100000000" selected>100 Triệu</option>
+                  <option value="500000000">500 Triệu</option>
+                  <option value="1000000000">1 Tỷ VNĐ</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Quick Backtest Result KPI Cards (Rendered here without chart) -->
+            <div id="qsBtKpiContainer" style="display:none; margin-top:12px;">
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+                
+                <!-- KPI Card 1: CAGR -->
+                <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #10b981; border-radius:6px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); border-right:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">🚀 LÃI KÉP NĂM (CAGR)</div>
+                  <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#34d399; margin-top:2px;" id="qsKpiCagr">--%</div>
+                  <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="qsKpiAlphaCagr">Alpha: -- vs VN-Index</div>
+                </div>
+
+                <!-- KPI Card 2: Total Return -->
+                <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #38bdf8; border-radius:6px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); border-right:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">💰 TỔNG SINH LỜI TOÀN KỲ</div>
+                  <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#38bdf8; margin-top:2px;" id="qsKpiTotalReturn">--%</div>
+                  <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="qsKpiVniTotal">VN-Index: --%</div>
+                </div>
+
+                <!-- KPI Card 3: Max Drawdown -->
+                <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #f43f5e; border-radius:6px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); border-right:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">📉 SỤT GIẢM TỐI ĐA (MAX DD)</div>
+                  <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#f87171; margin-top:2px;" id="qsKpiMaxDd">--%</div>
+                  <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="qsKpiVol">Biến động: --%</div>
+                </div>
+
+                <!-- KPI Card 4: Sharpe & Sortino -->
+                <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #facc15; border-radius:6px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); border-right:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">⚖️ SHARPE / SORTINO RATIO</div>
+                  <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#facc15; margin-top:2px;" id="qsKpiSharpe">-- / --</div>
+                  <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;">Hiệu chỉnh rủi ro (Rf = 5%)</div>
+                </div>
+
+                <!-- KPI Card 5: Win Rate -->
+                <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #a855f7; border-radius:6px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); border-right:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">🎯 TỶ LỆ QUÝ THẮNG (WIN RATE)</div>
+                  <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#c084fc; margin-top:2px;" id="qsKpiWinRate">--%</div>
+                  <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="qsKpiQuarterCount">-- Quý mô phỏng</div>
+                </div>
+
+                <!-- KPI Card 6: Final NAV -->
+                <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #06b6d4; border-radius:6px; padding:10px 12px; border-top:1px solid rgba(255,255,255,0.06); border-right:1px solid rgba(255,255,255,0.06); border-bottom:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">💵 NAV CUỐI KỲ & LỢI NHUẬN</div>
+                  <div style="font-size:16px; font-weight:900; font-family:var(--font-mono); color:#22d3ee; margin-top:2px;" id="qsKpiFinalNav">-- VNĐ</div>
+                  <div style="font-size:10px; color:#34d399; margin-top:2px;" id="qsKpiProfit">Lợi nhuận: -- VNĐ</div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Screener Table Card -->
+        <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:8px; border:1px solid var(--border-subtle); padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <span style="font-size:13px; font-weight:800;">📋 Danh Sách Cổ Phiếu Xếp Hạng Định Lượng & Chiến Lược Phù Hợp</span>
+            <span id="quantResultsCount" style="font-size:11px; color:var(--text-muted); font-weight:700;">-- mã</span>
+          </div>
+
+          <div class="table-scroll-wrap" style="max-height:600px; overflow-y:auto;">
+            <table class="board-table sector-table quant-table">
+              <thead>
+                <tr>
+                  <th style="width:35px; text-align:center;">#</th>
+                  <th style="width:70px; text-align:center;">MÃ CK</th>
+                  <th style="min-width:140px; text-align:left;">DOANH NGHIỆP</th>
+                  <th style="width:60px; text-align:center;">SÀN</th>
+                  <th style="width:80px; text-align:right;">THỊ GIÁ</th>
+                  <th style="width:70px; text-align:right;" title="% Thay đổi giá so với đóng cửa trước">TL %</th>
+                  <th style="width:100px; text-align:center;">ĐIỂM</th>
+                  <th style="min-width:120px; text-align:left;">CHIẾN LƯỢC</th>
+                  <th style="width:75px; text-align:right;">P/E</th>
+                  <th style="width:75px; text-align:right;">P/B</th>
+                  <th style="width:75px; text-align:right;">P/S</th>
+                  <th style="width:75px; text-align:right;">PEG</th>
+                  <th style="width:75px; text-align:right;">ROE</th>
+                  <th style="width:75px; text-align:right;">D/E</th>
+                  <th style="width:80px; text-align:right;">CỔ TỨC</th>
+                  <th style="width:85px; text-align:right;">DT 5 NĂM</th>
+                  <th style="width:110px; text-align:center;">ĐỊNH GIÁ</th>
+                </tr>
+              </thead>
+              <tbody id="quantScreenerBody">
+                <tr><td colspan="17" style="text-align:center; padding:30px; color:var(--text-muted);">⏳ Đang tính toán dữ liệu phân vị...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: STRATEGY SCREENER BACKTESTING STUDIO -->
+    <div class="view-panel" id="tab_backtest">
+      <div class="sector-view-container" style="display:flex; flex-direction:column; gap:14px;">
+        
+        <!-- SUB-TAB SWITCHER (TẦNG 1 VS TẦNG 2) -->
+        <div class="board-group-tabs" style="background:#0b1120; padding:6px 10px; border-radius:8px; border:1px solid rgba(56,189,248,0.2); display:flex; flex-wrap:wrap; gap:8px;">
+          <button class="board-tab-btn active" id="btnSubtabBtPortfolio" onclick="app.switchBacktestSubtab('portfolio')" style="font-weight:800;">
+            📊 TẦNG 1: TÁI CƠ CẤU FACTOR (PORTFOLIO STUDIO)
+          </button>
+          <button class="board-tab-btn" id="btnSubtabBtInstitutional" onclick="app.switchBacktestSubtab('institutional')" style="color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.3);">
+            🔬 TẦNG 2: PHÒNG THÍ NGHIỆM ĐỊNH LƯỢNG & ĐỊNH GIÁ NỘI TẠI (INSTITUTIONAL QUANT & FAIR VALUE LAB)
+          </button>
+        </div>
+
+        <!-- TIER 1 CONTAINER: PORTFOLIO & FACTOR BACKTEST STUDIO -->
+        <div id="btPortfolioSection" style="display:flex; flex-direction:column; gap:14px;">
+        
+        <!-- 1. Header Control Strip -->
+        <div style="background:var(--bg-card); padding:16px 20px; border-radius:10px; border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+          <div>
+            <div style="font-size:16px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+              <span>🚀</span> PHÒNG THỬ NGHIỆM & ĐỐI SOÁT CHIẾN LƯỢC (QUANT BACKTEST STUDIO)
+              <span class="badge-tag" id="btCoverageBadge" style="background:rgba(16,185,129,0.18); color:#34d399; font-size:10.5px; padding:3px 8px; border-radius:4px; font-weight:800; border:1px solid rgba(16,185,129,0.4); cursor:pointer;" onclick="app.openDataLakeModal()" title="Bấm để xem chi tiết độ phủ vũ trụ cổ phiếu">
+                🟢 VŨ TRỤ DỮ LIỆU: <strong id="btPoolStatsCount">1,526 Mã BCTC</strong>
+              </span>
+            </div>
+            <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">
+              Đối soát hiệu suất thực tế 2016 – 2026: Dữ liệu nến giá khớp lệnh thật từ TradingView & Yahoo Finance cho 16 bộ lọc cổ phiếu kinh điển so với VN-Index
+            </div>
+          </div>
+          
+          <!-- Backtest Execution Buttons & Data Pool Signal -->
+          <div style="display:flex; align-items:center; gap:10px;">
+            <!-- Universal Survival Firewall Toggle (Backtest) -->
+            <div style="display:flex; align-items:center; gap:6px;" title="Bật để áp dụng bộ lọc Sinh Tồn (ROA≥10%, CR≥1.5, QR≥1.0, ICR≥2.5) cho TẤT CẢ chiến lược">
+              <label style="font-size:11px; color:#f59e0b; font-weight:700; white-space:nowrap; cursor:pointer;" for="btSurvivalToggle">🛡️ Firewall:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:36px; height:20px;">
+                <input type="checkbox" id="btSurvivalToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+              <span id="btSurvivalToggleLabel" style="font-size:10px; color:#64748b; font-weight:600;">TẮT</span>
+            </div>
+            <!-- Time Series Momentum (TSMOM 12M Trend) Toggle (Backtest) -->
+            <div style="display:flex; align-items:center; gap:6px;" title="Bật để áp dụng bộ lọc Động Lượng Chuỗi Thời Gian 12 Tháng (R_12M > 0) cho TẤT CẢ chiến lược (Giảm sụt giảm & tạo Crisis Alpha)">
+              <label style="font-size:11px; color:#06b6d4; font-weight:700; white-space:nowrap; cursor:pointer;" for="btTsmomToggle">⚡ TSMOM:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:36px; height:20px;">
+                <input type="checkbox" id="btTsmomToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+              <span id="btTsmomToggleLabel" style="font-size:10px; color:#64748b; font-weight:600;">TẮT</span>
+            </div>
+            <!-- Forensic Accounting Firewall Toggle (Backtest) -->
+            <div style="display:flex; align-items:center; gap:6px;" title="Bật để áp dụng bộ lọc Pháp Y Tài Chính & Chống Gian Lận (Piotroski F-Score ≥ 7/9 & Beneish M-Score < -1.78) cho TẤT CẢ chiến lược">
+              <label style="font-size:11px; color:#ec4899; font-weight:700; white-space:nowrap; cursor:pointer;" for="btForensicToggle">🔍 Forensic:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:36px; height:20px;">
+                <input type="checkbox" id="btForensicToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+              <span id="btForensicToggleLabel" style="font-size:10px; color:#64748b; font-weight:600;">TẮT</span>
+            </div>
+            <button class="btn-sm" id="btnRunBacktestCompare" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 16px; background:linear-gradient(135deg, #0284c7, #38bdf8); color:#0f172a; border:none; border-radius:8px; font-weight:800; box-shadow:0 0 14px rgba(56,189,248,0.4);">
+              <span>▶</span> Chạy Đối Soát Đa Chiến Lược
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. Simulation Parameters Ribbon -->
+        <div style="background:#0f172a; padding:12px 18px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; flex-wrap:wrap; gap:16px; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+          
+          <!-- Parameter 1: Time Horizon -->
+          <div class="quant-filter-field" style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:11.5px; color:#94a3b8; font-weight:700; white-space:nowrap;">Khung Thời Gian:</label>
+            <div class="backtest-pills-group" id="btHorizonGroup" style="display:inline-flex; gap:4px;">
+              <button class="bt-pill-btn" data-horizon="1">1 Năm (Gần nhất)</button>
+              <button class="bt-pill-btn" data-horizon="3">3 Năm (2023-2026)</button>
+              <button class="bt-pill-btn active" data-horizon="5">5 Năm (2021-2026)</button>
+              <button class="bt-pill-btn" data-horizon="10">10 Năm (2016-2026 Thập Kỷ)</button>
+            </div>
+          </div>
+
+          <!-- Parameter 2: Exchange Multi-Select (HOSE, HNX, UPCOM) -->
+          <div class="quant-filter-field" style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:11.5px; color:#94a3b8; font-weight:700; white-space:nowrap;">Sàn Niêm Yết:</label>
+            <div class="backtest-pills-group" id="btExchangeGroup" style="display:inline-flex; gap:4px;">
+              <button class="bt-pill-btn bt-ex-pill active" data-exchange="ALL" title="Lọc toàn bộ 3 sàn">🌐 Tất Cả</button>
+              <button class="bt-pill-btn bt-ex-pill" data-exchange="HOSE" title="Chọn sàn HOSE">🏢 HOSE</button>
+              <button class="bt-pill-btn bt-ex-pill" data-exchange="HNX" title="Chọn sàn HNX">🏛️ HNX</button>
+              <button class="bt-pill-btn bt-ex-pill" data-exchange="UPCOM" title="Chọn sàn UPCOM">⚡ UPCOM</button>
+            </div>
+          </div>
+
+          <!-- Parameter 3: Rebalance Cadence -->
+          <div class="quant-filter-field" style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:11.5px; color:#94a3b8; font-weight:700; white-space:nowrap;">Chu Kỳ Đảo Danh Mục:</label>
+            <select id="btCadenceSelect" class="quant-select-ctrl" style="min-width:140px;">
+              <option value="quarterly" selected>📅 Hàng Quý (3 tháng/lần)</option>
+              <option value="semi_annual">📅 Bán Niên (6 tháng/lần)</option>
+              <option value="annual">📅 Hàng Năm (1 năm/lần)</option>
+            </select>
+          </div>
+
+          <!-- Parameter 4: Holdings Top K -->
+          <div class="quant-filter-field" style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:11.5px; color:#94a3b8; font-weight:700; white-space:nowrap;">Số Cổ Phiếu / Danh Mục:</label>
+            <select id="btTopKSelect" class="quant-select-ctrl" style="min-width:120px;">
+              <option value="5">Top 5 Cổ Phiếu</option>
+              <option value="10" selected>Top 10 Cổ Phiếu</option>
+              <option value="15">Top 15 Cổ Phiếu</option>
+              <option value="20">Top 20 Cổ Phiếu</option>
+            </select>
+          </div>
+
+          <!-- Parameter 4b: Basket Fill Mode -->
+          <div class="quant-filter-field" style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:11.5px; color:#94a3b8; font-weight:700; white-space:nowrap;">Chế Độ Rổ:</label>
+            <select id="btFillModeSelect" class="quant-select-ctrl" style="min-width:190px;" title="Chuẩn: chỉ giữ cổ đạt đủ tiêu chí (rổ có thể ít hơn số cổ phiếu tối đa). Fill: lấp đầy rổ bằng cổ gần đạt chuẩn nhất theo đúng tiêu chí của chiến lược đó.">
+              <option value="strict" selected>🎯 Chuẩn (chỉ cổ đạt chuẩn)</option>
+              <option value="fill">🧩 Fill (lấp cổ gần chuẩn)</option>
+            </select>
+          </div>
+
+          <!-- Parameter 5: Initial Capital -->
+          <div class="quant-filter-field" style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:11.5px; color:#94a3b8; font-weight:700; white-space:nowrap;">Vốn Khởi Điểm:</label>
+            <select id="btCapitalSelect" class="quant-select-ctrl" style="min-width:130px;">
+              <option value="100000000" selected>100 Triệu VNĐ</option>
+              <option value="500000000">500 Triệu VNĐ</option>
+              <option value="1000000000">1 Tỷ VNĐ</option>
+            </select>
+          </div>
+
+          <!-- Friction Note -->
+          <span style="font-size:10.5px; color:#64748b; margin-left:auto; font-style:italic;">
+            * Đã trừ 0.15% phí & 0.10% thuế khi tái cơ cấu
+          </span>
+        </div>
+
+        <!-- 3. Winner Trophy Banner -->
+        <div id="btWinnerBanner" style="background:linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(56, 189, 248, 0.08)); border:1px solid rgba(16, 185, 129, 0.35); border-radius:10px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="font-size:28px;">🏆</span>
+            <div>
+              <div style="font-size:14px; font-weight:800; color:#34d399;" id="btWinnerTitle">QUÁN QUÂN HIỆU NĂNG: Đang tính toán...</div>
+              <div style="font-size:11.5px; color:var(--text-secondary);" id="btWinnerDesc">Chiến lược mang lại tỷ suất sinh lời vượt trội với rủi ro thấp nhất toàn chu kỳ</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px;">
+            <div style="text-align:right;">
+              <div style="font-size:10.5px; color:var(--text-muted);">CAGR (Lãi Năm)</div>
+              <div style="font-size:18px; font-weight:800; font-family:var(--font-mono); color:#34d399;" id="btWinnerCagr">--%</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:10.5px; color:var(--text-muted);">Tổng Sinh Lời</div>
+              <div style="font-size:18px; font-weight:800; font-family:var(--font-mono); color:#38bdf8;" id="btWinnerTotal">--%</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:10.5px; color:var(--text-muted);">Sharpe Ratio</div>
+              <div style="font-size:18px; font-weight:800; font-family:var(--font-mono); color:#facc15;" id="btWinnerSharpe">--</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. Leaderboard Ranking Cards Grid (Top 5 Strategies vs Benchmark) -->
+        <div class="foreign-stats-grid" id="btLeaderboardGrid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+          <!-- Populated via JS -->
+        </div>
+
+        <!-- 5. Main Equity Curves Interactive Chart Section -->
+        <div class="chart-container-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:14px; font-weight:800; color:var(--text-primary);">📈 BIỂU ĐỒ ĐƯỜNG CONG TĂNG TRƯỞNG VỐN (NAV EQUITY CURVES)</span>
+              <span class="badge-tag" style="background:rgba(56,189,248,0.15); color:#38bdf8; font-size:10.5px; padding:2px 8px; border-radius:4px; font-weight:700;" id="btChartTimeLabel">5 Năm (2021 – 2026)</span>
+            </div>
+            <!-- Interactive Chart Legend Toggles -->
+            <div id="btChartLegend" style="display:flex; align-items:center; flex-wrap:wrap; gap:10px; font-size:11px;">
+              <!-- Dynamic legend checkboxes -->
+            </div>
+          </div>
+
+          <!-- Dual Visual Canvas -->
+          <div style="position:relative; height:360px; width:100%; background:#090e17; border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.06); cursor:crosshair;">
+            <canvas id="btEquityCanvas" style="width:100%; height:100%; display:block;"></canvas>
+            <div id="btChartTooltip"></div>
+          </div>
+        </div>
+
+        <!-- 6. Year-by-Year Performance Matrix Heatmap Table -->
+        <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <div style="font-size:13px; font-weight:800; display:flex; align-items:center; gap:8px;">
+              <span>🗓️</span> MA TRẬN LỢI NHUẬN TỪNG NĂM (YEAR-BY-YEAR RETURNS MATRIX)
+            </div>
+            <span style="font-size:11px; color:var(--text-muted); font-weight:600;">So sánh hiệu năng theo từng giai đoạn thị trường</span>
+          </div>
+
+          <div class="table-scroll-wrap" style="overflow-x:auto;">
+            <table class="board-table sector-table" id="btAnnualMatrixTable" style="text-align:center;">
+              <thead>
+                <tr>
+                  <th style="text-align:left; min-width:200px;">Chiến Lược Lọc</th>
+                  <th style="width:90px;">2021</th>
+                  <th style="width:90px;">2022 (Sập)</th>
+                  <th style="width:90px;">2023</th>
+                  <th style="width:90px;">2024</th>
+                  <th style="width:90px;">2025</th>
+                  <th style="width:90px;">2026 YTD</th>
+                  <th style="width:100px; font-weight:800; color:#38bdf8;">CAGR (Năm)</th>
+                  <th style="width:105px; font-weight:800; color:#34d399;">Tổng Lãi</th>
+                  <th style="width:95px; color:#ef4444;">Max Drawdown</th>
+                  <th style="width:85px; color:#facc15;">Sharpe</th>
+                </tr>
+              </thead>
+              <tbody id="btAnnualMatrixBody">
+                <!-- Populated via JS -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- 7. Detailed Rebalancing Timeline & Holdings Inspector -->
+        <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div style="font-size:13px; font-weight:800; display:flex; align-items:center; gap:8px;">
+              <span>📋</span> NHẬT KÝ ĐẢO DANH MỤC & CỔ PHIẾU ĐƯỢC CHỌN QUA TỪNG QUÝ
+            </div>
+            
+            <div style="display:flex; align-items:center; gap:8px;">
+              <label style="font-size:11.5px; color:var(--text-muted); font-weight:700;">Xem chi tiết chiến lược:</label>
+              <select id="btInspectStrategySelect" class="quant-select-ctrl" style="min-width:230px;">
+                <optgroup label="👑 7 Huyền Thoại Đầu Tư">
+                  <option value="deep_value_klarman">💎 Deep Value (Seth Klarman)</option>
+                  <option value="ps_focus_fisher">📊 P/S Focus (Ken Fisher)</option>
+                  <option value="contrarian_dreman">🔄 Contrarian (David Dreman)</option>
+                  <option value="growth_philip_fisher">🚀 Growth (Philip Fisher)</option>
+                  <option value="peter_lynch_garp">🎯 GARP (Peter Lynch)</option>
+                  <option value="defensive_graham">🛡️ Defensive (Graham)</option>
+                  <option value="value_buffett">🏰 Moat & Value (Buffett)</option>
+                  <option value="buffetts_alpha">🏛️ Buffett's Alpha (QMJ & Value)</option>
+                  <option value="novy_marx_quality_value">🏛️ Gross Profitability & Value (Novy-Marx)</option>
+                  <option value="gray_quantitative_value_qval">🛡️ Quantitative Value - Q-VAL (Gray)</option>
+                </optgroup>
+                <optgroup label="⚡ Hello Stocks (Gốc - Loại 5 ngành)">
+                  <option value="hello_lower_risk">🌱 Hello - Lower Risk</option>
+                  <option value="hello_balanced_risk">⚖️ Hello - Balanced</option>
+                  <option value="hello_full_throttle">🔥 Hello - Full Throttle</option>
+                </optgroup>
+                <optgroup label="✨ Hello Stocks Modified (Mô hình Lai 2 Tầng)">
+                  <option value="hello_lower_risk_mod">🌱 Hello Mod: Rủi Ro Thấp (Compounders)</option>
+                  <option value="hello_balanced_risk_mod">⚖️ Hello Mod: Cân Bằng (GARP & Margin)</option>
+                  <option value="hello_full_throttle_mod">🚀 Hello Mod: Tăng Tốc (Operating Leverage)</option>
+                </optgroup>
+                <optgroup label="🛡️ Mô Hình 3 Tầng: Sinh Tồn & Con Hào Ngành">
+                  <option value="universal_survival_sector_moat">🛡️ Universal Survival & Sector Moat</option>
+                </optgroup>
+                <optgroup label="📚 The Guru Investor (Reese & Forehand)">
+                  <option value="guru_magic_formula_greenblatt">🪄 Magic Formula (Greenblatt)</option>
+                  <option value="guru_piotroski_fscore">📋 F-Score 9 Điểm (Piotroski)</option>
+                  <option value="guru_zweig_conservative_growth">📈 Conservative Growth (Zweig)</option>
+                  <option value="guru_cornerstone_growth_oshaughnessy">🏛️ Cornerstone Growth (O'Shaughnessy)</option>
+                  <option value="guru_cornerstone_value_oshaughnessy">🏦 Cornerstone Value (O'Shaughnessy)</option>
+                  <option value="guru_neff_total_return">💵 Total Return Low-P/E (Neff)</option>
+                </optgroup>
+                <optgroup label="⚡ Time Series Momentum (Moskowitz et al. 2012)">
+                  <option value="tsmom_moskowitz">⚡ Time Series Momentum (Moskowitz 2012)</option>
+                </optgroup>
+                <optgroup label="🤝 Đồng Thuận Đa Chiến Lược">
+                  <option value="guru_consensus_multi_model" selected>🤝 MULTI-STRATEGY CONSENSUS - Đồng Thuận Đa Chiến Lược</option>
+                </optgroup>
+                <optgroup label="📊 Bậc Thang 5 Phân Vị (Quintiles)">
+                  <option value="quant_q1" selected>⭐ Quant Q1: Tinh Hoa (P80-P100)</option>
+                  <option value="quant_q2">🔷 Quant Q2: Tốt (P60-P80)</option>
+                  <option value="quant_q3">🟨 Quant Q3: Trung Bình (P40-P60)</option>
+                  <option value="quant_q4">🟧 Quant Q4: Yếu (P20-P40)</option>
+                  <option value="quant_q5">⚠️ Quant Q5: Rủi Ro Cao (P0-P20)</option>
+                  <option value="vnindex">📈 VN-Index Benchmark</option>
+                </optgroup>
+              </select>
+            </div>
+          </div>
+
+          <div id="btRebalanceTimelineContainer" style="display:flex; flex-direction:column; gap:10px; max-height:480px; overflow-y:auto;">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+
+        </div> <!-- END btPortfolioSection -->
+
+        <!-- TIER 2 CONTAINER: INSTITUTIONAL QUANT LAB -->
+        <div id="btInstitutionalSection" style="display:none; flex-direction:column; gap:14px;">
+          <!-- 1. Header Control Strip -->
+          <div style="background:var(--bg-card); padding:16px 20px; border-radius:10px; border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+            <div>
+              <div style="font-size:16px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+                <span>🔬</span> PHÒNG THÍ NGHIỆM ĐỊNH LƯỢNG CHUẨN ĐỊNH CHẾ (INSTITUTIONAL QUANT LAB)
+                <span class="badge-tag" style="background:rgba(56,189,248,0.18); color:#38bdf8; font-size:10.5px; padding:3px 8px; border-radius:4px; font-weight:800; border:1px solid rgba(56,189,248,0.4);">
+                  ⚡ BAR-BY-BAR • ATR TRAILING STOP • T+2.5 • WFA • MONTE CARLO
+                </span>
+              </div>
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">
+                Kiểm định độ bền tham số, mô phỏng trượt giá thực tế, bẫy quá khớp (Overfitting Cliffs), Walk-Forward và phân phối Monte Carlo 1.000 vòng
+              </div>
+            </div>
+
+            <!-- Execution Buttons -->
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+              <button class="btn-sm" id="btnRunInstBarBacktest" onclick="app.runInstitutionalBacktest()" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 16px; background:linear-gradient(135deg, #0284c7, #38bdf8); color:#0f172a; border:none; border-radius:8px; font-weight:800; box-shadow:0 0 14px rgba(56,189,248,0.4);">
+                <span>▶</span> Chạy Bar-by-Bar
+              </button>
+              <button class="btn-sm" id="btnRunInstSensitivity" onclick="app.runInstitutionalSensitivity()" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 14px; background:rgba(234,179,8,0.15); border:1px solid #eab308; color:#facc15; border-radius:8px; font-weight:800;">
+                <span>🗺️</span> Quét Vùng Bình Nguyên
+              </button>
+              <button class="btn-sm" id="btnRunInstWfa" onclick="app.runInstitutionalWfa()" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 14px; background:rgba(168,85,247,0.15); border:1px solid #a855f7; color:#c084fc; border-radius:8px; font-weight:800;">
+                <span>🔄</span> Walk-Forward (WFA)
+              </button>
+              <button class="btn-sm" id="btnRunInstMonteCarlo" onclick="app.runInstitutionalMonteCarlo()" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 14px; background:rgba(16,185,129,0.15); border:1px solid #10b981; color:#34d399; border-radius:8px; font-weight:800;">
+                <span>🎲</span> Monte Carlo (1.000 Rounds)
+              </button>
+            </div>
+          </div>
+
+          <!-- 2. Parameter Control Strip -->
+          <div style="background:#0f172a; padding:12px 18px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; flex-wrap:wrap; gap:14px; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+            <!-- Universe / Index / Single Ticker Selector -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Vũ Trụ / Mã:</label>
+              <select id="instUniverseSelect" class="quant-select-ctrl" style="min-width:145px;" onchange="app.handleInstUniverseChange(this.value)">
+                <option value="ALL" selected>🌐 Toàn Thị Trường (1.648 Mã)</option>
+                <option value="VN30">🏆 VN30 (Bluechips)</option>
+                <option value="VN70">⚡ VN70 (Midcaps)</option>
+                <option value="HOSE">🏢 Sàn HOSE</option>
+                <option value="HNX">🏛️ Sàn HNX</option>
+                <option value="UPCOM">⚡ Sàn UPCOM</option>
+                <option value="CUSTOM_TICKER">🎯 Nhập Mã Riêng Lẻ...</option>
+              </select>
+              <input type="text" id="instSymbolInput" value="ALL" class="search-input" style="width:75px; text-transform:uppercase; font-weight:800; text-align:center; font-size:12px; padding:5px 8px; border-radius:6px; background:#1e293b; color:#38bdf8; border:1px solid rgba(56,189,248,0.4); display:none;" placeholder="Mã CP">
+            </div>
+
+            <!-- Execution Mode (Factor Only vs Valuation Only vs Hybrid Funnel) -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#facc15; font-weight:800;">Chế Độ Vận Hành:</label>
+              <select id="instExecutionModeSelect" class="quant-select-ctrl" style="min-width:240px; color:#facc15; font-weight:800;" onchange="app.handleInstExecutionModeChange(this.value)">
+                <option value="hybrid_funnel" selected>⭐ Phễu Hybrid 2 Tầng (Screener + MoS)</option>
+                <option value="valuation_only">🔬 Định Giá Nội Tại Thuần Túy (MoS Timing)</option>
+                <option value="factor_only">📊 Factor Screener Thuần Túy (32 Gurus)</option>
+              </select>
+            </div>
+
+            <!-- GROUP A: Pure Factor / Guru Strategy Selector (Shown in factor_only mode) -->
+            <div id="instFactorStrategyGroup" class="quant-filter-field" style="display:none; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#38bdf8; font-weight:700;">Chiến Lược Factor:</label>
+              <select id="instFactorStrategySelect" class="quant-select-ctrl" style="min-width:260px;">
+                <optgroup label="👑 7 Huyền Thoại Đầu Tư (Guru Screeners)">
+                  <option value="value_buffett">🏰 Moat & Value (Warren Buffett)</option>
+                  <option value="buffetts_alpha">🏛️ Buffett's Alpha (Quality & Value)</option>
+                  <option value="peter_lynch_garp" selected>🎯 GARP (Peter Lynch)</option>
+                  <option value="deep_value_klarman">💎 Deep Value (Seth Klarman)</option>
+                  <option value="ps_focus_fisher">📊 P/S Focus (Ken Fisher)</option>
+                  <option value="growth_philip_fisher">🚀 Growth (Philip Fisher)</option>
+                  <option value="contrarian_dreman">🔄 Contrarian (David Dreman)</option>
+                  <option value="defensive_graham">🛡️ Defensive (Benjamin Graham)</option>
+                  <option value="novy_marx_quality_value">🏛️ Gross Profitability (Novy-Marx)</option>
+                  <option value="gray_quantitative_value_qval">🛡️ Quantitative Value - Q-VAL (Gray)</option>
+                </optgroup>
+                <optgroup label="📚 The Guru Investor (Reese & Forehand)">
+                  <option value="guru_magic_formula_greenblatt">🪄 Magic Formula (Joel Greenblatt)</option>
+                  <option value="guru_piotroski_fscore">📋 F-Score 9 Điểm (Piotroski)</option>
+                  <option value="guru_zweig_conservative_growth">📈 Conservative Growth (Zweig)</option>
+                  <option value="guru_cornerstone_growth_oshaughnessy">🏛️ Cornerstone Growth (O'Shaughnessy)</option>
+                  <option value="guru_cornerstone_value_oshaughnessy">🏦 Cornerstone Value (O'Shaughnessy)</option>
+                  <option value="guru_neff_total_return">💵 Total Return Low-P/E (John Neff)</option>
+                </optgroup>
+                <optgroup label="⚡ Time Series Momentum (Moskowitz et al. 2012)">
+                  <option value="tsmom_moskowitz">⚡ Time Series Momentum (Moskowitz 2012)</option>
+                </optgroup>
+                <optgroup label="🤝 Đồng Thuận Đa Chiến Lược">
+                  <option value="guru_consensus_multi_model">🤝 MULTI-STRATEGY CONSENSUS</option>
+                </optgroup>
+                <optgroup label="📊 5 Bậc Thang Phân Vị (Quintiles)">
+                  <option value="quant_q1">⭐ Quant Q1: Tinh Hoa (P80 - P100)</option>
+                  <option value="quant_q2">🔷 Quant Q2: Tốt (P60 - P80)</option>
+                  <option value="quant_q3">🟨 Quant Q3: Trung Bình (P40 - P60)</option>
+                  <option value="quant_q4">🟧 Quant Q4: Yếu (P20 - P40)</option>
+                  <option value="quant_q5">⚠️ Quant Q5: Rủi Ro Cao (P0 - P20)</option>
+                </optgroup>
+                <optgroup label="⚡ Hello Stocks (Gốc & Modified)">
+                  <option value="hello_lower_risk_mod">🌱 Hello Mod: Rủi Ro Thấp (Compounders)</option>
+                  <option value="hello_balanced_risk_mod">⚖️ Hello Mod: Cân Bằng (GARP & Margin)</option>
+                  <option value="hello_full_throttle_mod">🚀 Hello Mod: Tăng Tốc (Operating Leverage)</option>
+                  <option value="hello_lower_risk">🌱 Hello - Lower Risk</option>
+                  <option value="hello_balanced_risk">⚖️ Hello - Balanced</option>
+                  <option value="hello_full_throttle">🔥 Hello - Full Throttle</option>
+                </optgroup>
+                <optgroup label="🛡️ Mô Hình Sinh Tồn">
+                  <option value="universal_survival_sector_moat">🛡️ Universal Survival & Sector Moat</option>
+                </optgroup>
+                <optgroup label="📈 Kỹ Thuật Nến & Động Lượng (Bar-by-Bar)">
+                  <option value="trend_following_atr">📈 Trend Following MA + ATR</option>
+                  <option value="breakout_donchian">💥 Donchian Channel Breakout</option>
+                  <option value="supertrend_atr">⚡ SuperTrend ATR Direction</option>
+                  <option value="tsmom_daily">🚀 Time Series Momentum (60D)</option>
+                </optgroup>
+                <optgroup label="📈 Benchmark Thị Trường">
+                  <option value="vnindex">📈 VN-Index Benchmark (Buy & Hold)</option>
+                </optgroup>
+              </select>
+            </div>
+
+            <!-- GROUP B: Pure Valuation Model Selector (Shown in valuation_only mode) -->
+            <div id="instValModelGroup" class="quant-filter-field" style="display:none; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#facc15; font-weight:700;">Mô Hình Định Giá:</label>
+              <select id="instValModelSelect" class="quant-select-ctrl" style="min-width:260px;">
+                <option value="composite_fair_value" selected>⭐ Composite Tổng Hợp (22 Mô Hình Định Giá)</option>
+                <option value="blended_pe">🔬 Blended P/E (TTM + Forward + CAPE)</option>
+                <option value="ps_margin_adj">🔬 P/S Điều Chỉnh Biên LN (Ken Fisher)</option>
+                <option value="p_fcf">🔬 Price-to-FCF Yield Dòng Tiền Tự Do</option>
+                <option value="pb_rhodes_kropf">🔬 P/B với Bộ Lọc Rhodes-Kropf (RKV)</option>
+                <option value="p_tbv">🔬 Price-to-Tangible Book (P/TBV)</option>
+                <option value="ev_ebitda">🔬 Blended EV/EBITDA Doanh Nghiệp</option>
+                <option value="p_cf">🔬 Price-to-Operating Cash Flow (P/CF)</option>
+                <option value="p_affo">🔬 Price-to-AFFO Multiple (P/AFFO)</option>
+                <option value="dcf_2stage_mckinsey">🔬 Extended 2-Stage McKinsey DCF (ROIC)</option>
+                <option value="rim_edwards_bell_ohlson">🔬 Residual Income Model (RIM / EBO)</option>
+                <option value="greenwald_epv">🔬 Greenwald Earnings Power Value (EPV)</option>
+                <option value="graham_growth">🔬 Modern Graham Growth Formula</option>
+                <option value="rule_of_40_growth">🔬 Rule of 40 / Rule of 65 Super-Stock</option>
+                <option value="acquirers_multiple_ev_ebit">🔬 Acquirer's Multiple (EV/EBIT Carlisle)</option>
+                <option value="buffett_owners_earnings">🔬 Warren Buffett Owner's Earnings DCF</option>
+                <option value="bank_equity_cash_flow">🔬 Banking Equity Cash Flow (Ngân Hàng)</option>
+                <option value="reit_affo_dcf">🔬 REIT & Quỹ Đất RNAV (Bất Động Sản)</option>
+                <option value="industrial_apv">🔬 Industrial Adjusted Present Value APV</option>
+                <option value="consumer_eva_mva">🔬 Consumer EVA/MVA (Bán Lẻ/Tiêu Dùng)</option>
+                <option value="utilities_3stage_ddm">🔬 3-Stage DDM Chiết Khấu Cổ Tức (Điện/Nước)</option>
+                <option value="pharma_rnpv">🔬 Pharma Risk-Adjusted NPV (Dược Phẩm)</option>
+                <option value="telecom_unbundled_sotp">🔬 Telecom Unbundled SOTP & RAB (Viễn Thông)</option>
+              </select>
+            </div>
+
+            <!-- GROUP C: 2-Stage Hybrid Funnel Selectors (Shown in hybrid_funnel mode) -->
+            <div id="instStage1ScreenerGroup" class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#38bdf8; font-weight:800;">Tầng 1 (Lọc Factor):</label>
+              <select id="instStage1ScreenerSelect" class="quant-select-ctrl" style="min-width:210px; color:#38bdf8; font-weight:700;">
+                <option value="peter_lynch_garp" selected>🎯 GARP (Peter Lynch)</option>
+                <option value="value_buffett">🏰 Moat & Value (Warren Buffett)</option>
+                <option value="buffetts_alpha">🏛️ Buffett's Alpha (Quality & Value)</option>
+                <option value="deep_value_klarman">💎 Deep Value (Seth Klarman)</option>
+                <option value="guru_magic_formula_greenblatt">🪄 Magic Formula (Joel Greenblatt)</option>
+                <option value="guru_piotroski_fscore">📋 F-Score 9 Điểm (Piotroski)</option>
+                <option value="novy_marx_quality_value">🏛️ Gross Profitability (Novy-Marx)</option>
+                <option value="gray_quantitative_value_qval">🛡️ Quantitative Value (Q-VAL)</option>
+                <option value="quant_q1">⭐ Quant Q1: Tinh Hoa (P80-P100)</option>
+                <option value="quant_q2">🔷 Quant Q2: Tốt (P60-P80)</option>
+                <option value="hello_balanced_risk_mod">⚖️ Hello Mod: Cân Bằng (GARP)</option>
+                <option value="ps_focus_fisher">📊 P/S Focus (Ken Fisher)</option>
+                <option value="growth_philip_fisher">🚀 Growth (Philip Fisher)</option>
+                <option value="contrarian_dreman">🔄 Contrarian (David Dreman)</option>
+                <option value="defensive_graham">🛡️ Defensive (Benjamin Graham)</option>
+                <option value="guru_zweig_conservative_growth">📈 Conservative Growth (Zweig)</option>
+                <option value="guru_cornerstone_growth_oshaughnessy">🏛️ Cornerstone Growth (O'Shaughnessy)</option>
+                <option value="guru_cornerstone_value_oshaughnessy">🏦 Cornerstone Value (O'Shaughnessy)</option>
+                <option value="guru_neff_total_return">💵 Total Return Low-P/E (Neff)</option>
+                <option value="tsmom_moskowitz">⚡ Time Series Momentum (Moskowitz)</option>
+                <option value="guru_consensus_multi_model">🤝 Multi-Strategy Consensus</option>
+                <option value="universal_survival_sector_moat">🛡️ Universal Survival Moat</option>
+              </select>
+            </div>
+
+            <div id="instStage2ValModelGroup" class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#facc15; font-weight:800;">Tầng 2 (Mô Hình Định Giá):</label>
+              <select id="instStage2ValModelSelect" class="quant-select-ctrl" style="min-width:210px; color:#facc15; font-weight:700;">
+                <option value="composite_fair_value" selected>⭐ Composite Tổng Hợp (22 Models)</option>
+                <option value="buffett_owners_earnings">🔬 Warren Buffett Owner's Earnings</option>
+                <option value="dcf_2stage_mckinsey">🔬 Extended McKinsey DCF (ROIC)</option>
+                <option value="greenwald_epv">🔬 Greenwald Earnings Power Value (EPV)</option>
+                <option value="pb_rhodes_kropf">🔬 P/B Rhodes-Kropf (RKV)</option>
+                <option value="acquirers_multiple_ev_ebit">🔬 Acquirer's Multiple (EV/EBIT)</option>
+                <option value="blended_pe">🔬 Blended P/E (TTM + Forward)</option>
+                <option value="rim_edwards_bell_ohlson">🔬 Residual Income Model (RIM)</option>
+                <option value="graham_growth">🔬 Graham Growth Formula</option>
+                <option value="p_fcf">🔬 Price-to-FCF Yield</option>
+                <option value="ev_ebitda">🔬 Blended EV/EBITDA</option>
+                <option value="ps_margin_adj">🔬 P/S Margin-Adjusted</option>
+                <option value="p_tbv">🔬 Price-to-Tangible Book</option>
+                <option value="bank_equity_cash_flow">🔬 Banking Equity Cash Flow</option>
+                <option value="reit_affo_dcf">🔬 REIT & RNAV Bất Động Sản</option>
+              </select>
+            </div>
+
+            <!-- Time Horizon -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Khung:</label>
+              <select id="instHorizonSelect" class="quant-select-ctrl" style="min-width:105px;">
+                <option value="1">1 Năm</option>
+                <option value="2">2 Năm</option>
+                <option value="3" selected>3 Năm</option>
+                <option value="5">5 Năm</option>
+                <option value="10">10 Năm (2016-2026)</option>
+              </select>
+            </div>
+
+            <!-- Holdings Top K -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Số CP (Top K):</label>
+              <select id="instTopKSelect" class="quant-select-ctrl" style="min-width:85px;">
+                <option value="5">5 Mã</option>
+                <option value="10" selected>10 Mã</option>
+                <option value="15">15 Mã</option>
+                <option value="20">20 Mã</option>
+              </select>
+            </div>
+
+            <!-- Rebalance Cadence -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Chu Kỳ Đảo:</label>
+              <select id="instCadenceSelect" class="quant-select-ctrl" style="min-width:115px;">
+                <option value="quarterly" selected>📅 Hàng Quý</option>
+                <option value="semi_annual">📅 Bán Niên</option>
+                <option value="annual">📅 Hàng Năm</option>
+              </select>
+            </div>
+
+            <!-- Fill Mode (Strict vs Near-Miss) -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="Chế độ lấp đầy rổ cổ phiếu nếu số mã đạt chuẩn ít hơn Top K">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Lấp Chỗ:</label>
+              <select id="instFillModeSelect" class="quant-select-ctrl" style="min-width:110px;">
+                <option value="strict" selected>🎯 Nghiêm Ngặt</option>
+                <option value="near_miss">🧩 Lấp Gần Chuẩn</option>
+              </select>
+            </div>
+
+            <!-- Universal Survival Firewall Toggle -->
+            <div style="display:flex; align-items:center; gap:6px;" title="Áp dụng bộ lọc Sinh Tồn (ROA≥10%, CR≥1.5, QR≥1.0, ICR≥2.5)">
+              <label style="font-size:11px; color:#f59e0b; font-weight:700; cursor:pointer;" for="instSurvivalToggle">🛡️ Firewall:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="instSurvivalToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+
+            <!-- Universal TSMOM 12M Trend Toggle -->
+            <div style="display:flex; align-items:center; gap:6px;" title="Áp dụng bộ lọc Xu hướng Động lượng 12 Tháng (R_12M > 0)">
+              <label style="font-size:11px; color:#06b6d4; font-weight:700; cursor:pointer;" for="instTsmomToggle">⚡ TSMOM:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="instTsmomToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+
+            <!-- Universal Forensic Accounting Firewall Toggle (Piotroski F-Score >= 7 & Beneish M-Score < -1.78) -->
+            <div style="display:flex; align-items:center; gap:6px;" title="Áp dụng bộ lọc Pháp Y Tài Chính & Chống Gian Lận (Piotroski F-Score ≥ 7/9 & Beneish M-Score < -1.78)">
+              <label style="font-size:11px; color:#ec4899; font-weight:700; cursor:pointer;" for="instForensicToggle">🔍 Forensic:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="instForensicToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+
+            <!-- Risk Per Trade % -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="Rủi ro tối đa trên vốn cho 1 lệnh cắt lỗ">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Rủi Ro:</label>
+              <select id="instRiskSelect" class="quant-select-ctrl" style="min-width:85px;">
+                <option value="1.0">1.0%</option>
+                <option value="1.5" selected>1.5%</option>
+                <option value="2.0">2.0%</option>
+                <option value="3.0">3.0%</option>
+              </select>
+            </div>
+
+            <!-- ATR Stop Multiplier -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">ATR Stop:</label>
+              <select id="instAtrStopSelect" class="quant-select-ctrl" style="min-width:85px;">
+                <option value="1.5">1.5 ×</option>
+                <option value="2.0">2.0 ×</option>
+                <option value="2.5" selected>2.5 ×</option>
+                <option value="3.0">3.0 ×</option>
+                <option value="3.5">3.5 ×</option>
+              </select>
+            </div>
+
+            <!-- Friction Tag -->
+            <span style="font-size:10.5px; color:#64748b; margin-left:auto; font-style:italic;">
+              * T+2.5 Settlement • Phí 0.15% • Thuế 0.10% • Trượt giá 0.10%
+            </span>
+          </div>
+
+          <!-- 2B. Valuation & MoS Advanced Controls Strip (Active for Valuation & Hybrid Models) -->
+          <div id="instValuationControlStrip" style="background:#090e17; padding:10px 18px; border-radius:8px; border:1px solid rgba(250,204,21,0.25); display:flex; align-items:center; flex-wrap:wrap; gap:14px; box-shadow:0 2px 8px rgba(0,0,0,0.3);">
+            <span style="font-size:11.5px; font-weight:800; color:#facc15; display:flex; align-items:center; gap:4px;">
+              <span>⭐</span> Tham Số Định Giá:
+            </span>
+
+            <!-- Margin of Safety (MoS) % -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#34d399; font-weight:700;">Biên An Toàn (MoS):</label>
+              <select id="instMosSelect" class="quant-select-ctrl" style="min-width:90px; color:#34d399; font-weight:700; border-color:rgba(52,211,153,0.3);">
+                <option value="5">≥ 5%</option>
+                <option value="10">≥ 10%</option>
+                <option value="15" selected>≥ 15%</option>
+                <option value="20">≥ 20%</option>
+                <option value="25">≥ 25%</option>
+                <option value="30">≥ 30%</option>
+                <option value="35">≥ 35%</option>
+              </select>
+            </div>
+
+            <!-- Composite Engine Mode (Blended vs Omnibus) -->
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#facc15; font-weight:700;">Động Cơ Composite:</label>
+              <select id="instCompositeModeSelect" class="quant-select-ctrl" style="min-width:180px; color:#facc15; font-weight:700;" onchange="app.toggleInstOmnibusMetricSelect()">
+                <option value="blended" selected>🏛️ Blended (Cơ Cấu Ngành)</option>
+                <option value="omnibus">⚙️ Omnibus (Tối Ưu Sai Số)</option>
+              </select>
+            </div>
+
+            <!-- Omnibus Loss Metric Selector -->
+            <div id="instOmnibusMetricGroup" class="quant-filter-field" style="display:none; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#c084fc; font-weight:700;">Thước Đo Sai Số:</label>
+              <select id="instOmnibusMetricSelect" class="quant-select-ctrl" style="min-width:150px; color:#c084fc; font-weight:700;">
+                <option value="smape" selected>SMAPE (Symmetric %)</option>
+                <option value="male">MALE (Log Error)</option>
+                <option value="wmape">WMAPE (Weighted %)</option>
+                <option value="rmsle">RMSLE (Root Log)</option>
+                <option value="ivw">IVW (Scale-Free)</option>
+              </select>
+            </div>
+
+            <!-- Dynamic Beta MoS Toggle -->
+            <div style="display:flex; align-items:center; gap:5px;" title="Tự động nhân hệ số Downside Beta (β-) để đòi hỏi biên chiết khấu sâu hơn với cổ phiếu biến động mạnh">
+              <label style="font-size:11px; color:#38bdf8; font-weight:700; cursor:pointer;" for="instDynamicMosToggle">⚡ Dynamic β-:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:30px; height:16px;">
+                <input type="checkbox" id="instDynamicMosToggle" checked style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+
+            <!-- RKV Value Trap Filter Toggle -->
+            <div style="display:flex; align-items:center; gap:5px;" title="Loại bỏ bẫy giá trị Rhodes-Kropf (V/B < 1.0 - Doanh nghiệp rẻ vì đang phá hủy vốn)">
+              <label style="font-size:11px; color:#ec4899; font-weight:700; cursor:pointer;" for="instRkvToggle">🚫 RKV Trap:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:30px; height:16px;">
+                <input type="checkbox" id="instRkvToggle" checked style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 3. KPI Metrics Grid -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:10px;" id="instKpiGrid">
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #10b981; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">🚀 LÃI KÉP NĂM (CAGR)</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#34d399; margin-top:2px;" id="instKpiCagr">--%</div>
+              <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="instKpiBenchmarkCagr">Buy & Hold: --%</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #38bdf8; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">💰 TỔNG LỢI NHUẬN</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#38bdf8; margin-top:2px;" id="instKpiTotalReturn">--%</div>
+              <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="instKpiFinalNav">NAV: -- VNĐ</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #f43f5e; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">📉 SỤT GIẢM TỐI ĐA (MAX DD)</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#f87171; margin-top:2px;" id="instKpiMaxDd">--%</div>
+              <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="instKpiUlcer">Ulcer Index: --</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #facc15; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">⚖️ SHARPE / SORTINO / CALMAR</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#facc15; margin-top:2px;" id="instKpiSharpe">-- / --</div>
+              <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="instKpiCalmar">Calmar: --</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #a855f7; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">🎯 WIN RATE & PROFIT FACTOR</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#c084fc; margin-top:2px;" id="instKpiWinRate">--% (PF: --)</div>
+              <div style="font-size:10px; color:var(--text-secondary); margin-top:2px;" id="instKpiTradesCount">-- Lệnh (Payoff: --)</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #06b6d4; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">💸 MA SÁT & VỌNG LÃI/LỆNH</div>
+              <div style="font-size:16px; font-weight:900; font-family:var(--font-mono); color:#22d3ee; margin-top:2px;" id="instKpiExpectancy">-- VNĐ/lệnh</div>
+              <div style="font-size:10px; color:#94a3b8; margin-top:2px;" id="instKpiFriction">Tổng ma sát: -- VNĐ</div>
+            </div>
+          </div>
+
+          <!-- 3b. Fundamental Law of Active Management (Grinold & Kahn: IR ≈ TC × IC × √BR) -->
+          <div class="fundamental-law-card" style="background:linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.90)); border-radius:10px; border:1px solid rgba(56, 189, 248, 0.35); padding:16px; display:flex; flex-direction:column; gap:12px; box-shadow:0 4px 16px rgba(0,0,0,0.4);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:22px;">⚖️</span>
+                <div>
+                  <div style="font-size:13.5px; font-weight:900; color:#38bdf8; letter-spacing:0.3px;">
+                    ĐỊNH LUẬT CƠ BẢN CỦA QUẢN LÝ DANH MỤC TÍCH CỰC (THE FUNDAMENTAL LAW OF ACTIVE MANAGEMENT)
+                  </div>
+                  <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
+                    Mô hình chuẩn hóa Richard Grinold & Ronald Kahn: <strong class="mono" style="color:#facc15; font-size:12px;">IR ≈ TC × IC × √BR</strong> (Định lượng hóa nguồn gốc sinh Alpha)
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span id="flOverallBadge" class="badge-tag badge-success" style="font-size:11px; font-weight:800; padding:4px 10px;">
+                  Đang tính toán...
+                </span>
+              </div>
+            </div>
+
+            <!-- 4 Pillar Core Cards -->
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:10px;">
+              
+              <!-- Pillar 1: Information Ratio (IR) -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; border-left:3px solid #10b981;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:11px; font-weight:800; color:#34d399;">① TỶ SUẤT THÔNG TIN (IR)</span>
+                  <span id="flIrBadge" class="badge-tag" style="font-size:9.5px; font-weight:700;">--</span>
+                </div>
+                <div style="font-size:22px; font-weight:900; font-family:var(--font-mono); color:#10b981; margin:4px 0;" id="flIrValue">
+                  --
+                </div>
+                <div style="font-size:10.5px; color:#94a3b8; line-height:1.35;">
+                  Active Return: <strong id="flActiveReturn" class="mono txt-up">--%</strong> / Tracking Error: <strong id="flTrackingError" class="mono">--%</strong>
+                </div>
+                <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                  * Thang đo: ≤0 (Tệ) • 0.3-0.5 (Chuẩn Quỹ) • 0.5-0.75 (Tốt) • ≥1.0 (Đẳng Cấp Thế Giới)
+                </div>
+              </div>
+
+              <!-- Pillar 2: Information Coefficient (IC) -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; border-left:3px solid #38bdf8;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:11px; font-weight:800; color:#38bdf8;">② HỆ SỐ THÔNG TIN (IC)</span>
+                  <span id="flIcBadge" class="badge-tag" style="font-size:9.5px; font-weight:700;">--</span>
+                </div>
+                <div style="font-size:22px; font-weight:900; font-family:var(--font-mono); color:#38bdf8; margin:4px 0;" id="flIcValue">
+                  --
+                </div>
+                <div style="font-size:10.5px; color:#94a3b8; line-height:1.35;">
+                  Đo lường kỹ năng dự báo tương quan rank (Spearman Rank Corr). IC_IR: <strong id="flIcIr" class="mono">--</strong>
+                </div>
+                <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                  * Thang đo: &lt;0 (Lệch) • 0.01-0.03 (Quant Base) • 0.05-0.08 (Tốt) • &gt;0.10 (Xuất Sắc/Hiếm)
+                </div>
+              </div>
+
+              <!-- Pillar 3: Breadth (BR) -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; border-left:3px solid #facc15;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:11px; font-weight:800; color:#facc15;">③ ĐỘ RỘNG DANH MỤC (BR)</span>
+                  <span id="flBrBadge" class="badge-tag" style="font-size:9.5px; font-weight:700;">--</span>
+                </div>
+                <div style="font-size:22px; font-weight:900; font-family:var(--font-mono); color:#facc15; margin:4px 0;" id="flBrValue">
+                  -- <span style="font-size:12px; font-weight:600; color:#94a3b8;">cược/năm</span>
+                </div>
+                <div style="font-size:10.5px; color:#94a3b8; line-height:1.35;">
+                  Số cược độc lập: N_eff = <strong id="flNeff" class="mono">--</strong> (Hiệu chỉnh tương quan ngành ρ=0.35) • √BR = <strong id="flSqrtBr" class="mono">--</strong>
+                </div>
+                <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                  * Càng mở rộng cược độc lập, sức mạnh toán học √BR càng nhân rộng Alpha.
+                </div>
+              </div>
+
+              <!-- Pillar 4: Transfer Coefficient (TC) -->
+              <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.08); border-radius:8px; padding:12px; border-left:3px solid #c084fc;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                  <span style="font-size:11px; font-weight:800; color:#c084fc;">④ HỆ SỐ CHUYỂN ĐỔI (TC)</span>
+                  <span id="flTcBadge" class="badge-tag" style="font-size:9.5px; font-weight:700;">--</span>
+                </div>
+                <div style="font-size:22px; font-weight:900; font-family:var(--font-mono); color:#c084fc; margin:4px 0;" id="flTcValue">
+                  -- <span style="font-size:12px; font-weight:600; color:#94a3b8;">(Hiệu suất: <span id="flEfficiency">--%</span>)</span>
+                </div>
+                <div style="font-size:10.5px; color:#94a3b8; line-height:1.35;">
+                  Chuyển hóa tín hiệu sau ràng buộc Long-only (cấm bán khống), phí thuế $0.25\%$ & T+2.5
+                </div>
+                <div style="font-size:9.5px; color:var(--text-muted); margin-top:4px;">
+                  * Thang đo: &lt;0.3 (Gò Bó) • 0.3-0.5 (Chuẩn Long-Only) • 0.7-0.9 (Long/Short) • 1.0 (Lý Thuyết)
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Synthesis & Actionable Quant Advice -->
+            <div style="background:rgba(0,0,0,0.3); border-radius:6px; padding:10px 14px; border:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div style="display:flex; align-items:center; gap:8px; font-size:11px; color:#cbd5e1;">
+                <span style="font-size:14px;">💡</span>
+                <span><strong>Đánh Giá Chiến Lược:</strong> <span id="flRecommendation">Đang phân tích dữ liệu...</span></span>
+              </div>
+              <div style="font-size:11px; color:#94a3b8; display:flex; gap:14px;">
+                <span>IR Lý Thuyết (Unconstrained): <strong id="flIrUnconstrained" class="mono" style="color:#38bdf8;">--</strong></span>
+                <span>IR Ràng Buộc (Constrained): <strong id="flIrConstrained" class="mono" style="color:#34d399;">--</strong></span>
+              </div>
+            </div>
+
+            <div id="flOverfitWarningBox" style="display:none; background:rgba(244,63,94,0.15); border:1px solid rgba(244,63,94,0.4); border-radius:6px; padding:8px 12px; font-size:11px; color:#f87171;">
+              <!-- Warning rendered dynamically -->
+            </div>
+          </div>
+
+          <!-- 4. Interactive Candlestick / NAV Equity Canvas -->
+          <div class="chart-container-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:14px; font-weight:800; color:var(--text-primary);">📈 ĐƯỜNG CONG TĂNG TRƯỞNG VỐN & ĐIỂM VÀO/CẮT LỖ (DAILY NAV & ATR STOPS)</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-secondary);">
+                <span style="display:inline-block; width:10px; height:10px; background:#38bdf8; border-radius:2px;"></span> NAV Chiến Lược
+                <span style="display:inline-block; width:10px; height:10px; background:#94a3b8; border-radius:2px; margin-left:8px;"></span> Buy & Hold
+                <span style="display:inline-block; width:10px; height:10px; background:#f43f5e; border-radius:2px; margin-left:8px;"></span> ATR Trailing Stop
+              </div>
+            </div>
+            <div style="position:relative; height:340px; width:100%; background:#090e17; border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.06); cursor:crosshair;">
+              <canvas id="instEquityCanvas" style="width:100%; height:100%; display:block;"></canvas>
+              <div id="instChartTooltip"></div>
+            </div>
+          </div>
+
+          <!-- 5. Advanced Validation Modules Container (Plateau, WFA, Monte Carlo) -->
+          <div id="instValidationContainer" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:14px;">
+            <!-- Box 1: Sensitivity Plateau Heatmap Canvas -->
+            <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div style="font-size:13px; font-weight:800; color:#facc15; display:flex; align-items:center; gap:6px;">
+                  <span>🗺️</span> BẢN ĐỒ NHIỆT VÙNG BÌNH NGUYÊN (PLATEAU HEATMAP)
+                </div>
+                <span id="instPlateauBadge" class="badge-tag" style="background:rgba(234,179,8,0.15); color:#facc15; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">Chờ quét</span>
+              </div>
+              <div id="instPlateauDesc" style="font-size:11px; color:var(--text-secondary); margin-bottom:10px;">
+                Nhận diện vùng thông số ổn định (Plateau) và phát hiện bẫy quá khớp (Overfitted Cliffs).
+              </div>
+              <div style="height:220px; width:100%; background:#090e17; border-radius:6px; overflow:hidden; border:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center;">
+                <canvas id="instPlateauCanvas" style="width:100%; height:100%; display:block;"></canvas>
+              </div>
+            </div>
+
+            <!-- Box 2: Walk-Forward Analysis (WFA) Multi-Window Timeline -->
+            <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div style="font-size:13px; font-weight:800; color:#c084fc; display:flex; align-items:center; gap:6px;">
+                  <span>🔄</span> WALK-FORWARD ANALYSIS (WFA)
+                </div>
+                <span id="instWfaBadge" class="badge-tag" style="background:rgba(168,85,247,0.15); color:#c084fc; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">Chờ chạy</span>
+              </div>
+              <div id="instWfaDesc" style="font-size:11px; color:var(--text-secondary); margin-bottom:10px;">
+                Tối ưu hóa In-Sample trượt và kiểm định Out-of-Sample liên tục để đo lường độ bền thực tế.
+              </div>
+              <div id="instWfaTimeline" style="display:flex; flex-direction:column; gap:6px; max-height:220px; overflow-y:auto; font-size:11px;">
+                <div style="color:var(--text-muted); text-align:center; padding:30px 0;">Bấm "Walk-Forward (WFA)" để chạy phân tích đa chu kỳ</div>
+              </div>
+            </div>
+
+            <!-- Box 3: Monte Carlo 95% Confidence Interval & Bell Curve -->
+            <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px; grid-column: 1 / -1;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div style="font-size:13px; font-weight:800; color:#34d399; display:flex; align-items:center; gap:6px;">
+                  <span>🎲</span> KIỂM ĐỊNH ÁP LỰC MONTE CARLO (1.000 BOOTSTRAP & 1.000 PERMUTATIONS)
+                </div>
+                <span id="instMcBadge" class="badge-tag" style="background:rgba(16,185,129,0.15); color:#34d399; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">Chờ chạy</span>
+              </div>
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+                <div style="background:#090e17; padding:12px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size:11.5px; font-weight:800; color:#38bdf8; margin-bottom:6px;">🎯 Khoảng Tin Cậy 95% (Bootstrap CI)</div>
+                  <div style="display:flex; flex-direction:column; gap:6px; font-size:11px;">
+                    <div style="display:flex; justify-content:space-between;"><span>Sharpe Ratio (95% CI):</span> <strong id="mcCiSharpe" class="mono txt-up">-- đến --</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span>Tổng Lợi Nhuận (95% CI):</span> <strong id="mcCiReturn" class="mono txt-up">-- đến --</strong></div>
+                    <div style="display:flex; justify-content:space-between;"><span>Max Drawdown (95% CI):</span> <strong id="mcCiMaxDd" class="mono txt-down">-- đến --</strong></div>
+                  </div>
+                  <div style="font-size:11.5px; font-weight:800; color:#f87171; margin-top:12px; margin-bottom:6px;">⚠️ Rủi Ro Thứ Tự Chuỗi Lệnh (Permutation Test)</div>
+                  <div style="font-size:11px; color:var(--text-secondary);" id="mcPermDesc">--</div>
+                </div>
+                <div style="height:160px; background:#090e17; border-radius:8px; border:1px solid rgba(255,255,255,0.06); padding:8px;">
+                  <canvas id="instMcCanvas" style="width:100%; height:100%; display:block;"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 6. Detailed Trade Execution Log -->
+          <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:10px; border:1px solid var(--border-subtle); padding:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div style="font-size:13px; font-weight:800; display:flex; align-items:center; gap:8px;">
+                <span>📋</span> SỔ LỆNH KHỚP CHI TIẾT (TRADE EXECUTION LOG)
+              </div>
+              <span id="instTradesCountBadge" style="font-size:11px; color:var(--text-muted); font-weight:700;">-- lệnh</span>
+            </div>
+            <div class="table-scroll-wrap" style="max-height:360px; overflow-y:auto;">
+              <table class="board-table sector-table" style="text-align:center; font-size:11.5px;">
+                <thead>
+                  <tr>
+                    <th style="width:40px;">#</th>
+                    <th style="width:70px;">Mã CP</th>
+                    <th style="width:100px;">Ngày Mua</th>
+                    <th style="width:85px; text-align:right;">Giá Mua</th>
+                    <th style="width:100px;">Ngày Bán</th>
+                    <th style="width:85px; text-align:right;">Giá Bán</th>
+                    <th style="width:80px; text-align:right;">Số Lượng</th>
+                    <th style="width:70px;">Số Ngày</th>
+                    <th style="text-align:left;">Lý Do Thoát Lệnh</th>
+                    <th style="width:110px; text-align:right;">Lãi/Lỗ (VNĐ)</th>
+                    <th style="width:75px; text-align:right;">% PnL</th>
+                  </tr>
+                </thead>
+                <tbody id="instTradesTableBody">
+                  <!-- Populated via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div> <!-- END btInstitutionalSection -->
+
+      </div>
+    </div>
+
+    <!-- TAB 4: SECTOR HEATMAP & TREEMAP -->
+    <div class="view-panel" id="tab_treemap">
+      <div class="treemap-view-container" id="treemapContainer">
+        <!-- Rendered via MarketTreemap -->
+      </div>
+    </div>
+
+    <!-- TAB 5: FOREIGN INVESTOR FLOW -->
+    <div class="view-panel" id="tab_foreign">
+      <div class="foreign-view-container">
+        
+        <div class="foreign-stats-grid">
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Tổng Khối Ngoại Mua</span>
+            <span class="f-stat-num mono txt-up" id="fTotalBuy">-- tỷ</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Tổng Khối Ngoại Bán</span>
+            <span class="f-stat-num mono txt-down" id="fTotalSell">-- tỷ</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Giá Trị Mua/Bán Ròng</span>
+            <span class="f-stat-num mono" id="fNetFlow">-- tỷ</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Tỷ Trọng Giao Dịch Ngoại</span>
+            <span class="f-stat-num mono txt-blue" id="fRatio">--%</span>
+          </div>
+        </div>
+
+        <div class="foreign-tables-grid">
+          <div class="foreign-table-card">
+            <div class="foreign-table-title txt-up">
+              <span>🟢</span> Top 10 Cổ Phiếu Khối Ngoại Mua Ròng
+            </div>
+            <table class="trading-board-table" style="text-align:right;">
+              <thead>
+                <tr>
+                  <th style="width:30px;">#</th>
+                  <th style="text-align:left;">Mã</th>
+                  <th>Giá</th>
+                  <th>%</th>
+                  <th>Mua Ròng</th>
+                  <th>Room</th>
+                </tr>
+              </thead>
+              <tbody id="foreignBuyTable"></tbody>
+            </table>
+          </div>
+
+          <div class="foreign-table-card">
+            <div class="foreign-table-title txt-down">
+              <span>🔴</span> Top 10 Cổ Phiếu Khối Ngoại Bán Ròng
+            </div>
+            <table class="trading-board-table" style="text-align:right;">
+              <thead>
+                <tr>
+                  <th style="width:30px;">#</th>
+                  <th style="text-align:left;">Mã</th>
+                  <th>Giá</th>
+                  <th>%</th>
+                  <th>Bán Ròng</th>
+                  <th>Room</th>
+                </tr>
+              </thead>
+              <tbody id="foreignSellTable"></tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB: PHÂN TÍCH CHỈ SỐ NGÀNH ICB & SÓNG NGÀNH -->
+    <div class="view-panel" id="tab_sectors">
+      <div class="sectors-view-container" style="display:flex; flex-direction:column; gap:12px; padding:4px;">
+        
+        <!-- Header Strip -->
+        <div class="sectors-header-strip" style="display:flex; justify-content:space-between; align-items:center; background:var(--bg-card); padding:12px 16px; border-radius:8px; border:1px solid var(--border-subtle);">
+          <div>
+            <div style="font-size:15px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+              <span>🌐</span> BẢNG ĐIỀU KHIỂN CHỈ SỐ NGÀNH CHUẨN QUỐC TẾ ICB
+              <span class="badge-tag" style="background:rgba(56,189,248,0.15); color:#38bdf8; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">HOSE SECTOR INDICES</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">
+              Phân tích sức mạnh dòng tiền, biến động nến kỹ thuật và định giá P/E của 10 nhóm ngành trọng điểm
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button class="btn-sm" id="btnRefreshSectors" style="cursor:pointer; display:flex; align-items:center; gap:4px; font-size:11px; padding:5px 12px; background:rgba(56, 189, 248, 0.1); border-color:#38bdf8; color:#38bdf8; border-radius:6px;">
+              🔄 Làm mới chỉ số
+            </button>
+          </div>
+        </div>
+
+        <!-- Sector Subtab Bar -->
+        <div class="sector-subtabs-bar" style="display:flex; gap:6px; align-items:center;">
+          <button class="sector-subtab active" data-ssub="overview" style="cursor:pointer; font-size:12px; font-weight:700; padding:7px 16px; border-radius:6px; border:1px solid var(--border-subtle); background:rgba(56,189,248,0.12); color:#38bdf8;">📊 Tổng Quan</button>
+          <button class="sector-subtab" data-ssub="rotation" style="cursor:pointer; font-size:12px; font-weight:700; padding:7px 16px; border-radius:6px; border:1px solid var(--border-subtle); background:transparent; color:var(--text-secondary);">🔄 Sector Rotation (RRG)</button>
+        </div>
+
+        <!-- OVERVIEW SUBPANEL -->
+        <div id="sectorOverviewPanel">
+
+        <!-- 10 Sector Cards Grid -->
+        <div class="sector-cards-grid" id="sectorCardsGrid" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); gap:10px;">
+          <!-- Rendered dynamically -->
+        </div>
+
+        <!-- Main Chart & Leaderboard Section -->
+        <div class="sector-main-grid" style="display:grid; grid-template-columns: 1fr 340px; gap:12px;">
+          
+          <!-- LEFT: ADVANCED SECTOR CANDLESTICK & TECHNICAL CHART -->
+          <div class="chart-container-card" style="background:var(--bg-card); border-radius:8px; border:1px solid var(--border-subtle); padding:12px; display:flex; flex-direction:column; gap:8px;">
+            <div class="chart-toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; padding-bottom:8px; border-bottom:1px solid var(--border-subtle);">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <span id="currentSectorTitle" style="font-size:14px; font-weight:800; color:var(--text-primary);">🏢 VNREAL - Bất Động Sản</span>
+                <span id="currentSectorChangeBadge" class="breadth-badge txt-up" style="font-size:12px; font-weight:800;">+0.00%</span>
+                <span class="signal-badge" id="sectorSignalBadge" style="font-size:11px; padding:2px 8px;">ĐANG TÍNH</span>
+              </div>
+              
+              <!-- Nhóm 1: Chu kỳ nến (Resolution / Interval) -->
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-right:4px;">Chu kỳ:</span>
+                <button class="sector-interval-btn active" data-sitv="1D">1D (Ngày)</button>
+                <button class="sector-interval-btn" data-sitv="1W">1W (Tuần)</button>
+                <button class="sector-interval-btn" data-sitv="1M">1M (Tháng)</button>
+              </div>
+
+              <!-- Nhóm 2: Phạm vi hiển thị (Range Zoom) -->
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-right:4px;">Phạm vi:</span>
+                <button class="sector-range-btn" data-srange="1W">1W</button>
+                <button class="sector-range-btn" data-srange="1M">1M</button>
+                <button class="sector-range-btn" data-srange="3M">3M</button>
+                <button class="sector-range-btn" data-srange="6M">6M</button>
+                <button class="sector-range-btn" data-srange="1Y">1Y</button>
+                <button class="sector-range-btn active" data-srange="ALL">ALL</button>
+              </div>
+
+              <!-- Nhóm 3: Các chỉ báo kỹ thuật -->
+              <div style="display:flex; align-items:center; gap:4px;">
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase; margin-right:4px;">Chỉ báo:</span>
+                <button class="sector-ind-btn active" data-sind="ma20">MA20</button>
+                <button class="sector-ind-btn active" data-sind="ma50">MA50</button>
+                <button class="sector-ind-btn" data-sind="bollinger">Bollinger</button>
+                <button class="sector-ind-btn active" data-sind="volume">Volume</button>
+                <button class="sector-ind-btn active" data-sind="rsi">RSI(14)</button>
+                <button class="sector-ind-btn active" data-sind="macd">MACD</button>
+              </div>
+            </div>
+
+            <!-- SECTOR HUD TOOLTIP -->
+            <div class="chart-hud" id="sectorChartHud">
+              <div>Thời gian: <strong id="sectorHudDate">--</strong></div>
+              <div>Mở: <strong id="sectorHudOpen">--</strong></div>
+              <div>Cao: <strong id="sectorHudHigh">--</strong></div>
+              <div>Thấp: <strong id="sectorHudLow">--</strong></div>
+              <div>Đóng: <strong id="sectorHudClose">--</strong></div>
+              <div>KL: <strong id="sectorHudVolume">--</strong></div>
+            </div>
+
+            <!-- DUAL SYNCHRONIZED SECTOR CHARTS -->
+            <div class="main-chart-wrapper" id="sectorMainChartContainer" style="height:340px; border-radius:6px; overflow:hidden; background:#090e17;"></div>
+            <div class="sub-chart-wrapper" id="sectorSubChartContainer" style="height:130px; border-radius:6px; overflow:hidden; background:#090e17; margin-top:4px;"></div>
+          </div>
+
+          <!-- RIGHT: SECTOR VALUATION & PERFORMANCE SUMMARY -->
+          <div class="sector-summary-card" style="background:var(--bg-card); border-radius:8px; border:1px solid var(--border-subtle); padding:12px; display:flex; flex-direction:column; gap:10px;">
+            
+            <!-- Technical Signal Box -->
+            <div class="ladder-card" style="padding:8px 10px; background:var(--bg-surface-elevated); border-radius:6px; border:1px solid var(--border-subtle);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <span class="ladder-card-title" style="margin-bottom:0; font-size:11px;">Tín Hiệu Xu Hướng Ngành</span>
+                <span class="signal-badge" id="sectorSignalBadgeSmall">MUA</span>
+              </div>
+              <div id="sectorSignalDetails" style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+                <div>• MA20 đang nằm trên MA50 (Xu hướng tăng)</div>
+                <div>• RSI(14) đang ở vùng trung tính tích cực</div>
+              </div>
+            </div>
+
+            <div style="font-size:13px; font-weight:800; border-bottom:1px solid var(--border-subtle); padding-bottom:6px;">
+              📊 Định Giá & Sức Mạnh Ngành
+            </div>
+            <div id="sectorMetricDetails" style="font-size:12px; display:flex; flex-direction:column; gap:8px;">
+              <!-- Dynamic metrics: P/E, P/B, ROE, Thanh khoản, Số mã tăng/giảm -->
+            </div>
+            <div style="font-size:13px; font-weight:800; border-bottom:1px solid var(--border-subtle); padding-bottom:6px; margin-top:6px;">
+              🏆 Cổ Phiếu Trụ Dẫn Dắt Ngành
+            </div>
+            <div id="sectorLeadingStocks" style="display:flex; flex-wrap:wrap; gap:6px;">
+              <!-- Top leader ticker pills -->
+            </div>
+          </div>
+        </div>
+
+        <!-- BOTTOM: SECTOR CONSTITUENTS TABLE -->
+        <div class="sector-constituents-card" style="background:var(--bg-card); border-radius:8px; border:1px solid var(--border-subtle); padding:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+              <span style="font-size:13px; font-weight:800;">📋 Toàn Bộ Cổ Phiếu Thành Phần Thuộc Ngành</span>
+              <div class="sector-exchange-filter" id="sectorExchangeFilter" style="display:inline-flex; gap:3px; background:rgba(255,255,255,0.04); padding:2px; border-radius:6px; border:1px solid var(--border-subtle);">
+                <button class="sector-ex-btn active" data-sex="ALL" style="font-size:11px; padding:3px 10px; border-radius:4px; border:none; cursor:pointer; font-weight:700; background:#38bdf8; color:#0f172a;">🌐 Tất Cả (3 Sàn)</button>
+                <button class="sector-ex-btn" data-sex="HOSE" style="font-size:11px; padding:3px 10px; border-radius:4px; border:none; cursor:pointer; font-weight:600; background:transparent; color:var(--text-secondary);">HOSE</button>
+                <button class="sector-ex-btn" data-sex="HNX" style="font-size:11px; padding:3px 10px; border-radius:4px; border:none; cursor:pointer; font-weight:600; background:transparent; color:var(--text-secondary);">HNX</button>
+                <button class="sector-ex-btn" data-sex="UPCOM" style="font-size:11px; padding:3px 10px; border-radius:4px; border:none; cursor:pointer; font-weight:600; background:transparent; color:var(--text-secondary);">UPCOM</button>
+              </div>
+            </div>
+            <span id="sectorConstituentsCount" style="font-size:11px; color:var(--text-muted); font-weight:700;">-- mã</span>
+          </div>
+          <div class="table-responsive" style="max-height:360px; overflow-y:auto;">
+            <table class="trading-board-table clean-board-table">
+              <thead>
+                <tr>
+                  <th style="width:40px; text-align:center;">#</th>
+                  <th style="width:80px; text-align:left;">Mã CK</th>
+                  <th style="text-align:left;">Tên Doanh Nghiệp</th>
+                  <th style="width:65px; text-align:center;">Sàn</th>
+                  <th style="width:85px; text-align:right;">Giá Hiện Tại</th>
+                  <th style="width:75px; text-align:right;">% Thay Đổi</th>
+                  <th style="width:90px; text-align:right;">Vốn Hóa</th>
+                  <th style="width:65px; text-align:right;">P/E</th>
+                  <th style="width:65px; text-align:right;">P/B</th>
+                  <th style="width:65px; text-align:right;">ROE</th>
+                  <th style="width:75px; text-align:center;">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody id="sectorConstituentsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        </div><!-- /#sectorOverviewPanel -->
+
+        <!-- ROTATION (RRG) SUBPANEL -->
+        <div id="sectorRotationPanel" style="display:none; flex-direction:column; gap:12px;">
+          <!-- Controls Row -->
+          <div class="rrg-controls-row" style="display:flex; flex-wrap:wrap; align-items:center; gap:10px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; padding:10px 14px;">
+            <label style="font-size:11px; color:var(--text-muted); font-weight:700;">Benchmark:</label>
+            <select id="rrgBenchmark" style="font-size:12px; padding:4px 8px; border-radius:6px; background:var(--bg-surface-elevated); color:var(--text-primary); border:1px solid var(--border-subtle);">
+              <option value="VNINDEX">VNINDEX</option>
+              <option value="VN30">VN30</option>
+              <option value="HNXINDEX">HNXINDEX</option>
+            </select>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:700;">Chu kỳ:</label>
+            <select id="rrgInterval" style="font-size:12px; padding:4px 8px; border-radius:6px; background:var(--bg-surface-elevated); color:var(--text-primary); border:1px solid var(--border-subtle);">
+              <option value="1W">1W</option>
+              <option value="1M">1M</option>
+            </select>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:700;">Phương pháp:</label>
+            <select id="rrgMethod" style="font-size:12px; padding:4px 8px; border-radius:6px; background:var(--bg-surface-elevated); color:var(--text-primary); border:1px solid var(--border-subtle);">
+              <option value="jdk">Chuẩn JdK</option>
+              <option value="enhanced">Enhanced EMA</option>
+            </select>
+            <label style="font-size:11px; color:var(--text-muted); font-weight:700;">Đuôi:</label>
+            <input type="range" id="rrgTail" min="4" max="12" step="1" value="8" style="vertical-align:middle;">
+            <span id="rrgTailVal" style="font-size:11px; font-weight:800; color:#38bdf8; min-width:18px;">8</span>
+            <button id="rrgRefresh" class="btn-sm" style="cursor:pointer; font-size:11px; padding:5px 12px; background:rgba(56,189,248,0.1); border-color:#38bdf8; color:#38bdf8; border-radius:6px;">Vẽ lại</button>
+          </div>
+
+          <!-- Status -->
+          <div id="rrgStatus" style="font-size:11px; color:var(--text-secondary); padding:0 4px;"></div>
+
+          <!-- Legend -->
+          <div class="rrg-legend" style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; font-size:11px; color:var(--text-secondary); padding:0 4px;">
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#10b981; margin-right:5px;"></span>Leading (TR)</span>
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#f59e0b; margin-right:5px;"></span>Weakening (BR)</span>
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#ef4444; margin-right:5px;"></span>Lagging (BL)</span>
+            <span><span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:#3b82f6; margin-right:5px;"></span>Improving (TL)</span>
+          </div>
+
+          <!-- RRG Chart -->
+          <div id="rrgChartContainer" style="position:relative; min-height:480px; background:var(--bg-card); border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden;">
+            <div id="rrgTooltip" style="display:none; position:absolute; z-index:20; pointer-events:none; background:rgba(9,14,23,0.95); border:1px solid var(--border-subtle); border-radius:6px; padding:8px 10px; font-size:11px; line-height:1.5; color:var(--text-primary); box-shadow:0 4px 16px rgba(0,0,0,0.45);"></div>
+          </div>
+
+          <!-- Error note for failed sectors -->
+          <div id="rrgErrorNote" style="display:none; font-size:11px; color:var(--text-muted); padding:0 4px;"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 6: PRICE ALERTS MANAGER -->
+    <div class="view-panel" id="tab_alerts">
+      <div class="alerts-view-container">
+        <div class="alerts-header-card">
+          <div>
+            <div style="font-size:14px; font-weight:800;">Quản Lý Cảnh Báo Giá Tức Thì</div>
+            <div style="font-size:11px; color:var(--text-secondary);">Hệ thống tự động thông báo nổi Toast và âm thanh khi giá vượt ngưỡng cài đặt</div>
+          </div>
+          <button class="btn-sm" id="btnOpenAlertModal" style="background:#2563eb; color:#fff; border-color:#2563eb;">
+            + Thêm Cảnh Báo Mới
+          </button>
+        </div>
+        <div class="alerts-list-grid" id="alertsListGrid"></div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- ADD ALERT MODAL -->
+  <div class="modal-overlay" id="alertModal">
+    <div class="modal-card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:800; font-size:13px;">Thiết Lập Cảnh Báo Giá Mới</span>
+        <span style="cursor:pointer; font-weight:bold;" id="btnCloseAlertModal">✕</span>
+      </div>
+
+      <div>
+        <label style="font-size:11px; color:var(--text-secondary); margin-bottom:4px; display:block;">Mã Cổ Phiếu:</label>
+        <input type="text" class="modal-input" id="alertSymbolInput" placeholder="VD: FPT" uppercase>
+      </div>
+
+      <div>
+        <label style="font-size:11px; color:var(--text-secondary); margin-bottom:4px; display:block;">Điều Kiện Kích Hoạt:</label>
+        <select class="modal-input" id="alertConditionSelect">
+          <option value="above">Giá vượt lên trên (≥)</option>
+          <option value="below">Giá giảm xuống dưới (≤)</option>
+          <option value="pct_change">Biến động % trong phiên (|±%| ≥)</option>
+        </select>
+      </div>
+
+      <div>
+        <label style="font-size:11px; color:var(--text-secondary); margin-bottom:4px; display:block;">Giá Mục Tiêu (nghìn VNĐ):</label>
+        <input type="number" step="0.1" class="modal-input" id="alertPriceInput" placeholder="VD: 72.5">
+      </div>
+
+      <button class="btn-sm" id="btnSaveAlert" style="background:#2563eb; color:#fff; justify-content:center; padding:8px;">
+        Lưu Cảnh Báo
+      </button>
+    </div>
+  </div>
+
+  <!-- IN-APP ARTICLE READER MODAL (DISTRACTION-FREE VIEWER) -->
+  <div class="modal-overlay" id="readerModal">
+    <div class="reader-modal-card">
+      
+      <!-- Top Navigation & Controls Bar -->
+      <div class="reader-modal-header">
+        <div class="reader-header-left">
+          <span class="reader-source-badge" id="readerSourceBadge">Báo Tài Chính</span>
+          <span class="reader-meta-date" id="readerMetaDate">--</span>
+          <span class="reader-tag-chip" id="readerSymbolBadge" style="display:none;"></span>
+        </div>
+
+        <div class="reader-header-controls">
+          <div class="reader-font-controls">
+            <button class="reader-ctrl-btn" id="btnReaderFontDec" title="Giảm cỡ chữ (A-)">A-</button>
+            <span id="readerFontIndicator" style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); min-width:28px; text-align:center;">16px</span>
+            <button class="reader-ctrl-btn" id="btnReaderFontInc" title="Tăng cỡ chữ (A+)">A+</button>
+          </div>
+          <button class="reader-ctrl-btn" id="btnReaderCopyLink" title="Sao chép liên kết">
+            <span>📋</span> <span class="hide-sm">Sao chép link</span>
+          </button>
+          <a href="#" target="_blank" class="reader-ctrl-btn" id="btnReaderOpenOriginal" title="Mở trang báo gốc">
+            <span>↗</span> <span class="hide-sm">Trang gốc</span>
+          </a>
+          <button class="reader-ctrl-btn reader-close-btn" id="btnCloseReaderModal" title="Đóng [Esc]">
+            ✕
+          </button>
+        </div>
+      </div>
+
+      <!-- Article Content Body -->
+      <div class="reader-modal-body" id="readerModalBody">
+        <!-- Populated via JS -->
+      </div>
+
+    </div>
+  </div>
+
+  <!-- VNSTOCK EARNINGS ENGINE & 3-SCENARIO VALUATION POPUP MODAL -->
+  <div class="modal-overlay" id="earningsEngineModal">
+    <div class="modal-card" style="max-width:960px; width:95%; max-height:90vh; overflow-y:auto; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:12px; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:18px;">🎯</span>
+          <div>
+            <div style="font-weight:800; font-size:16px;" id="modalEeTitle">CHẨN ĐOÁN ĐỘNG LỰC TĂNG TRƯỞNG & ĐỊNH GIÁ 3 KỊCH BẢN</div>
+            <div style="font-size:11px; color:var(--text-secondary);" id="modalEeSubtitle">Khung phân tích lợi nhuận thực chiến theo chuẩn Base Rate</div>
+          </div>
+        </div>
+        <button class="reader-ctrl-btn reader-close-btn" id="btnCloseEeModal" title="Đóng [Esc]" style="cursor:pointer; background:rgba(255,255,255,0.06); border-radius:6px; border:1px solid var(--border-subtle); font-size:14px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; color:var(--text-primary);">✕</button>
+      </div>
+
+      <div id="modalEeContent">
+        <div style="text-align:center; padding:40px; color:var(--text-muted);">⏳ Đang tải dữ liệu động lực tăng trưởng...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VNSTOCK MULTI-SOURCE DATA LAKE STATUS POPUP MODAL -->
+  <div class="modal-overlay" id="dataLakeModal">
+    <div class="modal-card" style="max-width:760px; width:95%; max-height:90vh; overflow-y:auto; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:12px; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:22px;">🌐</span>
+          <div>
+            <div style="font-weight:800; font-size:16px; display:flex; align-items:center; gap:8px;">
+              TỔNG QUAN KHO DỮ LIỆU ĐA NGUỒN (MULTI-SOURCE DATA LAKE)
+              <span class="badge-tag" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:10px; padding:2px 6px; border-radius:4px; font-weight:700;">100% THỊ TRƯỜNG</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary);">Tận dụng đồng thời TradingView Scanner + Yahoo Finance Batch + vnstock Live Feeds</div>
+          </div>
+        </div>
+        <button class="reader-ctrl-btn reader-close-btn" id="btnCloseDataLakeModal" title="Đóng [Esc]" style="cursor:pointer; background:rgba(255,255,255,0.06); border-radius:6px; border:1px solid var(--border-subtle); font-size:14px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; color:var(--text-primary);" onclick="app.closeDataLakeModal()">✕</button>
+      </div>
+
+      <div id="dataLakeModalContent">
+        <!-- Live summary stat cards -->
+        <div class="foreign-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom:14px;">
+          <div class="foreign-stat-card" style="border-left:3px solid #10b981; background:rgba(16,185,129,0.06);">
+            <span style="color:#34d399; font-size:11px; font-weight:800;">🟢 ĐỦ CẢ GIÁ & BCTC</span>
+            <span class="f-stat-num mono txt-up" id="dlFullySynced">--</span>
+            <span style="font-size:9.5px; color:var(--text-muted);">Sẵn sàng 100% Backtest</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">BCTC Chuẩn Hóa (TradingView)</span>
+            <span class="f-stat-num mono txt-blue" id="dlScreenerStocks">1,526</span>
+            <span style="font-size:9.5px; color:var(--text-muted);">39 chỉ số tài chính</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Nến Giá Thật 10 Năm</span>
+            <span class="f-stat-num mono txt-ref" id="dlPricesStocks">--</span>
+            <span style="font-size:9.5px; color:var(--text-muted);">Yahoo Finance / TV</span>
+          </div>
+          <div class="foreign-stat-card">
+            <span style="color:var(--text-muted); font-size:11px;">Tổng Mã Toàn Thị Trường</span>
+            <span class="f-stat-num mono txt-ceil" id="dlTotalStocks">1,526</span>
+            <span style="font-size:9.5px; color:var(--text-muted);">3 sàn HOSE, HNX, UPCOM</span>
+          </div>
+        </div>
+
+        <!-- 3 Source Stream Details Cards -->
+        <div style="font-size:12px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">📡 Trạng Thái 3 Luồng Dữ Liệu Kết Nối:</div>
+        <div class="data-lake-modal-grid">
+          <div class="data-lake-source-card">
+            <div class="src-title">
+              <span>📊 TradingView Scanner API</span>
+              <span class="src-badge">ONLINE 🟢</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+              Quét toàn diện 39 chỉ số tài chính (P/E, P/B, P/S, PEG, ROE, FCF, Biên LN, Tăng trưởng 1Y/3Y/5Y) cho 1,526 mã.
+            </div>
+          </div>
+
+          <div class="data-lake-source-card">
+            <div class="src-title">
+              <span>📈 Yahoo Finance .VN Batch</span>
+              <span class="src-badge">ONLINE 🟢</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+              Tải đa luồng song song kho nến ngày lịch sử từ 2016 – 2026 cho toàn bộ các mã trên HOSE, HNX, UPCOM.
+            </div>
+          </div>
+
+          <div class="data-lake-source-card">
+            <div class="src-title">
+              <span>⚡ vnstock VCI / TCBS Live</span>
+              <span class="src-badge">ONLINE 🟢</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+              Sổ lệnh 3 cấp độ (Order Depth), dòng tiền Khối ngoại mua/bán ròng, dòng tiền CFO, pha loãng 3 năm và PDF tài liệu.
+            </div>
+          </div>
+        </div>
+
+        <!-- Exchange Breakdown Table -->
+        <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-subtle); border-radius:8px; padding:12px; margin-top:12px;">
+          <div style="font-size:12px; font-weight:700; margin-bottom:8px; display:flex; justify-content:space-between;">
+            <span>🏢 Phân Bổ Theo 3 Sàn Giao Dịch Niêm Yết:</span>
+            <span style="font-size:10.5px; color:var(--text-muted);" id="dlLastUpdated">Cập nhật: Mới nhất</span>
+          </div>
+          <div style="display:flex; justify-content:space-around; text-align:center; font-size:12px;">
+            <div><span style="color:var(--text-muted);">Sàn HOSE:</span> <strong class="mono txt-up" id="dlHoseCount">~400 mã</strong></div>
+            <div><span style="color:var(--text-muted);">Sàn HNX:</span> <strong class="mono txt-blue" id="dlHnxCount">~320 mã</strong></div>
+            <div><span style="color:var(--text-muted);">Sàn UPCOM:</span> <strong class="mono txt-ref" id="dlUpcomCount">~800 mã</strong></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAVE CRITERIA POPUP MODAL -->
+  <div class="modal-overlay" id="saveCriteriaModal">
+    <div class="modal-card" style="max-width:540px; width:92%; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:10px; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">💾</span>
+          <span style="font-weight:800; font-size:14px; color:#34d399;">Lưu Bộ Tiêu Chí Tùy Biến</span>
+        </div>
+        <button class="reader-ctrl-btn reader-close-btn" id="btnCloseSaveCritModal" title="Đóng [Esc]" style="cursor:pointer; background:rgba(255,255,255,0.06); border-radius:6px; border:1px solid var(--border-subtle); font-size:13px; width:28px; height:28px; display:flex; align-items:center; justify-content:center; color:var(--text-primary);">✕</button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div>
+          <label style="font-size:11.5px; color:var(--text-secondary); margin-bottom:4px; display:block; font-weight:700;">Tên Chiến Lược / Bộ Lọc:</label>
+          <input type="text" class="modal-input" id="saveCritNameInput" placeholder="VD: GARP Đột Phá + P/E < 15 (Sàn HOSE)" style="width:100%; box-sizing:border-box;">
+        </div>
+
+        <div>
+          <label style="font-size:11.5px; color:var(--text-secondary); margin-bottom:4px; display:block; font-weight:700;">Ghi Chú / Mô Tả (Tùy chọn):</label>
+          <input type="text" class="modal-input" id="saveCritDescInput" placeholder="VD: Chiến lược tập trung cổ phiếu tăng trưởng giá rẻ, kiểm soát rủi ro bằng Firewall" style="width:100%; box-sizing:border-box;">
+        </div>
+
+        <!-- Summary of active parameters -->
+        <div style="background:rgba(15, 23, 42, 0.7); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:10px 12px;">
+          <div style="font-size:11px; font-weight:700; color:#38bdf8; margin-bottom:6px;">📋 Tóm tắt tiêu chí đang kích hoạt:</div>
+          <div id="saveCritSummaryBox" style="font-size:11px; color:var(--text-secondary); line-height:1.5; font-family:var(--font-mono);">
+            <!-- Populated via JS -->
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:6px;">
+          <button class="btn-sm" id="btnCancelSaveCrit" style="cursor:pointer; background:rgba(148,163,184,0.1); border-color:#64748b; color:#94a3b8;">
+            Hủy Bỏ
+          </button>
+          <button class="btn-sm" id="btnConfirmSaveCrit" style="cursor:pointer; background:linear-gradient(135deg, #10b981, #059669); color:#fff; border:none; font-weight:800; padding:7px 18px;">
+            <span>💾</span> Xác Nhận Lưu
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SAVED STRATEGIES LIST / MANAGER MODAL -->
+  <div class="modal-overlay" id="savedCriteriaListModal">
+    <div class="modal-card" style="max-width:760px; width:95%; max-height:85vh; overflow-y:auto; padding:20px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle); padding-bottom:12px; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:20px;">📂</span>
+          <div>
+            <div style="font-weight:800; font-size:15px; color:var(--text-primary);">QUẢN LÝ BỘ TIÊU CHÍ & CHIẾN LƯỢC TÙY BIẾN ĐÃ LƯU</div>
+            <div style="font-size:11px; color:var(--text-secondary);">Tải lại tức thì hoặc thực hiện đối soát nhanh hiệu suất lịch sử</div>
+          </div>
+        </div>
+        <button class="reader-ctrl-btn reader-close-btn" id="btnCloseSavedListModal" title="Đóng [Esc]" style="cursor:pointer; background:rgba(255,255,255,0.06); border-radius:6px; border:1px solid var(--border-subtle); font-size:14px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; color:var(--text-primary);">✕</button>
+      </div>
+
+      <div id="savedStrategiesContainer" style="display:flex; flex-direction:column; gap:10px;">
+        <!-- Populated dynamically via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Javascript Modules -->
+  <script src="/static/js/chart.js?v=9.1.0"></script>
+  <script src="/static/js/treemap/layout.js?v=9.2.1"></script>
+  <script src="/static/js/treemap/colorscale.js?v=9.2.1"></script>
+  <script src="/static/js/treemap/labels.js?v=9.2.1"></script>
+  <script src="/static/js/treemap/perf.js?v=9.2.1"></script>
+  <script src="/static/js/treemap/tooltip.js?v=9.2.1"></script>
+  <script src="/static/js/treemap.js?v=9.2.1"></script>
+  <script src="/static/js/sector_rotation.js?v=2" defer></script>
+  <script src="/static/js/app.js?v=9.5.0"></script>
+</body>
+</html>

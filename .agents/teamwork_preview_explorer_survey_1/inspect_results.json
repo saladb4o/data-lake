@@ -1,0 +1,100 @@
+{
+  "all_symbols": {
+    "type": "list",
+    "count": 5041,
+    "sample_item": {
+      "symbol": "41B5G3000",
+      "organ_name": "5-year Government Bond    Futures 032026",
+      "en_organ_name": "5-year Government Bond    Futures 032026",
+      "exchange": "DELISTED",
+      "type": "FU",
+      "icb_code": "",
+      "ref": 50.0,
+      "ceil": 0.0,
+      "floor": 0.0,
+      "sector": "ChungKhoan",
+      "industry": "Phái Sinh (Futures)"
+    },
+    "exchanges": {
+      "DELISTED": 1596,
+      "HNX": 313,
+      "UPCOM": 822,
+      "HOSE": 2214,
+      "BOND": 96
+    }
+  },
+  "vn30_target_symbols": [
+    "ACB",
+    "BCM",
+    "BID",
+    "BVH",
+    "CTG",
+    "FPT",
+    "GAS",
+    "GVR",
+    "HDB",
+    "HPG",
+    "MBB",
+    "MSN",
+    "MWG",
+    "PLX",
+    "POW",
+    "SAB",
+    "SHB",
+    "SSB",
+    "SSI",
+    "STB",
+    "TCB",
+    "TPB",
+    "VCB",
+    "VHM",
+    "VIB",
+    "VIC",
+    "VJC",
+    "VNM",
+    "VPB",
+    "VRE"
+  ],
+  "financial_models": {
+    "type": "list",
+    "symbol_count": 2500
+  },
+  "historical_prices": {
+    "type": "dict",
+    "count": 5,
+    "first_10_symbols": [
+      "version",
+      "last_updated",
+      "total_symbols",
+      "source",
+      "symbols"
+    ],
+    "vn30_found_count": 0
+  },
+  "industries.json": {
+    "type": "list",
+    "count": 8186,
+    "sample_keys": null
+  },
+  "screener_snapshot.json": {
+    "type": "dict",
+    "count": 6,
+    "sample_keys": [
+      "updated_at",
+      "total_symbols",
+      "source",
+      "provenance_summary",
+      "sectors",
+      "stocks"
+    ]
+  },
+  "models_summary.txt": "[SECURITIES][CASHFLOW] Code=631120, Level=2.0, Order=70.0 -> Tổn thất tài sản\n[SECURITIES][CASHFLOW] Code=631130, Level=2.0, Order=80.0 -> Chênh  lệch  tỷ  giá  ngoại  tệ  phát  sinh  trong kỳ của hoạt động TC & đầu tư\n[SECURITIES][CASHFLOW] Code=631140, Level=2.0, Order=90.0 -> Các khoản chi phí phải trả\n[SECURITIES][CASHFLOW] Code=31180, Level=2.0, Order=100.0 -> Thuế thu nhập doanh nghiệp đã nộp\n[SECURITIES][CASHFLOW] Code=631150, Level=2.0, Order=110.0 -> Ghi tăng vốn kinh doanh từ lợi nhuận",
+  "rrg_disk_cache.json": {
+    "type": "dict",
+    "count": 2,
+    "sample_keys": [
+      "sectors_rrg_VNINDEX_1W_8_jdk",
+      "sectors_rrg_VNINDEX_1W_8_enhanced"
+    ]
+  }
+}

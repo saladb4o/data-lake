@@ -1,0 +1,602 @@
+=== FAST INSPECTION REPORT ===
+
+--- 1. Screener Snapshot (`data/screener_snapshot.json`) ---
+Screener keys: ['updated_at', 'total_symbols', 'source', 'provenance_summary', 'sectors', 'stocks']
+Screener total stocks: 1645
+Updated at: 2026-09-01 12:32:08
+Source: Unified Multi-Source (TradingView, vnstock, yfinance)
+
+VNM in screener_snapshot total keys: 51
+VNM screener sample fields:
+  _metadata: dict = {'sources_used': ['tradingview'], 'is_real_data': True, 'data_quality_score': 87.5, 'provenance_tier': 'Tier 3 (Reported / Audited)', 'is_valid_fundamental': True, 'field_provenance': {'shares': 2, 'market_cap': 3, 'total_equity': 3, 'total_debt': 3, 'de_ratio': 3, 'net_de_ratio': 2, 'current_ratio': 3, 'net_income': 3, 'revenue': 3, 'gross_margin': 3, 'op_margin': 3, 'net_margin': 3, 'roe': 3, 'roa': 3, 'pe': 3, 'pb': 3, 'ps': 3, 'eps': 3, 'dividend_yield': 3, 'fcf_ttm': 3, 'cfo_to_pat': 3, 'rev_1y_growth': 3, 'pat_1y_growth': 3, 'rev_5y_growth': 3, 'rev_3y_cagr': 2, 'pat_3y_cagr': 2, 'pat_5y_growth': 2, 'peg': 2, 'peg_sales': 2, 'quick_ratio': 3, 'cash_to_assets': 2, 'interest_coverage': 2, 'rule_of_40': 2, 'roic': 2, 'core_pat_ratio': 0, 'share_dilution_3y': 0, 'dilution_spread': 0, 'ebit_expansion': 2, 'operating_leverage': 2, 'eps_3y_cagr': 2, 'mcap': 3, 'shares_out': 2}, 'is_imputed': {'cash_to_assets': True, 'cfo_to_pat': False, 'core_pat_ratio': True, 'current_ratio': False, 'de_ratio': False, 'dilution_spread': True, 'dividend_yield': False, 'ebit_expansion': True, 'eps': False, 'eps_3y_cagr': True, 'fcf_ttm': False, 'gross_margin': False, 'interest_coverage': True, 'market_cap': False, 'mcap': False, 'net_de_ratio': True, 'net_income': False, 'net_margin': False, 'op_margin': False, 'operating_leverage': True, 'pat_1y_growth': False, 'pat_3y_cagr': True, 'pat_5y_growth': True, 'pb': False, 'pe': False, 'peg': True, 'peg_sales': True, 'ps': False, 'quick_ratio': False, 'rev_1y_growth': False, 'rev_3y_cagr': True, 'rev_5y_growth': False, 'revenue': False, 'roa': False, 'roe': False, 'roic': True, 'rule_of_40': True, 'share_dilution_3y': True, 'shares': True, 'shares_out': True, 'total_debt': False, 'total_equity': False}, 'imputed_field_count': 18, 'synced_at': '2026-09-01T12:31:45.046248'}
+  cash_to_assets: float = 14.38
+  cfo_to_pat: float = 1.0
+  change_pct: float = -0.32
+  core_pat_ratio: float = 94.0
+  current_ratio: float = 1.91
+  de_ratio: float = 0.27
+  dilution_spread: float = 1.2
+  dividend_yield: float = 6.98
+  ebit_expansion: float = 4.14
+  eps: float = 4727.57
+  eps_3y_cagr: float = 27.8
+  exchange: str = 'HOSE'
+  fcf_ttm: float = 8170.1
+  gross_margin: float = 41.55
+  industry: str = 'Công Nghiệp'
+  interest_coverage: float = 19.73
+  is_cyclical: bool = False
+  market_cap: int = 130204
+  name: str = 'CTCP Sữa Việt Nam (Vinamilk)'
+  net_de_ratio: float = 0.24
+  net_margin: float = 14.32
+  op_margin: float = 18.14
+  operating_leverage: bool = True
+  pat_1y_growth: float = 30.92
+  pat_3y_cagr: float = 27.8
+  pat_5y_growth: float = 105.6
+  pb: float = 4.09
+  pe: float = 13.18
+  peg: float = 0.43
+  peg_sales: float = 1.88
+  percentiles: dict = keys: ['growth', 'quality', 'health', 'valuation', 'composite']... (9 items)
+  price: float = 62300.0
+  ps: float = 1.89
+  quick_ratio: float = 1.53
+  rev_1y_growth: float = 12.69
+  rev_3y_cagr: float = 7.0
+  rev_5y_growth: float = 1.31
+  roa: float = 17.52
+  roe: float = 31.05
+  roic: float = 22.69
+  rule_of_40: float = 27.01
+  sector_code: str = 'VNCONS'
+  sector_name: str = 'Công Nghiệp'
+  sector_percentile: float = 95.7
+  sector_rank: int = 7
+  sector_total: int = 142
+  share_dilution_3y: float = 2.0
+  size_category: str = 'Large-Cap'
+  size_damper: float = 0.85
+  symbol: str = 'VNM'
+
+--- 2. Historical Prices Quarters (`data/historical_prices.json`) ---
+Historical prices keys: ['version', 'last_updated', 'total_symbols', 'source', 'symbols']
+Version: 4.0-unified-full-market, Last updated: 2026-08-23T07:50:06.501Z, Source: TradingView & Multi-Source Real Historical Feeds
+Symbols count in historical prices: 1306
+VNM hp metadata: ['symbol: VNM', 'exchange: HOSE', 'total_quarters: 41', 'earliest_quarter: 2016-Q1', 'latest_quarter: 2026-Q1']
+VNM total quarters: 41
+Quarter range: 2016-Q1 to 2026-Q1
+Latest quarter (2026-Q1) fields:
+  quarter: str = '2026-Q1'
+  start_date: str = '2026-01-05'
+  end_date: str = '2026-03-31'
+  start_price: int = 61200
+  close_price: int = 60500
+  high: int = 75500
+  low: int = 58100
+  volume: int = 536740561
+  return_pct: float = -1.14
+
+VN30 Historical Quarter Coverage:
+  ACB (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  BCM (HOSE): 23 quarters (2020-Q3 -> 2026-Q1)
+  BID (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  BVH (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  CTG (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  FPT (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  GAS (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  GVR (HOSE): 25 quarters (2020-Q1 -> 2026-Q1)
+  HDB (HOSE): 33 quarters (2018-Q1 -> 2026-Q1)
+  HPG (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  MBB (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  MSN (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  MWG (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  PLX (HOSE): 36 quarters (2017-Q2 -> 2026-Q1)
+  POW (HOSE): 29 quarters (2019-Q1 -> 2026-Q1)
+  SAB (HOSE): 38 quarters (2016-Q4 -> 2026-Q1)
+  SHB (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  SSB (HOSE): 21 quarters (2021-Q1 -> 2026-Q1)
+  SSI (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  STB (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  TCB (HOSE): 32 quarters (2018-Q2 -> 2026-Q1)
+  TPB (HOSE): 32 quarters (2018-Q2 -> 2026-Q1)
+  VCB (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  VHM (HOSE): 32 quarters (2018-Q2 -> 2026-Q1)
+  VIB (HOSE): 37 quarters (2017-Q1 -> 2026-Q1)
+  VIC (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  VJC (HOSE): 37 quarters (2017-Q1 -> 2026-Q1)
+  VNM (HOSE): 41 quarters (2016-Q1 -> 2026-Q1)
+  VPB (HOSE): 35 quarters (2017-Q3 -> 2026-Q1)
+  VRE (HOSE): 34 quarters (2017-Q4 -> 2026-Q1)
+
+--- 3. Financial Models Schema (`data/financial_models.json`) ---
+Financial models count: 2500
+By companyForm: {'SECURITIES': 905, 'NON_FINANCE': 335, 'BANK': 579, 'INSURANCE': 650, 'ALL_FORMS': 31}
+By modelTypeName: {'CASHFLOW': 342, 'BALANCESHEET': 581, 'EXPLAINATION': 1167, 'INCOME': 198, 'HIGHLIGHT': 55, 'GROWTH': 11, 'PROFITABILITY': 10, 'COMMITMENT': 3, 'FINHEALTH': 9, 'FUNDAMENTAL': 91, 'ESTIMATION': 14, 'GOVERNANCE': 3, 'POSITIONING': 10, '': 6}
+Unique Form + ModelType combinations: ['SECURITIES_CASHFLOW', 'SECURITIES_BALANCESHEET', 'NON_FINANCE_BALANCESHEET', 'BANK_EXPLAINATION', 'SECURITIES_EXPLAINATION', 'INSURANCE_EXPLAINATION', 'NON_FINANCE_INCOME', 'INSURANCE_HIGHLIGHT', 'INSURANCE_BALANCESHEET', 'NON_FINANCE_CASHFLOW', 'BANK_BALANCESHEET', 'INSURANCE_INCOME', 'NON_FINANCE_GROWTH', 'INSURANCE_CASHFLOW', 'NON_FINANCE_PROFITABILITY', 'BANK_CASHFLOW', 'BANK_INCOME', 'ALL_FORMS_COMMITMENT', 'ALL_FORMS_HIGHLIGHT', 'NON_FINANCE_FINHEALTH', 'SECURITIES_INCOME', 'NON_FINANCE_FUNDAMENTAL', 'ALL_FORMS_ESTIMATION', 'BANK_FUNDAMENTAL', 'SECURITIES_FUNDAMENTAL', 'INSURANCE_FUNDAMENTAL', 'SECURITIES_HIGHLIGHT', 'BANK_HIGHLIGHT', 'ALL_FORMS_GOVERNANCE', 'NON_FINANCE_POSITIONING', 'BANK_']
+
+[SECURITIES_CASHFLOW] (Total items: 71):
+   Code 631110.0 | Level 2.0 | Order 60.0 | Nợ phải thu khó đòi đã xử lý | 
+   Code 631120.0 | Level 2.0 | Order 70.0 | Tổn thất tài sản | Asset Loss
+   Code 631130.0 | Level 2.0 | Order 80.0 | Chênh  lệch  tỷ  giá  ngoại  tệ  phát  sinh  trong kỳ của hoạt động TC & đầu tư | Foreign Exchange Differences arise in period of financial and investing activities
+   Code 631140.0 | Level 2.0 | Order 90.0 | Các khoản chi phí phải trả | Expense Payable
+   Code 31180.0 | Level 2.0 | Order 100.0 | Thuế thu nhập doanh nghiệp đã nộp | Income Tax paid
+   Code 631150.0 | Level 2.0 | Order 110.0 | Ghi tăng vốn kinh doanh từ lợi nhuận | Increase operating capital from profit
+   Code 631160.0 | Level 2.0 | Order 120.0 | Cổ tức, lãi liên doanh đã trả | Dividends and interest paid
+   Code 33700.0 | Level 2.0 | Order 125.0 | Chi từ các quỹ của doanh nghiệp | Payments from corporates funds
+   Code 631171.0 | Level 3.0 | Order 130.0 | Tiền thực chi quỹ khen thưởng, phúc lợi | Payment for welfare funds
+   Code 631172.0 | Level 3.0 | Order 140.0 | Tiền thực chi quỹ đầu tư phát triển | Payment for Development and Investment Funds
+   Code 631180.0 | Level 2.0 | Order 150.0 | Lãi lỗ thanh lý TSCĐ | Depletion of  Fixed Assets Gains/Loss
+   Code 631190.0 | Level 2.0 | Order 160.0 | Lãi lỗ đầu tư khác | Other investments Gains/Loss
+   Code 31120.0 | Level 1.0 | Order 170.0 | Lợi nhuận từ hoạt động kinh doanh trước thay đổi vốn  lưu động | Operating profit/(loss) before changes in Working Capital
+   Code 31130.0 | Level 2.0 | Order 180.0 | Tăng, giảm các khoản phải thu |  Increase/(decrease) in receivables
+   Code 31140.0 | Level 2.0 | Order 190.0 | Tăng, giảm hàng tồn kho | Increase/(decrease) in inventories
+   ... and 56 more line items
+
+[SECURITIES_BALANCESHEET] (Total items: 106):
+   Code 13000.0 | Level 1.0 | Order 0.0 | Nợ phải trả | Liabilities
+   Code 611110.0 | Level 3.0 | Order 30.0 | Tiền mặt tại quỹ (gồm cả chứng khoán mua lẻ) | Cash on hand (includeding: Buying Retail Securities)
+   Code 11112.0 | Level 3.0 | Order 40.0 | Tiền gửi NH | Cash in Banks
+   Code 11113.0 | Level 3.0 | Order 50.0 | Tiền đang chuyển | Cash in transit
+   Code 611140.0 | Level 3.0 | Order 60.0 | Tiền gửi của người đầu tư về giao dịch chứng khoán | Cash deposited by investors for securities trading
+   Code 611150.0 | Level 3.0 | Order 70.0 | Tiền gửi về bán chứng khoán phát hành | Deposits of selling securities in issues
+   Code 611160.0 | Level 3.0 | Order 80.0 | Tiền gửi thanh toán bù trừ giao dịch chứng khoán | Deposits for trading securties compensatory payments
+   Code 611210.0 | Level 3.0 | Order 100.0 | Chứng khoán tự doanh | Private securities
+   Code 611220.0 | Level 3.0 | Order 110.0 | Chứng khoán đầu tư ngắn hạn của người uỷ thác đầu tư | Short-term investment securities of trusters
+   Code 611230.0 | Level 3.0 | Order 120.0 | Đầu tư ngắn hạn | Short term investment
+   Code 611310.0 | Level 3.0 | Order 170.0 | Phải thu của Trung tâm giao dịch chứng khoán | Securities and Exchange Center Receivable
+   Code 611320.0 | Level 3.0 | Order 180.0 | Phải thu của người đầu tư | Investor Account Receivable
+   Code 611330.0 | Level 3.0 | Order 190.0 | Phải thu của tổ chức phát hành chứng khoán hoặc bảo lãnh phát hành chứng khoán | Issuer Account Receivable
+   Code 611340.0 | Level 3.0 | Order 210.0 | Ứng trước cho người bán | Advance for seller
+   Code 11520.0 | Level 3.0 | Order 220.0 | Thuế GTGT được khấu trừ | Discounted VAT
+   ... and 91 more line items
+
+[NON_FINANCE_BALANCESHEET] (Total items: 146):
+   Code 11000.0 | Level 1.0 | Order 10.0 | Tài sản ngắn hạn | Current Assets
+   Code 11100.0 | Level 2.0 | Order 20.0 | Tiền và các khoản tương đương tiền | Cash and Cash Equivalents
+   Code 11110.0 | Level 3.0 | Order 30.0 | Tiền | Cash
+   Code 11120.0 | Level 3.0 | Order 70.0 | Các khoản tương đương tiền | Cash equivalents
+   Code 11200.0 | Level 2.0 | Order 80.0 | Các khoản đầu tư tài chính ngắn hạn | Short term financial investment
+   Code 11210.0 | Level 3.0 | Order 90.0 | Đầu tư ngắn hạn | Short-term investments
+   Code 11290.0 | Level 3.0 | Order 100.0 | Dự phòng giảm giá đầu tư ngắn hạn | Provision for  short term investment loss
+   Code 412320.0 | Level 3.0 | Order 105.0 | Đầu tư giữ đến ngày đáo hạn | Held to maturity Investment
+   Code 11457.0 | Level 3.0 | Order 106.0 | Dự phòng đầu tư nắm giữ đến ngày đáo hạn ngắn hạn | Provision for Held-to-maturity investment
+   Code 11440.0 | Level 3.0 | Order 107.0 | Đầu tư ngắn hạn khác | Other short-term investments
+   Code 11441.0 | Level 3.0 | Order 108.0 | Dự phòng tổn thất các khoản đầu tư ngắn hạn khác | Provision for impairment of other short-term investments
+   Code 11300.0 | Level 2.0 | Order 110.0 | Các khoản phải thu ngắn hạn | Short term Account Receivables
+   Code 11310.0 | Level 3.0 | Order 120.0 | Phải thu khách hàng | Account Receivable
+   Code 11320.0 | Level 3.0 | Order 130.0 | Trả trước cho người bán | Prepaid for suppliers
+   Code 11330.0 | Level 3.0 | Order 140.0 | Phải thu nội bộ ngắn hạn | Short term Internal Receivable
+   ... and 131 more line items
+
+[BANK_EXPLAINATION] (Total items: 197):
+   Code 413400.0 | Level 1.0 | Order 230.0 | Các công cụ tài chính phái sinh và các khoản nợ tài chính khác | Derivative financial instruments and other financial debts
+   Code 413420.0 | Level 1.0 | Order 231.0 | Công nợ phải trả lãi | 
+   Code 413430.0 | Level 1.0 | Order 232.0 | Quỹ của tổ chức tín dụng | 
+   Code 413431.0 | Level 2.0 | Order 233.0 | Quỹ dự trữ bổ sung vốn điều lệ | 
+   Code 413432.0 | Level 2.0 | Order 234.0 | Quỹ dự phòng tài chính | 
+   Code 413433.0 | Level 2.0 | Order 235.0 | Quỹ đầu tư phát triển | 
+   Code 400180.0 | Level 2.0 | Order 236.0 | Quỹ khác thuộc tổ chức tín dụng | 
+   Code 440010.0 | Level 1.0 | Order 360.0 | Các khoản cho vay phân theo đối tượng khách hàng | 
+   Code 412121.0 | Level 2.0 | Order 390.0 | Cho vay cho thuê tài chính | Leasing loans
+   Code 413350.0 | Level 2.0 | Order 400.0 | Các khoản trả thay khách hàng | 
+   Code 412124.0 | Level 2.0 | Order 410.0 | Cho vay từ nguồn vốn ủy thác đầu tư | Loans from delegated capitals
+   Code 440013.0 | Level 2.0 | Order 430.0 | Cho vay đối với các tổ chức, cá nhân nước ngoài | 
+   Code 412123.0 | Level 2.0 | Order 440.0 | Cho vay theo chỉ định của Chính phủ | Loans according to nomination of government
+   Code 440014.0 | Level 2.0 | Order 450.0 | Nợ cho vay được khoanh và nợ chờ xử lý | 
+   Code 440015.0 | Level 2.0 | Order 460.0 | Các khoản cho vay khác_phân theo đối tượng | 
+   ... and 182 more line items
+
+[SECURITIES_EXPLAINATION] (Total items: 671):
+   Code 600025.0 | Level 1.0 | Order 1.0 | Tài sản cố định thuê ngoài | 
+   Code 600026.0 | Level 1.0 | Order 10.0 | Vật tư, chứng chỉ có giá nhận giữ hộ | 
+   Code 600027.0 | Level 1.0 | Order 20.0 | Tài sản nhận ký cược | 
+   Code 616300.0 | Level 1.0 | Order 30.0 | Nợ khó đòi đã xử lý | Bad Debts proceeded
+   Code 616400.0 | Level 1.0 | Order 40.0 | Ngoại tệ các loại | Foreign currencies
+   Code 51004.0 | Level 1.0 | Order 50.0 | KLCP đang lưu hành | Share Outstanding
+   Code 14140.0 | Level 1.0 | Order 60.0 | Cổ phiếu quỹ | Treasury shares
+   Code 700154.0 | Level 1.0 | Order 70.0 | Ảnh hưởng của thay đổi tỷ giá hối đoái quy đổi ngoại tệ tổng hợp | Effect of changes in foreign currency exchange rates
+   Code 700155.0 | Level 2.0 | Order 80.0 | Tiền thu bán chứng khoán môi giới cho khách hàng | 
+   Code 700156.0 | Level 2.0 | Order 90.0 | Tiền chi mua chứng khoán môi giới cho khách hàng | 
+   Code 700157.0 | Level 2.0 | Order 100.0 | Tiền thu bán chứng khoán ủy thác của khách hàng | 
+   Code 700158.0 | Level 2.0 | Order 110.0 | Tiền chi bán chứng khoán ủy thác của khách hàng | 
+   Code 700159.0 | Level 2.0 | Order 120.0 | Thu tiền từ tài khoản vãng lai của khách hàng | 
+   Code 700160.0 | Level 2.0 | Order 130.0 | Chi tiền từ tài khoản vãng lai của khách hàng | 
+   Code 700161.0 | Level 2.0 | Order 140.0 | Thu vay Quỹ Hỗ trợ thanh toán | 
+   ... and 656 more line items
+
+[INSURANCE_EXPLAINATION] (Total items: 299):
+   Code 11100.0 | Level 1.0 | Order 1.0 | Tiền và các khoản tương đương tiền | Cash and Cash Equivalents
+   Code 11111.0 | Level 2.0 | Order 10.0 | Tiền mặt | Cash on hand
+   Code 11112.0 | Level 2.0 | Order 20.0 | Tiền gửi NH | Cash in Banks
+   Code 11113.0 | Level 2.0 | Order 30.0 | Tiền đang chuyển | Cash in transit
+   Code 11120.0 | Level 2.0 | Order 40.0 | Các khoản tương đương tiền | Cash equivalents
+   Code 11200.0 | Level 1.0 | Order 50.0 | Các khoản đầu tư tài chính ngắn hạn | Short term financial investment
+   Code 900000.0 | Level 2.0 | Order 60.0 | Đầu tư chứng khoán ngắn hạn | Short-term sercurities investment
+   Code 412320.0 | Level 2.0 | Order 70.0 | Đầu tư giữ đến ngày đáo hạn | Held to maturity Investment
+   Code 412327.0 | Level 3.0 | Order 80.0 | Đầu tư ngắn hạn | Short term
+   Code 412328.0 | Level 3.0 | Order 90.0 | Đầu tư dài hạn chuẩn bị đáo hạn | Long term Investment
+   Code 11280.0 | Level 2.0 | Order 100.0 | Đầu tư ngắn hạn khác | Other short-term investments
+   Code 11290.0 | Level 2.0 | Order 110.0 | Dự phòng giảm giá đầu tư ngắn hạn | Provision for  short term investment loss
+   Code 11310.0 | Level 1.0 | Order 120.0 | Phải thu khách hàng | Account Receivable
+   Code 11311.0 | Level 2.0 | Order 130.0 | Phải thu hoạt động bảo hiểm gốc | Premium receivables
+   Code 11312.0 | Level 2.0 | Order 140.0 | Phải thu hoạt động nhận tái bảo hiểm | Re-insurance premium receivables
+   ... and 284 more line items
+
+[NON_FINANCE_INCOME] (Total items: 47):
+   Code 21000.0 | Level 0.0 | Order 10.0 | Tổng doanh thu hoạt động kinh doanh | Gross Operating Revenue
+   Code 21090.0 | Level 1.0 | Order 20.0 | Các khoản giảm trừ doanh thu | Deduction revenues
+   Code 21001.0 | Level 1.0 | Order 30.0 | Doanh thu thuần | Net Sales
+   Code 22100.0 | Level 1.0 | Order 40.0 | Giá vốn hàng bán | Cost of goods sold
+   Code 23100.0 | Level 1.0 | Order 50.0 | Lợi nhuận gộp | Gross profit
+   Code 21500.0 | Level 1.0 | Order 60.0 | Doanh thu hoạt động tài chính | Financial income
+   Code 22500.0 | Level 1.0 | Order 70.0 | Chi phí tài chính | Financial Expenses
+   Code 22510.0 | Level 2.0 | Order 75.0 | Trong đó: Chi phí lãi vay | Of which: Interest Expenses
+   Code 23300.0 | Level 1.0 | Order 76.0 | Lợi nhuận hoặc lỗ trong công ty liên kết | Profit or loss from join venture companies
+   Code 22110.0 | Level 1.0 | Order 80.0 | Chi phí bán hàng | Selling Expenses
+   Code 22200.0 | Level 1.0 | Order 90.0 | Chi phí quản lý doanh nghiệp | General and admin expenses
+   Code 23110.0 | Level 1.0 | Order 100.0 | Lợi nhuận thuần từ hoạt động kinh doanh | Net Profit from Operating activities
+   Code 21900.0 | Level 1.0 | Order 110.0 | Thu nhập khác | Other incomes
+   Code 22900.0 | Level 1.0 | Order 120.0 | Chi phí khác | Other Expenses
+   Code 23900.0 | Level 1.0 | Order 130.0 | Lợi nhuận khác | Other profits
+   ... and 32 more line items
+
+[INSURANCE_HIGHLIGHT] (Total items: 18):
+   Code 920000.0 | Level 0.0 | Order 10.0 | Báo cáo Kết quả Hoạt động kinh doanh | Income Statement
+   Code 21000.0 | Level 1.0 | Order 20.0 | Tổng doanh thu hoạt động kinh doanh | Gross Operating Revenue
+   Code 21001.0 | Level 1.0 | Order 30.0 | Doanh thu thuần | Net Sales
+   Code 22150.0 | Level 1.0 | Order 40.0 | Bồi thường thuộc phần trách nhiệm giữ lại | Claim expenses on retained risks
+   Code 23110.0 | Level 1.0 | Order 50.0 | Lợi nhuận thuần từ hoạt động kinh doanh | Net Profit from Operating activities
+   Code 23501.0 | Level 1.0 | Order 60.0 | Lợi nhuận hoạt động tài chính | 
+   Code 23000.0 | Level 1.0 | Order 70.0 | Lợi nhuận sau thuế của Công ty mẹ | Net Profit After Tax of Parent Company
+   Code 910000.0 | Level 0.0 | Order 80.0 | Bảng Cân đối Kế toán | Balance Sheet
+   Code 11200.0 | Level 1.0 | Order 90.0 | Các khoản đầu tư tài chính ngắn hạn | Short term financial investment
+   Code 12500.0 | Level 1.0 | Order 100.0 | Các khoản đầu tư tài chính dài hạn | Long term Finacial  Investments
+   Code 11300.0 | Level 1.0 | Order 110.0 | Các khoản phải thu ngắn hạn | Short term Account Receivables
+   Code 13100.0 | Level 1.0 | Order 120.0 | Nợ ngắn hạn | Short term Liabilities
+   Code 13500.0 | Level 1.0 | Order 130.0 | Các quĩ dự phòng nghiệp vụ (trước 2014) | Reserves
+   Code 13510.0 | Level 2.0 | Order 140.0 | Dự phòng phí (trước 2014) | Unearned premium reserve
+   Code 13520.0 | Level 2.0 | Order 150.0 | Dự phòng bồi thường (trước 2014) | Claim reserve
+   ... and 3 more line items
+
+[INSURANCE_BALANCESHEET] (Total items: 168):
+   Code 12700.0 | Level 0.0 | Order 9.0 | TỔNG CỘNG TÀI SẢN | TOTAL ASSETS
+   Code 11000.0 | Level 1.0 | Order 10.0 | Tài sản ngắn hạn | Current Assets
+   Code 11100.0 | Level 2.0 | Order 11.0 | Tiền và các khoản tương đương tiền | Cash and Cash Equivalents
+   Code 11110.0 | Level 3.0 | Order 20.0 | Tiền | Cash
+   Code 11120.0 | Level 3.0 | Order 51.0 | Các khoản tương đương tiền | Cash equivalents
+   Code 11200.0 | Level 2.0 | Order 60.0 | Các khoản đầu tư tài chính ngắn hạn | Short term financial investment
+   Code 11210.0 | Level 3.0 | Order 80.0 | Đầu tư ngắn hạn | Short-term investments
+   Code 11290.0 | Level 3.0 | Order 81.0 | Dự phòng giảm giá đầu tư ngắn hạn | Provision for  short term investment loss
+   Code 412320.0 | Level 3.0 | Order 82.0 | Đầu tư giữ đến ngày đáo hạn | Held to maturity Investment
+   Code 11300.0 | Level 2.0 | Order 90.0 | Các khoản phải thu ngắn hạn | Short term Account Receivables
+   Code 11310.0 | Level 3.0 | Order 100.0 | Phải thu khách hàng | Account Receivable
+   Code 11311.0 | Level 4.0 | Order 101.0 | Phải thu hoạt động bảo hiểm gốc | Premium receivables
+   Code 400005.0 | Level 4.0 | Order 105.0 | Phải thu khác của khách hàng | Other Receivable from customers
+   Code 11320.0 | Level 3.0 | Order 110.0 | Trả trước cho người bán | Prepaid for suppliers
+   Code 11550.0 | Level 3.0 | Order 111.0 | Tạm ứng | Advances to employees
+   ... and 153 more line items
+
+[NON_FINANCE_CASHFLOW] (Total items: 81):
+   Code 932000.0 | Level 0.0 | Order 0.0 | LƯU CHUYỂN TIỀN TỪ HOẠT ĐỘNG KINH DOANH - GIÁN TIẾP | Cash flows from Operating Activities - Indirect method
+   Code 932000.0 | Level 0.0 | Order 0.0 | LƯU CHUYỂN TIỀN TỪ HOẠT ĐỘNG KINH DOANH - GIÁN TIẾP | Cash flows from Operating Activities - Indirect method
+   Code 23810.0 | Level 1.0 | Order 10.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 23810.0 | Level 1.0 | Order 10.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 30000.0 | Level 0.0 | Order 15.0 | Điều chỉnh cho các khoản | Adjustments
+   Code 30000.0 | Level 1.0 | Order 15.0 | Điều chỉnh cho các khoản | Adjustments
+   Code 22230.0 | Level 2.0 | Order 20.0 | Chi phí khấu hao tài sản cố định | Depreciation of Fixed Assets Expenses
+   Code 22230.0 | Level 1.0 | Order 20.0 | Chi phí khấu hao tài sản cố định | Depreciation of Fixed Assets Expenses
+   Code 31111.0 | Level 2.0 | Order 25.0 | Phân bổ lợi thế thương mại | Amortisation of goodwill
+   Code 31111.0 | Level 1.0 | Order 25.0 | Phân bổ lợi thế thương mại | Amortisation of goodwill
+   Code 22515.0 | Level 2.0 | Order 30.0 | Dự phòng giảm giá các khoản đầu tư ngắn hạn, dài hạn | Provision for short term investment loss
+   Code 22515.0 | Level 1.0 | Order 30.0 | Dự phòng giảm giá các khoản đầu tư ngắn hạn, dài hạn | Provision for short term investment loss
+   Code 31100.0 | Level 2.0 | Order 40.0 | Lãi, lỗ chênh lệch tỷ giá hối đoái chưa thực hiện | Unrealised foreign exchange gain/(loss)
+   Code 31100.0 | Level 1.0 | Order 40.0 | Lãi, lỗ chênh lệch tỷ giá hối đoái chưa thực hiện | Unrealised foreign exchange gain/(loss)
+   Code 31101.0 | Level 1.0 | Order 45.0 | Lãi/(lỗ) từ thanh lý tài sản cố định | Profit/(loss) from liquidating fixed assets
+   ... and 66 more line items
+
+[BANK_BALANCESHEET] (Total items: 161):
+   Code 12700.0 | Level 1.0 | Order 10.0 | TỔNG CỘNG TÀI SẢN | TOTAL ASSETS
+   Code 411100.0 | Level 2.0 | Order 20.0 | Tiền mặt, vàng bạc, đá quí | Cash, gold, gemstone
+   Code 411200.0 | Level 2.0 | Order 30.0 | Tiền gửi tại NHNN | Balance at the State Bank
+   Code 411400.0 | Level 2.0 | Order 50.0 | Tiền, vàng gửi tại các TCTD khác và cho vay các TCTD khác | Current deposit and lend with other financial institutions
+   Code 411410.0 | Level 3.0 | Order 51.0 | Tiền vàng gửi các TCTD khác | Cash and gold deposits
+   Code 411420.0 | Level 3.0 | Order 52.0 | Cho vay các TCTD khác | Other bank loans
+   Code 411430.0 | Level 3.0 | Order 53.0 | Dự phòng rủi ro cho vay các TCTD khác | Provision for other financial institution loans - loss
+   Code 411500.0 | Level 2.0 | Order 60.0 | Chứng khoán kinh doanh | Trading securities
+   Code 411510.0 | Level 3.0 | Order 70.0 | Chứng khoán kinh doanh | Trading securities
+   Code 411520.0 | Level 3.0 | Order 80.0 | Dự phòng giảm giá chứng khoán kinh doanh | Provision for trading securities loss
+   Code 411600.0 | Level 2.0 | Order 90.0 | Các công cụ chứng khoán phái sinh và các tài sản tài chính khác | Derivative financial instruments and other financial assets
+   Code 12700.0 | Level 0.0 | Order 99.0 | TỔNG CỘNG TÀI SẢN | TOTAL ASSETS
+   Code 411100.0 | Level 1.0 | Order 100.0 | Tiền mặt, vàng bạc, đá quí | Cash, gold, gemstone
+   Code 412000.0 | Level 2.0 | Order 100.0 | Cho vay khách hàng | Customer Loans
+   Code 412100.0 | Level 3.0 | Order 110.0 | Cho vay khách hàng | Customer Loans
+   ... and 146 more line items
+
+[INSURANCE_INCOME] (Total items: 86):
+   Code 21400.0 | Level 1.0 | Order 10.0 | Doanh thu phí bảo hiểm | Revenue from insurance premium
+   Code 21410.0 | Level 2.0 | Order 20.0 | Thu phí bảo hiểm gốc | Gross written premium
+   Code 21420.0 | Level 2.0 | Order 30.0 | Thu phí nhận tái bảo hiểm | Reinsurance premium ceded
+   Code 21425.0 | Level 2.0 | Order 31.0 | Tăng (giảm) dự phòng phí bảo hiểm gốc và nhận tái bảo hiểm | Increase/(decrease) in unearned premium reserve for direct insurance and outward reinsurance
+   Code 21090.0 | Level 1.0 | Order 32.0 | Các khoản giảm trừ doanh thu | Deduction revenues
+   Code 21491.0 | Level 2.0 | Order 33.0 | Phí nhượng tái bảo hiểm | Reinsurance premium ceded
+   Code 411910.0 | Level 2.0 | Order 34.0 | Dự phòng phí nhượng tái bảo hiểm | Provision for Premium outward reinsurance 
+   Code 21493.0 | Level 3.0 | Order 35.0 | Giảm phí | Premium deductions
+   Code 21492.0 | Level 3.0 | Order 36.0 | Hoàn phí | Premium returns
+   Code 99999.0 | Level 2.0 | Order 37.0 | Các khoản giảm trừ khác | Others deduction
+   Code 21480.0 | Level 1.0 | Order 38.0 | Tăng (giảm) dự phòng phí, dự phòng toán học (trước 2014) | Increase in unearned premium reserve and techinical reserve
+   Code 21440.0 | Level 1.0 | Order 39.0 | Doanh thu phí bảo hiểm thuần | Net revenue of insurance premium
+   Code 21450.0 | Level 1.0 | Order 40.0 | Hoa hồng nhượng tái bảo hiểm và doanh thu khác HĐKD Bảo hiểm | Commission income from  outward reinsurance and other income from insurance activities
+   Code 21411.0 | Level 2.0 | Order 45.0 | Thu hoa hồng nhượng tái bảo hiểm | Commission on reinsurance ceded
+   Code 21430.0 | Level 2.0 | Order 46.0 | Thu khác hoạt động kinh doanh bảo hiểm | Other income
+   ... and 71 more line items
+
+[NON_FINANCE_GROWTH] (Total items: 11):
+   Code 53032.0 | Level 1.0 | Order 10.0 | Tăng trưởng DTT Quý vs cùng kỳ (Qtr) | Net Revenue Growth (Qtr vs Same Period)
+   Code 53030.0 | Level 1.0 | Order 10.0 | Tăng trưởng DTT (YoY) | Net Revenue Growth (YoY)
+   Code 53035.0 | Level 1.0 | Order 20.0 | Tăng trưởng LNST Quý so vs Cùng kỳ (Qtr) | Net Income Growth (Qtr vs Same Period)
+   Code 52005.0 | Level 1.0 | Order 20.0 | Tăng trưởng LNST (YoY) | Profit After Tax Growth (YoY)
+   Code 53058.0 | Level 1.0 | Order 30.0 | Tăng trưởng EBIT hoạt động (4 Quý gần nhất) | Operating EBIT Growth (Trailing 4 Qtrs)
+   Code 53075.0 | Level 1.0 | Order 30.0 | Tăng trưởng EBIT Quý so với cùng kỳ năm trước (YoY) | Quarter EBIT Growth (YoY)
+   Code 53020.0 | Level 1.0 | Order 40.0 | Tăng trưởng TTS (YoY) | Total Asset Growth (YoY)
+   Code 53020.0 | Level 1.0 | Order 40.0 | Tăng trưởng TTS (YoY) | Total Asset Growth (YoY)
+   Code 51030.0 | Level 1.0 | Order 50.0 | Tăng trưởng VCSH (YoY) | Equity Growth (YoY)
+   Code 51030.0 | Level 1.0 | Order 50.0 | Tăng trưởng VCSH (YoY) | Equity Growth (YoY)
+   Code 56140.0 | Level 1.0 | Order 60.0 | Tăng trưởng cổ tức (Năm) | Dividend payment growth Yearly
+
+[INSURANCE_CASHFLOW] (Total items: 61):
+   Code 932000.0 | Level 0.0 | Order 0.0 | LƯU CHUYỂN TIỀN TỪ HOẠT ĐỘNG KINH DOANH - GIÁN TIẾP | Cash flows from Operating Activities - Indirect method
+   Code 23810.0 | Level 0.0 | Order 1.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 30000.0 | Level 0.0 | Order 2.0 | Điều chỉnh cho các khoản | Adjustments
+   Code 22230.0 | Level 1.0 | Order 3.0 | Chi phí khấu hao tài sản cố định | Depreciation of Fixed Assets Expenses
+   Code 31111.0 | Level 1.0 | Order 4.0 | Phân bổ lợi thế thương mại | Amortisation of goodwill
+   Code 22515.0 | Level 1.0 | Order 5.0 | Dự phòng giảm giá các khoản đầu tư ngắn hạn, dài hạn | Provision for short term investment loss
+   Code 31100.0 | Level 1.0 | Order 6.0 | Lãi, lỗ chênh lệch tỷ giá hối đoái chưa thực hiện | Unrealised foreign exchange gain/(loss)
+   Code 31110.0 | Level 1.0 | Order 7.0 | Lãi, lỗ từ hoạt động đầu tư | Profit/(loss) from investing activities
+   Code 22509.0 | Level 1.0 | Order 8.0 | Chi phí lãi vay | Interest Expenses
+   Code 31102.0 | Level 1.0 | Order 12.0 | Thu lãi và cổ tức | Interest income and dividend
+   Code 431100.0 | Level 1.0 | Order 13.0 | Các khoản điều chỉnh khác | Other adjustments
+   Code 31120.0 | Level 0.0 | Order 14.0 | Lợi nhuận từ hoạt động kinh doanh trước thay đổi vốn  lưu động | Operating profit/(loss) before changes in Working Capital
+   Code 31130.0 | Level 1.0 | Order 15.0 | Tăng, giảm các khoản phải thu |  Increase/(decrease) in receivables
+   Code 520000.0 | Level 2.0 | Order 16.0 | Phải thu hoạt động BH gốc | 
+   Code 521000.0 | Level 2.0 | Order 17.0 | Phải thu hoạt động BH Nhận Tái | Reinsurance assumed receivables
+   ... and 46 more line items
+
+[NON_FINANCE_PROFITABILITY] (Total items: 10):
+   Code 52002.0 | Level 1.0 | Order 10.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 10.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   Code 52001.0 | Level 1.0 | Order 20.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52001.0 | Level 1.0 | Order 20.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 56240.0 | Level 1.0 | Order 30.0 | Biên LN gộp (quý) | Gross Profit margin (Quarter)
+   Code 53006.0 | Level 1.0 | Order 30.0 | Biên lợi nhuận gộp (4 Quý gần nhất) | Gross Profit margin (Last 4 Qrts.)
+   Code 56020.0 | Level 1.0 | Order 40.0 | Biên lợi nhuận ròng (Quý) | Net Profit Margin (Quarter)
+   Code 56180.0 | Level 1.0 | Order 50.0 | Biên EBITDA hoạt động (Quý) | EBITDA Margin Quarterly
+   Code 56200.0 | Level 1.0 | Order 50.0 | Biên EBITDA hoạt động (Năm) | Operating EBITDA Margin Yearly
+   Code 56190.0 | Level 1.0 | Order 60.0 | Biên EBIT hoạt động (Quý) | Operating EBIT Margin Quarterly
+
+[BANK_CASHFLOW] (Total items: 129):
+   Code 932000.0 | Level 0.0 | Order 0.0 | LƯU CHUYỂN TIỀN TỪ HOẠT ĐỘNG KINH DOANH - GIÁN TIẾP | Cash flows from Operating Activities - Indirect method
+   Code 932000.0 | Level 0.0 | Order 1.0 | LƯU CHUYỂN TIỀN TỪ HOẠT ĐỘNG KINH DOANH - GIÁN TIẾP | Cash flows from Operating Activities - Indirect method
+   Code 30000.0 | Level 0.0 | Order 10.0 | Điều chỉnh cho các khoản | Adjustments
+   Code 23800.0 | Level 2.0 | Order 10.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 22230.0 | Level 1.0 | Order 15.0 | Chi phí khấu hao tài sản cố định | Depreciation of Fixed Assets Expenses
+   Code 431030.0 | Level 1.0 | Order 20.0 | Dự phòng rủi ro tín dụng, Giảm giá, đầu tư trích thêm,/(hoàn nhập) trong năm | Provision for credit risk, loss, additional invesment, /(return) in the period
+   Code 22230.0 | Level 2.0 | Order 20.0 | Chi phí khấu hao tài sản cố định | Depreciation of Fixed Assets Expenses
+   Code 431040.0 | Level 1.0 | Order 25.0 | Lãi và phí phải thu trong kì (thực tế chưa thu) (*) | Interest, charge receivable dates (not collected yet) (*)
+   Code 431030.0 | Level 2.0 | Order 30.0 | Dự phòng rủi ro tín dụng, Giảm giá, đầu tư trích thêm,/(hoàn nhập) trong năm | Provision for credit risk, loss, additional invesment, /(return) in the period
+   Code 431060.0 | Level 1.0 | Order 35.0 | Lãi lỗ do thanh lý TSCĐ | Gain (loss) by liquidating fixed assets
+   Code 431070.0 | Level 1.0 | Order 40.0 | Lãi lỗ do việc bán, thanh lý bất động sản | Gain (loss) of selling investment real estate
+   Code 431080.0 | Level 1.0 | Order 45.0 | Lãi lỗ do đầu tư vào đơn vị khác, cổ tức nhận được từ hoạt động đầu tư | Gain (loss) on Investment in equities and joint-venture, dividends received
+   Code 431050.0 | Level 2.0 | Order 50.0 | Lãi và phí phải trả trong kì (Thực tế chưa trả) | Interest, charge payable dates (not paid yet)
+   Code 431090.0 | Level 1.0 | Order 50.0 | Chênh lệch tỷ giá hối đoái chưa thực hiện | Exchange difference unrealized
+   Code 431100.0 | Level 1.0 | Order 55.0 | Các khoản điều chỉnh khác | Other adjustments
+   ... and 114 more line items
+
+[BANK_INCOME] (Total items: 43):
+   Code 421100.0 | Level 1.0 | Order 20.0 | Thu nhập lãi và các khoản thu nhập tương tự | Interest and similar income
+   Code 422100.0 | Level 1.0 | Order 30.0 | Chi phí lãi và các khoản chi phí tương tự | Interest expense and similar charges
+   Code 421900.0 | Level 1.0 | Order 35.0 | Thu nhập lãi thuần | Interest income
+   Code 423100.0 | Level 1.0 | Order 40.0 | Thu nhập thuần ngoài lãi | Non-interest income
+   Code 421200.0 | Level 1.0 | Order 50.0 | Thu nhập từ hoạt động dịch vụ | Service income
+   Code 422200.0 | Level 1.0 | Order 60.0 | Chi phí hoạt động dịch vụ | Service expense
+   Code 423200.0 | Level 1.0 | Order 70.0 | Thu nhập thuần từ hoạt động dịch vụ | Net service income
+   Code 423300.0 | Level 1.0 | Order 100.0 | Lợi nhuận thuần từ hoạt động kinh doanh ngoại hối | Net foreign exchange gains(loss)
+   Code 423400.0 | Level 1.0 | Order 130.0 | Lợi nhuận thuần từ hoạt động kinh doanh chứng khoán | Net income on trading securities
+   Code 421600.0 | Level 1.0 | Order 170.0 | Thu nhập thuần từ hoạt động kinh doanh khác | Net income of other business operations
+   Code 421100.0 | Level 2.0 | Order 200.0 | Thu nhập lãi và các khoản thu nhập tương tự | Interest and similar income
+   Code 22200.0 | Level 1.0 | Order 220.0 | Chi phí quản lý doanh nghiệp | General and admin expenses
+   Code 88888.0 | Level 1.0 | Order 225.0 | Lợi nhuận thuần từ hoạt động kinh doanh trước chi phí dự phòng rủi ro tín dụng | Net profit from operating activities before provision for credit risk
+   Code 422900.0 | Level 1.0 | Order 230.0 | Chi phí dự phòng rủi ro tín dụng | Provision for credit risk
+   Code 23800.0 | Level 1.0 | Order 260.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   ... and 28 more line items
+
+[ALL_FORMS_COMMITMENT] (Total items: 3):
+   Code 51033.0 | Level 1.0 | Order 10.0 | Cổ tức / Thị giá hiện tại | Current Dividend Yield
+   Code 53043.0 | Level 1.0 | Order 20.0 | Tỷ lệ trả cổ tức (Năm) | Dividend Payout (Yr)
+   Code 53044.0 | Level 1.0 | Order 30.0 | Tỷ lệ phát hành ESOP năm gần nhất | ESOP percentage of recent year
+
+[ALL_FORMS_HIGHLIGHT] (Total items: 11):
+   Code 910000.0 | Level 0.0 | Order 100.0 | Bảng Cân đối Kế toán | Balance Sheet
+   Code 12700.0 | Level 1.0 | Order 110.0 | TỔNG CỘNG TÀI SẢN | TOTAL ASSETS
+   Code 11000.0 | Level 1.0 | Order 120.0 | Tài sản ngắn hạn | Current Assets
+   Code 12000.0 | Level 1.0 | Order 130.0 | Tài sản dài hạn | Long-term Assets
+   Code 13000.0 | Level 1.0 | Order 140.0 | Nợ phải trả | Liabilities
+   Code 14000.0 | Level 1.0 | Order 150.0 | Vốn chủ sở hữu | Owners equity
+   Code 23110.0 | Level 1.0 | Order 240.0 | Lợi nhuận thuần từ hoạt động kinh doanh | Net Profit from Operating activities
+   Code 23000.0 | Level 1.0 | Order 260.0 | Lợi nhuận sau thuế của Công ty mẹ | Net Profit After Tax of Parent Company
+   Code 53007.0 | Level 1.0 | Order 300.0 | EPS (4 Quý liền kề) | EPS (trailing 4 Qtrs)
+   Code 52001.0 | Level 1.0 | Order 310.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 320.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+
+[NON_FINANCE_FINHEALTH] (Total items: 9):
+   Code 54018.0 | Level 1.0 | Order 20.0 | D/E | D/E
+   Code 65006.0 | Level 1.0 | Order 30.0 | Khả năng Thanh toán Lãi vay (4 Quý gần nhất) | Interest coverage TTM
+   Code 65006.0 | Level 1.0 | Order 30.0 | Khả năng Thanh toán Lãi vay (4 Quý gần nhất) | Interest coverage TTM
+   Code 56290.0 | Level 1.0 | Order 40.0 | Tỷ lệ CFO/Doanh thu thuần (Quý) | CFO/Revenue
+   Code 53060.0 | Level 1.0 | Order 40.0 | Tỷ lệ CFO / Doanh thu thuần (4 Quý gần nhất) | CFO / Net Revenue (Trailing 4 Qtrs)
+   Code 56100.0 | Level 1.0 | Order 50.0 | Số ngày nắm giữ Hàng tồn kho (Quý) | Days of Inventory Quarterly
+   Code 54020.0 | Level 1.0 | Order 50.0 | Số ngày nắm giữ Hàng tồn kho (Năm) | Days of Inventory Yearly
+   Code 56030.0 | Level 1.0 | Order 60.0 | Nợ vay/EBITDA (Năm) | Loans/EBITDA (Yr)
+   Code 56070.0 | Level 1.0 | Order 70.0 | Vòng quay Tiền mặt (Quý) | Cash cycle (Quarter)
+
+[SECURITIES_INCOME] (Total items: 22):
+   Code 21000.0 | Level 1.0 | Order 10.0 | Tổng doanh thu hoạt động kinh doanh | Gross Operating Revenue
+   Code 621110.0 | Level 2.0 | Order 30.0 | Doanh thu môi giới chứng khoán cho người đầu tư | Securities Brokerage for investors Revenues
+   Code 621120.0 | Level 2.0 | Order 40.0 | Doanh thu hoạt động tự doanh chứng khoán | Operating private Securities Revenues
+   Code 621130.0 | Level 2.0 | Order 50.0 | Doanh thu quản lý danh mục đầu tư cho  người uỷ thác đầu tư | Managerial Porfolio Investment for truster investment Revenues
+   Code 621140.0 | Level 2.0 | Order 70.0 | Doanh thu bảo lãnh phát hành, đại lý phát hành chứng khoán | Issue Guarantee,  securities issue agency Revenues
+   Code 621150.0 | Level 2.0 | Order 90.0 | Doanh thu tư vấn đầu tư chứng khoán cho người đầu tư | Securities Investment Consult Revenue for investors
+   Code 621160.0 | Level 2.0 | Order 110.0 | Doanh thu lưu ký chứng khoán cho người đầu tư | Securities Deposit Revenue for investors
+   Code 621170.0 | Level 2.0 | Order 120.0 | Hoàn nhập dự phòng, các khoản trích trước | Repayment provision, Advances
+   Code 621180.0 | Level 2.0 | Order 130.0 | Doanh thu về vốn kinh doanh | Operating Capital Revenues
+   Code 621190.0 | Level 2.0 | Order 140.0 | Doanh thu cho thuê tài sản, sử dụng thiết bị, sử dụng thông tin | Leasing, using equipment and information Revenues
+   Code 421110.0 | Level 2.0 | Order 141.0 | Thu nhập lãi tiền gửi | Interest on deposit
+   Code 21090.0 | Level 1.0 | Order 160.0 | Các khoản giảm trừ doanh thu | Deduction revenues
+   Code 21001.0 | Level 1.0 | Order 170.0 | Doanh thu thuần | Net Sales
+   Code 621200.0 | Level 1.0 | Order 180.0 | Thu lãi đầu tư | Proceeds from Interest Investment
+   Code 621300.0 | Level 1.0 | Order 190.0 | Doanh thu hoạt động kinh doanh chứng khoán và lãi đầu tư | Trading Securities activities and Interest Investment Revenues
+   ... and 7 more line items
+
+[NON_FINANCE_FUNDAMENTAL] (Total items: 21):
+   Code 53055.0 | Level 1.0 | Order 10.0 | Tăng trưởng DTT (YTD) | Net Revenue Growth (YTD)
+   Code 53056.0 | Level 1.0 | Order 20.0 | Tăng trưởng LNST (YTD) | Net Income Growth (YTD)
+   Code 52005.0 | Level 1.0 | Order 20.0 | Tăng trưởng LNST (YoY) | Profit After Tax Growth (YoY)
+   Code 53058.0 | Level 1.0 | Order 30.0 | Tăng trưởng EBIT hoạt động (4 Quý gần nhất) | Operating EBIT Growth (Trailing 4 Qtrs)
+   Code 53068.0 | Level 1.0 | Order 30.0 | Tăng trưởng EBIT (YTD) | EBIT Growth (YTD)
+   Code 53006.0 | Level 1.0 | Order 40.0 | Biên lợi nhuận gộp (4 Quý gần nhất) | Gross Profit margin (Last 4 Qrts.)
+   Code 53061.0 | Level 1.0 | Order 40.0 | Biên lợi nhuận gộp (YTD) | Gross Profit Margin (YTD)
+   Code 52001.0 | Level 1.0 | Order 50.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52001.0 | Level 1.0 | Order 50.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 60.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 60.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   Code 54018.0 | Level 1.0 | Order 70.0 | D/E | D/E
+   Code 54018.0 | Level 1.0 | Order 70.0 | D/E | D/E
+   Code 51033.0 | Level 1.0 | Order 80.0 | Cổ tức / Thị giá hiện tại | Current Dividend Yield
+   Code 51033.0 | Level 1.0 | Order 80.0 | Cổ tức / Thị giá hiện tại | Current Dividend Yield
+   ... and 6 more line items
+
+[ALL_FORMS_ESTIMATION] (Total items: 14):
+   Code 21000.0 | Level 1.0 | Order 1.0 | Tổng doanh thu hoạt động kinh doanh | Gross Operating Revenue
+   Code 21001.0 | Level 1.0 | Order 1.0 | Doanh thu thuần | Net Sales
+   Code 21001.0 | Level 1.0 | Order 2.0 | Doanh thu thuần | Net Sales
+   Code 23800.0 | Level 1.0 | Order 2.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 23800.0 | Level 1.0 | Order 3.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 23003.0 | Level 1.0 | Order 5.0 | Lợi nhuận sau thuế thu nhập doanh nghiệp | Net Profit After Tax
+   Code 23000.0 | Level 1.0 | Order 7.0 | Lợi nhuận sau thuế của Công ty mẹ | Net Profit After Tax of Parent Company
+   Code 400001.0 | Level 1.0 | Order 9.0 | Cổ tức bằng tiền dự kiến | Estimated dividend
+   Code 14110.0 | Level 1.0 | Order 10.0 | Vốn góp | Paid-in capital
+   Code 14310.0 | Level 1.0 | Order 11.0 | Quỹ khen thưởng, phúc lợi | Bonus and welfare funds
+   Code 14170.0 | Level 1.0 | Order 12.0 | Quỹ đầu tư phát triển | Development and Investment Fund
+   Code 14180.0 | Level 1.0 | Order 13.0 | Quỹ dự phòng tài chính | Financial Provision  Fund
+   Code 413431.0 | Level 1.0 | Order 14.0 | Quỹ dự trữ bổ sung vốn điều lệ | 
+   Code 14190.0 | Level 1.0 | Order 15.0 | Quỹ khác thuộc vốn chủ sở hữu | Other Funds of Owners Equity
+
+[BANK_FUNDAMENTAL] (Total items: 30):
+   Code 55002.0 | Level 1.0 | Order 10.0 | Hệ số an toàn vốn (CAR) | Capital Adequacy Ratio (CAR)
+   Code 55002.0 | Level 1.0 | Order 10.0 | Hệ số an toàn vốn (CAR) | Capital Adequacy Ratio (CAR)
+   Code 56007.0 | Level 1.0 | Order 20.0 | Tỷ lệ Vốn chủ sở hữu trên Tổng tài sản | Equity to Total Asset
+   Code 56007.0 | Level 1.0 | Order 20.0 | Tỷ lệ Vốn chủ sở hữu trên Tổng tài sản | Equity to Total Asset
+   Code 57016.0 | Level 1.0 | Order 30.0 | Tỷ lệ nợ xấu (NPL) | Bad loans / Loans outstanding (NPL)
+   Code 57016.0 | Level 1.0 | Order 30.0 | Tỷ lệ nợ xấu (NPL) | Bad loans / Loans outstanding (NPL)
+   Code 57017.0 | Level 1.0 | Order 40.0 | Tỷ lệ bao nợ xấu | Provision for doubtful debts / Bad loans
+   Code 57017.0 | Level 1.0 | Order 40.0 | Tỷ lệ bao nợ xấu | Provision for doubtful debts / Bad loans
+   Code 57010.0 | Level 1.0 | Order 50.0 | Tỷ lệ lãi dự thu trên tổng tài sản | Receivable Interest / Total asset
+   Code 57010.0 | Level 1.0 | Order 50.0 | Tỷ lệ lãi dự thu trên tổng tài sản | Receivable Interest / Total asset
+   Code 53080.0 | Level 1.0 | Order 60.0 | Tăng trưởng cho vay khách hàng (YTD) | Customer Loans Growth (YTD)
+   Code 53080.0 | Level 1.0 | Order 60.0 | Tăng trưởng cho vay khách hàng (YTD) | Customer Loans Growth (YTD)
+   Code 57012.0 | Level 1.0 | Order 70.0 | Tỷ lệ cho vay trên tiền gửi | Loans outstanding / Deposit of Customer
+   Code 57012.0 | Level 1.0 | Order 70.0 | Tỷ lệ cho vay trên tiền gửi | Loans outstanding / Deposit of Customer
+   Code 57009.0 | Level 1.0 | Order 80.0 | Tỷ lệ cho vay trên tổng tài sản | Loans outstanding / Total asset
+   ... and 15 more line items
+
+[SECURITIES_FUNDAMENTAL] (Total items: 22):
+   Code 53055.0 | Level 1.0 | Order 10.0 | Tăng trưởng DTT (YTD) | Net Revenue Growth (YTD)
+   Code 53030.0 | Level 1.0 | Order 10.0 | Tăng trưởng DTT (YoY) | Net Revenue Growth (YoY)
+   Code 53056.0 | Level 1.0 | Order 20.0 | Tăng trưởng LNST (YTD) | Net Income Growth (YTD)
+   Code 52005.0 | Level 1.0 | Order 20.0 | Tăng trưởng LNST (YoY) | Profit After Tax Growth (YoY)
+   Code 51050.0 | Level 1.0 | Order 30.0 | Tăng trưởng VCSH (YTD) | Equity Growth (YTD)
+   Code 51050.0 | Level 1.0 | Order 30.0 | Tăng trưởng VCSH (YTD) | Equity Growth (YTD)
+   Code 52022.0 | Level 1.0 | Order 40.0 | Biên lợi nhuận ròng (YTD) | Net profit margin (YTD)
+   Code 52021.0 | Level 1.0 | Order 40.0 | Biên lợi nhuận ròng (4 Quý gần nhất) | Net Profit Margin (Last 4Qrts.)
+   Code 52001.0 | Level 1.0 | Order 50.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52001.0 | Level 1.0 | Order 50.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 60.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 60.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   Code 54018.0 | Level 1.0 | Order 70.0 | D/E | D/E
+   Code 54018.0 | Level 1.0 | Order 70.0 | D/E | D/E
+   Code 712010.0 | Level 1.0 | Order 80.0 | Tỷ lệ vốn khả dụng | Capital adequacy ratio
+   ... and 7 more line items
+
+[INSURANCE_FUNDAMENTAL] (Total items: 18):
+   Code 56001.0 | Level 1.0 | Order 10.0 | Đòn bẩy tài chính | Financial Leverage
+   Code 56002.0 | Level 1.0 | Order 10.0 | Tỷ lệ nợ trên Vốn chủ sở hữu | Liability to Equity
+   Code 53030.0 | Level 1.0 | Order 20.0 | Tăng trưởng DTT (YoY) | Net Revenue Growth (YoY)
+   Code 53055.0 | Level 1.0 | Order 20.0 | Tăng trưởng DTT (YTD) | Net Revenue Growth (YTD)
+   Code 52005.0 | Level 1.0 | Order 30.0 | Tăng trưởng LNST (YoY) | Profit After Tax Growth (YoY)
+   Code 53056.0 | Level 1.0 | Order 30.0 | Tăng trưởng LNST (YTD) | Net Income Growth (YTD)
+   Code 53076.0 | Level 1.0 | Order 40.0 | Tăng trưởng lợi nhuận từ HĐ tài chính 4 quý liền kề (YoY) | Growth of trailing profit from financial activities
+   Code 53077.0 | Level 1.0 | Order 40.0 | Tăng trưởng lợi nhuận HĐ tài chính YTD | Growth of profit from financial activities YTD
+   Code 53078.0 | Level 1.0 | Order 50.0 | Tỷ lệ kết hợp (Năm) | Insurance combined ratio (Yr)
+   Code 53079.0 | Level 1.0 | Order 50.0 | Tỷ lệ kết hợp (YTD) | Insurance combined ratio (YTD)
+   Code 52022.0 | Level 1.0 | Order 60.0 | Biên lợi nhuận ròng (YTD) | Net profit margin (YTD)
+   Code 52021.0 | Level 1.0 | Order 60.0 | Biên lợi nhuận ròng (4 Quý gần nhất) | Net Profit Margin (Last 4Qrts.)
+   Code 52001.0 | Level 1.0 | Order 70.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52001.0 | Level 1.0 | Order 70.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 80.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+   ... and 3 more line items
+
+[SECURITIES_HIGHLIGHT] (Total items: 13):
+   Code 910000.0 | Level 0.0 | Order 100.0 | Bảng Cân đối Kế toán | Balance Sheet
+   Code 12700.0 | Level 1.0 | Order 110.0 | TỔNG CỘNG TÀI SẢN | TOTAL ASSETS
+   Code 11000.0 | Level 1.0 | Order 120.0 | Tài sản ngắn hạn | Current Assets
+   Code 12000.0 | Level 1.0 | Order 130.0 | Tài sản dài hạn | Long-term Assets
+   Code 13000.0 | Level 1.0 | Order 140.0 | Nợ phải trả | Liabilities
+   Code 14000.0 | Level 1.0 | Order 150.0 | Vốn chủ sở hữu | Owners equity
+   Code 920000.0 | Level 0.0 | Order 200.0 | Báo cáo Kết quả Hoạt động kinh doanh | Income Statement
+   Code 21000.0 | Level 1.0 | Order 210.0 | Tổng doanh thu hoạt động kinh doanh | Gross Operating Revenue
+   Code 23800.0 | Level 1.0 | Order 230.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 23003.0 | Level 1.0 | Order 240.0 | Lợi nhuận sau thuế thu nhập doanh nghiệp | Net Profit After Tax
+   Code 53007.0 | Level 1.0 | Order 300.0 | EPS (4 Quý liền kề) | EPS (trailing 4 Qtrs)
+   Code 52001.0 | Level 1.0 | Order 310.0 | ROA 4 quý gần nhất | ROA last 4 quarters
+   Code 52002.0 | Level 1.0 | Order 320.0 | ROE 4 quý gần nhất | ROE last 4 quarters
+
+[BANK_HIGHLIGHT] (Total items: 13):
+   Code 910000.0 | Level 0.0 | Order 10.0 | Bảng Cân đối Kế toán | Balance Sheet
+   Code 412000.0 | Level 1.0 | Order 40.0 | Cho vay khách hàng | Customer Loans
+   Code 412200.0 | Level 2.0 | Order 50.0 | Dự phòng rủi ro cho vay khách hàng | Provision for customer loans loss
+   Code 412400.0 | Level 1.0 | Order 70.0 | Góp vốn, đầu tư dài hạn | Capital contributions and long-term investments
+   Code 413300.0 | Level 1.0 | Order 90.0 | Tiền gửi của khách hàng | Deposit of customers
+   Code 413600.0 | Level 1.0 | Order 100.0 | Phát hành giấy tờ có giá | Issuing bank note
+   Code 14100.0 | Level 1.0 | Order 110.0 | Vốn và các quỹ | Capital and researves
+   Code 14400.0 | Level 1.0 | Order 120.0 | TỔNG CỘNG NGUỒN VỐN | TOTAL EQUITY
+   Code 920000.0 | Level 0.0 | Order 125.0 | Báo cáo Kết quả Hoạt động kinh doanh | Income Statement
+   Code 423200.0 | Level 1.0 | Order 140.0 | Thu nhập thuần từ hoạt động dịch vụ | Net service income
+   Code 22200.0 | Level 1.0 | Order 190.0 | Chi phí quản lý doanh nghiệp | General and admin expenses
+   Code 23800.0 | Level 1.0 | Order 200.0 | Lợi nhuận kế toán trước thuế | Pretax Profit
+   Code 23000.0 | Level 1.0 | Order 210.0 | Lợi nhuận sau thuế của Công ty mẹ | Net Profit After Tax of Parent Company
+
+[ALL_FORMS_GOVERNANCE] (Total items: 3):
+   Code 57066.0 | Level 1.0 | Order 10.0 | Tỷ lệ Free-float | Free-float ratio
+   Code 57057.0 | Level 1.0 | Order 20.0 | Tổng tỷ lệ sở hữu Nội bộ | Total Internal Ownership
+   Code 57053.0 | Level 1.0 | Order 30.0 | Tỷ lệ sở hữu Nhà nước | State Ownership
+
+[NON_FINANCE_POSITIONING] (Total items: 10):
+   Code 52017.0 | Level 1.0 | Order 10.0 | Doanh thu thuần (Quý) | Net Revenue (Qtr)
+   Code 52016.0 | Level 1.0 | Order 10.0 | Doanh thu thuần (4 Quý liền kề) | Net Revenue (Trailing 4 Qtrs)
+   Code 52015.0 | Level 1.0 | Order 20.0 | Lợi nhuận sau thuế công ty mẹ (4 Quý liền kề) | Net Income of Parent Company (Trailing 4 Qtrs)
+   Code 52018.0 | Level 1.0 | Order 20.0 | Lợi nhuận sau thuế công ty mẹ (4 Quý liền kề) | Net Income of Parent Company (Qtr)
+   Code 51003.0 | Level 1.0 | Order 30.0 | Thị giá vốn | Market Capitalization
+   Code 51003.0 | Level 1.0 | Order 30.0 | Thị giá vốn | Market Capitalization
+   Code 54017.0 | Level 1.0 | Order 40.0 | Số ngày phải thu theo Năm DSO | Days of sale outstanding Yearly
+   Code 56110.0 | Level 1.0 | Order 40.0 | Số ngày phải thu theo Quý DSO | Days of sale outstanding Quarterly
+   Code 56010.0 | Level 1.0 | Order 50.0 | Số ngày phải trả theo Quý DPO | Days of payable (Quarter)
+   Code 54015.0 | Level 1.0 | Order 50.0 | Số ngày phải trả theo Năm DPO | Days of payable (Year)
+
+[BANK_] (Total items: 6):
+   Code 51000.0 | Level 0.0 | Order 500.0 | Chỉ số định giá | Valuation Measures
+   Code 51009.0 | Level 1.0 | Order 510.0 | PE (Năm gần nhất) | PE (This Yr)
+   Code 51022.0 | Level 1.0 | Order 520.0 | PEG (1 Năm) | PEG (1 Yr)
+   Code 51012.0 | Level 1.0 | Order 540.0 | PB (Quý gần nhất) | PB (Qtr)
+   Code 52003.0 | Level 1.0 | Order 550.0 | Payout Ratio | Payout Ratio
+   Code 53007.0 | Level 1.0 | Order 560.0 | EPS (4 Quý liền kề) | EPS (trailing 4 Qtrs)

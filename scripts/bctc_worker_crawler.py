@@ -1,0 +1,118 @@
+"""
+=============================================================================
+BCTC & BCTN DISTRIBUTED WORKER CRAWLER (GITHUB ACTIONS ENGINE)
+=============================================================================
+Leverages the battle-tested BCTCBatchProcessor to download and parse
+real BCTC PDFs across HOSE, HNX, and UPCOM in parallel worker shards.
+"""
+
+import os
+import sys
+import json
+import time
+import argparse
+from typing import Dict, List, Any
+
+# Ensure root dir is in sys.path
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+from services.bctc_batch_processor import BCTCBatchProcessor
+from services.stock_service import ALL_SYMBOLS_MAP
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Distributed BCTC & BCTN Worker")
+    parser.add_argument("--worker-id", type=int, default=0, help="Worker index (0 to total-1)")
+    parser.add_argument("--total-workers", type=int, default=5, help="Total number of workers")
+    parser.add_argument("--output-dir", type=str, default="./output", help="Directory to save shard output")
+    parser.add_argument("--symbols-file", type=str, default="", help="Optional JSON path to all_symbols")
+    parser.add_argument("--max-bctc", type=int, default=4, help="Max BCTC PDFs per symbol")
+    args = parser.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # 1. Load symbols
+    all_symbols = []
+    if args.symbols_file and os.path.exists(args.symbols_file):
+        try:
+            with open(args.symbols_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for item in data:
+                        if isinstance(item, dict):
+                            s = item.get("symbol") or item.get("ticker")
+                            if s: all_symbols.append(s)
+                        elif isinstance(item, str):
+                            all_symbols.append(item)
+        except Exception:
+            pass
+
+    if not all_symbols:
+        try:
+            from vnstock import Listing
+            lst = Listing()
+            df = lst.all_symbols()
+            if df is not None and not df.empty:
+                col = 'symbol' if 'symbol' in df.columns else 'ticker'
+                all_symbols = df[col].dropna().unique().tolist()
+        except Exception:
+            pass
+
+    if not all_symbols and ALL_SYMBOLS_MAP:
+        all_symbols = list(ALL_SYMBOLS_MAP.keys())
+
+    if not all_symbols:
+        all_symbols = ["FPT", "HPG", "VNM", "MWG", "DGC", "SSI", "VHM", "VIC", "TCB", "MBB"]
+
+    all_symbols = sorted(list(set([str(s).strip().upper() for s in all_symbols if s and len(str(s).strip()) == 3 and str(s).strip().isalnum()])))
+    my_symbols = [s for i, s in enumerate(all_symbols) if i % args.total_workers == args.worker_id]
+
+    shard_file = os.path.join(args.output_dir, f"bctc_shard_{args.worker_id}.json")
+    print(f"🚀 Worker {args.worker_id}/{args.total_workers} assigned {len(my_symbols)} symbols.")
+    print(f"💾 Target Shard File: {shard_file}")
+
+    processor = BCTCBatchProcessor()
+    shard_data = {}
+
+    if os.path.exists(shard_file):
+        try:
+            with open(shard_file, "r", encoding="utf-8") as f:
+                shard_data = json.load(f)
+            print(f"🔄 Resumed {len(shard_data)} symbols from checkpoint.")
+        except Exception:
+            shard_data = {}
+
+    symbols_to_run = [s for s in my_symbols if s not in shard_data]
+    print(f"⚡ Processing {len(symbols_to_run)} symbols...")
+
+    for idx, sym in enumerate(symbols_to_run, 1):
+        try:
+            res = processor.process_single_company(symbol=sym, max_reports=args.max_bctc)
+            shard_data[sym] = {
+                "symbol": sym,
+                "periods": res.get("results", []),
+                "count": len(res.get("results", [])),
+                "updated_at": int(time.time())
+            }
+            extracted_count = len(res.get("results", []))
+            print(f"  [{idx}/{len(symbols_to_run)}] {sym}: Extracted {extracted_count} BCTC filings")
+        except Exception as err:
+            print(f"  [{idx}/{len(symbols_to_run)}] {sym}: Error ({err})")
+            shard_data[sym] = {"symbol": sym, "periods": [], "count": 0, "error": str(err), "updated_at": int(time.time())}
+
+        # Periodic atomic checkpoint
+        if idx % 5 == 0 or idx == len(symbols_to_run):
+            tmp_shard = shard_file + ".tmp"
+            with open(tmp_shard, "w", encoding="utf-8") as f:
+                json.dump(shard_data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_shard, shard_file)
+
+        time.sleep(0.3)
+
+    print(f"🎉 Worker {args.worker_id} successfully completed all {len(my_symbols)} symbols!")
+
+
+if __name__ == "__main__":
+    main()

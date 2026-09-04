@@ -1,0 +1,272 @@
+{
+  "ACB": {
+    "name": "Ngân hàng TMCP Á Châu",
+    "sector": "VNFIN",
+    "market_cap": 131470,
+    "pe": 8.39,
+    "pb": 1.32,
+    "gross_margin": 45.0,
+    "rev_growth": 24.27
+  },
+  "BCM": {
+    "name": "Tập đoàn Đầu tư và Phát triển Công nghiệp Becamex - CTCP",
+    "sector": "VNREAL",
+    "market_cap": 44867,
+    "pe": 20.98,
+    "pb": 2.05,
+    "gross_margin": 62.91,
+    "rev_growth": -64.66
+  },
+  "BID": {
+    "name": "Ngân hàng TMCP Đầu tư và Phát triển VN",
+    "sector": "VNFIN",
+    "market_cap": 286629,
+    "pe": 8.7,
+    "pb": 1.48,
+    "gross_margin": 45.0,
+    "rev_growth": 23.85
+  },
+  "BVH": {
+    "name": "Tập đoàn Bảo Việt",
+    "sector": "VNFIN",
+    "market_cap": 47509,
+    "pe": 15.3,
+    "pb": 1.88,
+    "gross_margin": 45.0,
+    "rev_growth": 4.35
+  },
+  "CTG": {
+    "name": "Ngân hàng TMCP Công thương VN",
+    "sector": "VNFIN",
+    "market_cap": 248154,
+    "pe": 6.18,
+    "pb": 1.25,
+    "gross_margin": 45.0,
+    "rev_growth": 31.0
+  },
+  "FPT": {
+    "name": "CTCP FPT",
+    "sector": "VNIT",
+    "market_cap": 125107,
+    "pe": 12.48,
+    "pb": 3.13,
+    "gross_margin": 34.69,
+    "rev_growth": -17.06
+  },
+  "GAS": {
+    "name": "Tổng CT Khí Việt Nam (PV Gas)",
+    "sector": "VNENE",
+    "market_cap": 203170,
+    "pe": 15.99,
+    "pb": 2.96,
+    "gross_margin": 12.47,
+    "rev_growth": 43.78
+  },
+  "GVR": {
+    "name": "Tập đoàn Công nghiệp Cao su Việt Nam - Công ty Cổ phần",
+    "sector": "VNMAT",
+    "market_cap": 129400,
+    "pe": 19.82,
+    "pb": 2.2,
+    "gross_margin": 27.56,
+    "rev_growth": 55.81
+  },
+  "HDB": {
+    "name": "Ngân hàng Thương mại Cổ phần Phát Triển Thành phố Hồ Chí Minh",
+    "sector": "VNFIN",
+    "market_cap": 139147,
+    "pe": 7.15,
+    "pb": 1.62,
+    "gross_margin": 45.0,
+    "rev_growth": 26.27
+  },
+  "HPG": {
+    "name": "CTCP Tập đoàn Hòa Phát",
+    "sector": "VNMAT",
+    "market_cap": 186590,
+    "pe": 8.04,
+    "pb": 1.32,
+    "gross_margin": 16.29,
+    "rev_growth": 53.6
+  },
+  "MBB": {
+    "name": "Ngân hàng TMCP Quân đội (MBBank)",
+    "sector": "VNFIN",
+    "market_cap": 211947,
+    "pe": 6.77,
+    "pb": 1.36,
+    "gross_margin": 45.0,
+    "rev_growth": 44.82
+  },
+  "MSN": {
+    "name": "CTCP Tập đoàn Masan",
+    "sector": "VNCONS",
+    "market_cap": 107754,
+    "pe": 15.13,
+    "pb": 2.72,
+    "gross_margin": 31.61,
+    "rev_growth": 53.52
+  },
+  "MWG": {
+    "name": "CTCP Đầu tư Thế Giới Di Động",
+    "sector": "VNCOND",
+    "market_cap": 110132,
+    "pe": 13.46,
+    "pb": 3.12,
+    "gross_margin": 18.6,
+    "rev_growth": 28.58
+  },
+  "PLX": {
+    "name": "Tập đoàn Xăng dầu Việt Nam",
+    "sector": "VNENE",
+    "market_cap": 46059,
+    "pe": 30.05,
+    "pb": 1.79,
+    "gross_margin": 4.85,
+    "rev_growth": 76.78
+  },
+  "POW": {
+    "name": "Tổng CTCP Điện lực Dầu khí VN",
+    "sector": "VNUTI",
+    "market_cap": 40189,
+    "pe": 6.56,
+    "pb": 0.97,
+    "gross_margin": 17.95,
+    "rev_growth": 115.7
+  },
+  "SAB": {
+    "name": "Tổng Công ty Cổ phần Bia - Rượu - Nước Giải khát Sài Gòn",
+    "sector": "VNCONS",
+    "market_cap": 58485,
+    "pe": 12.25,
+    "pb": 2.99,
+    "gross_margin": 37.42,
+    "rev_growth": 1.23
+  },
+  "SHB": {
+    "name": "Ngân hàng Thương mại Cổ phần Sài Gòn – Hà Nội",
+    "sector": "VNFIN",
+    "market_cap": 65193,
+    "pe": 4.86,
+    "pb": 0.87,
+    "gross_margin": 45.0,
+    "rev_growth": 19.74
+  },
+  "SSB": {
+    "name": "Ngân hàng Thương mại Cổ phần Đông Nam Á",
+    "sector": "VNFIN",
+    "market_cap": 58632,
+    "pe": 19.33,
+    "pb": 1.41,
+    "gross_margin": 45.0,
+    "rev_growth": 14.51
+  },
+  "SSI": {
+    "name": "CTCP Chứng khoán SSI",
+    "sector": "VNFIN",
+    "market_cap": 64078,
+    "pe": 12.52,
+    "pb": 1.58,
+    "gross_margin": 81.7,
+    "rev_growth": 26.52
+  },
+  "STB": {
+    "name": "Ngân hàng Thương mại Cổ phần Sài Gòn Thương Tín",
+    "sector": "VNFIN",
+    "market_cap": 142334,
+    "pe": 138.52,
+    "pb": 2.27,
+    "gross_margin": 45.0,
+    "rev_growth": 31.79
+  },
+  "TCB": {
+    "name": "Ngân hàng TMCP Kỹ thương VN (Techcombank)",
+    "sector": "VNFIN",
+    "market_cap": 236680,
+    "pe": 8.72,
+    "pb": 1.32,
+    "gross_margin": 45.0,
+    "rev_growth": 37.92
+  },
+  "TPB": {
+    "name": "Ngân hàng Thương mại Cổ phần Tiên Phong",
+    "sector": "VNFIN",
+    "market_cap": 40640,
+    "pe": 5.38,
+    "pb": 0.89,
+    "gross_margin": 45.0,
+    "rev_growth": 39.06
+  },
+  "VCB": {
+    "name": "Ngân hàng Ngoại thương VN (Vietcombank)",
+    "sector": "VNFIN",
+    "market_cap": 502176,
+    "pe": 12.06,
+    "pb": 2.02,
+    "gross_margin": 45.0,
+    "rev_growth": 49.13
+  },
+  "VHM": {
+    "name": "CTCP Vinhomes",
+    "sector": "VNREAL",
+    "market_cap": 599682,
+    "pe": 7.59,
+    "pb": 2.31,
+    "gross_margin": 42.99,
+    "rev_growth": 177.16
+  },
+  "VIB": {
+    "name": "Ngân hàng Thương mại Cổ phần Quốc tế Việt Nam",
+    "sector": "VNFIN",
+    "market_cap": 50890,
+    "pe": 6.86,
+    "pb": 1.06,
+    "gross_margin": 45.0,
+    "rev_growth": 28.25
+  },
+  "VIC": {
+    "name": "Tập đoàn Vingroup",
+    "sector": "VNREAL",
+    "market_cap": 1782955,
+    "pe": 71.69,
+    "pb": 10.43,
+    "gross_margin": 19.58,
+    "rev_growth": 154.65
+  },
+  "VJC": {
+    "name": "Công ty Cổ phần Hàng không Vietjet",
+    "sector": "VNCOND",
+    "market_cap": 96137,
+    "pe": 42.45,
+    "pb": 3.65,
+    "gross_margin": 8.35,
+    "rev_growth": 70.52
+  },
+  "VNM": {
+    "name": "CTCP Sữa Việt Nam (Vinamilk)",
+    "sector": "VNCONS",
+    "market_cap": 130204,
+    "pe": 13.18,
+    "pb": 4.09,
+    "gross_margin": 41.55,
+    "rev_growth": 12.69
+  },
+  "VPB": {
+    "name": "Ngân hàng TMCP Việt Nam Thịnh Vượng",
+    "sector": "VNFIN",
+    "market_cap": 220563,
+    "pe": 7.4,
+    "pb": 1.24,
+    "gross_margin": 45.0,
+    "rev_growth": 52.7
+  },
+  "VRE": {
+    "name": "CTCP Vincom Retail",
+    "sector": "VNREAL",
+    "market_cap": 59308,
+    "pe": 8.18,
+    "pb": 1.2,
+    "gross_margin": 53.9,
+    "rev_growth": 10.79
+  }
+}
