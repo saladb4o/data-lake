@@ -48,6 +48,7 @@ from services.stock_service import (
     get_sector_history,
     get_company_peers,
     get_company_ecosystem,
+    get_company_forensic_report,
     start_background_news_poller,
     get_quant_screener,
     get_company_earnings_engine,
@@ -411,6 +412,56 @@ def api_company_ecosystem(
     try:
         data = get_company_ecosystem(symbol=symbol, depth=depth, min_ownership=min_ownership)
         return JSONResponse(content={"status": "success", "data": data})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.get("/api/company/forensics")
+def api_company_forensics(symbol: str = Query(..., description="Stock ticker symbol (e.g. HPG, VNM, FPT)")):
+    """Returns comprehensive Forensic Accounting Intelligence, 5-Triangle Matrix, Debt Wall, CapEx Projects & Integrity Score"""
+    try:
+        data = get_company_forensic_report(symbol=symbol)
+        return JSONResponse(content={"status": "success", "data": data})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
+@app.get("/api/company/document-dossier")
+def api_company_document_dossier(
+    symbol: str = Query(..., description="Stock ticker symbol"),
+    doc_id: Optional[str] = Query(None, description="Document ID or PDF filename")
+):
+    """Returns deep-extracted structured intelligence of a specific document for instant inline preview"""
+    try:
+        from services.bctc_batch_processor import _get_lake_data, _get_corporate_actions_lake
+        lake = _get_lake_data()
+        corp_lake = _get_corporate_actions_lake()
+
+        target_record = None
+        if doc_id:
+            if doc_id in lake:
+                target_record = lake[doc_id]
+            elif doc_id in corp_lake:
+                target_record = corp_lake[doc_id]
+            else:
+                for k, v in lake.items():
+                    if doc_id.lower() in k.lower() or doc_id.lower() in v.get("title", "").lower():
+                        target_record = v
+                        break
+                if not target_record:
+                    for k, v in corp_lake.items():
+                        if doc_id.lower() in k.lower() or doc_id.lower() in v.get("title", "").lower():
+                            target_record = v
+                            break
+
+        if not target_record:
+            for k, v in lake.items():
+                if v.get("symbol") == symbol.upper().strip():
+                    target_record = v
+                    break
+
+        if not target_record:
+            return JSONResponse(content={"status": "not_found", "message": f"Chưa có dữ liệu bóc tách sẵn cho tài liệu {doc_id} của mã {symbol}."})
+
+        return JSONResponse(content={"status": "success", "data": target_record})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 

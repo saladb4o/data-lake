@@ -70,37 +70,66 @@ def main():
     my_symbols = [s for i, s in enumerate(all_symbols) if i % args.total_workers == args.worker_id]
 
     shard_file = os.path.join(args.output_dir, f"bctc_shard_{args.worker_id}.json")
+    corp_shard_file = os.path.join(args.output_dir, f"corporate_shard_{args.worker_id}.json")
     print(f"🚀 Worker {args.worker_id}/{args.total_workers} assigned {len(my_symbols)} symbols.")
-    print(f"💾 Target Shard File: {shard_file}")
+    print(f"💾 Target BCTC Shard: {shard_file}")
+    print(f"💾 Target Corporate Shard: {corp_shard_file}")
 
     processor = BCTCBatchProcessor()
     shard_data = {}
+    corp_shard_data = {}
 
     if os.path.exists(shard_file):
         try:
             with open(shard_file, "r", encoding="utf-8") as f:
                 shard_data = json.load(f)
-            print(f"🔄 Resumed {len(shard_data)} symbols from checkpoint.")
+            print(f"🔄 Resumed {len(shard_data)} BCTC symbols from checkpoint.")
         except Exception:
             shard_data = {}
 
-    symbols_to_run = [s for s in my_symbols if s not in shard_data]
+    if os.path.exists(corp_shard_file):
+        try:
+            with open(corp_shard_file, "r", encoding="utf-8") as f:
+                corp_shard_data = json.load(f)
+            print(f"🔄 Resumed {len(corp_shard_data)} Corporate symbols from checkpoint.")
+        except Exception:
+            corp_shard_data = {}
+
+    symbols_to_run = [s for s in my_symbols if s not in shard_data or s not in corp_shard_data]
     print(f"⚡ Processing {len(symbols_to_run)} symbols...")
 
     for idx, sym in enumerate(symbols_to_run, 1):
-        try:
-            res = processor.process_single_company(symbol=sym, max_reports=args.max_bctc)
-            shard_data[sym] = {
-                "symbol": sym,
-                "periods": res.get("results", []),
-                "count": len(res.get("results", [])),
-                "updated_at": int(time.time())
-            }
-            extracted_count = len(res.get("results", []))
-            print(f"  [{idx}/{len(symbols_to_run)}] {sym}: Extracted {extracted_count} BCTC filings")
-        except Exception as err:
-            print(f"  [{idx}/{len(symbols_to_run)}] {sym}: Error ({err})")
-            shard_data[sym] = {"symbol": sym, "periods": [], "count": 0, "error": str(err), "updated_at": int(time.time())}
+        # 1. BCTC & Sector Footnotes Processing
+        if sym not in shard_data:
+            try:
+                res = processor.process_single_company(symbol=sym, max_reports=args.max_bctc)
+                shard_data[sym] = {
+                    "symbol": sym,
+                    "periods": res.get("results", []),
+                    "count": len(res.get("results", [])),
+                    "updated_at": int(time.time())
+                }
+                extracted_count = len(res.get("results", []))
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} BCTC: Extracted {extracted_count} filings")
+            except Exception as err:
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} BCTC Error: {err}")
+                shard_data[sym] = {"symbol": sym, "periods": [], "count": 0, "error": str(err), "updated_at": int(time.time())}
+
+        # 2. Corporate Disclosures (TT96 Governance & AGM Resolutions)
+        if sym not in corp_shard_data:
+            try:
+                c_res = processor.process_corporate_disclosures(symbol=sym, report_types=["governance", "resolution"], limit_per_type=2)
+                corp_shard_data[sym] = {
+                    "symbol": sym,
+                    "records": c_res.get("results", []),
+                    "count": len(c_res.get("results", [])),
+                    "updated_at": int(time.time())
+                }
+                corp_count = len(c_res.get("results", []))
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} Governance/AGM: Extracted {corp_count} filings")
+            except Exception as err:
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} Governance Error: {err}")
+                corp_shard_data[sym] = {"symbol": sym, "records": [], "count": 0, "error": str(err), "updated_at": int(time.time())}
 
         # Periodic atomic checkpoint
         if idx % 5 == 0 or idx == len(symbols_to_run):
@@ -109,9 +138,14 @@ def main():
                 json.dump(shard_data, f, ensure_ascii=False, indent=2)
             os.replace(tmp_shard, shard_file)
 
+            tmp_corp = corp_shard_file + ".tmp"
+            with open(tmp_corp, "w", encoding="utf-8") as f:
+                json.dump(corp_shard_data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_corp, corp_shard_file)
+
         time.sleep(0.3)
 
-    print(f"🎉 Worker {args.worker_id} successfully completed all {len(my_symbols)} symbols!")
+    print(f"🎉 Worker {args.worker_id} successfully completed all {len(my_symbols)} symbols (BCTC + Corporate Actions)!")
 
 
 if __name__ == "__main__":

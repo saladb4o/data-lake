@@ -50,7 +50,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bctc_shard_${{ matrix.worker_id }}
-          path: ./output/bctc_shard_${{ matrix.worker_id }}.json
+          path: |
+            ./output/bctc_shard_${{ matrix.worker_id }}.json
+            ./output/corporate_shard_${{ matrix.worker_id }}.json
           retention-days: 7
 
   merge_and_publish:
@@ -76,24 +78,28 @@ jobs:
         with:
           path: ./all_shards
 
-      - name: Merge Shards to data/pdf_lake/extracted_bctc_lake.json
+      - name: Merge Shards to data/pdf_lake/
         run: |
           python scripts/merge_shards.py \
             --input-dir ./all_shards \
             --output-file ./data/pdf_lake/extracted_bctc_lake.json \
-            --base-lake ./data/pdf_lake/extracted_bctc_lake.json
+            --base-lake ./data/pdf_lake/extracted_bctc_lake.json \
+            --corp-output-file ./data/pdf_lake/extracted_corporate_actions.json \
+            --corp-base-lake ./data/pdf_lake/extracted_corporate_actions.json
 
       - name: Auto-Commit & Push thẳng vào Repo
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/pdf_lake/extracted_bctc_lake.json
-          git commit -m "chore(data): auto-update extracted_bctc_lake.json from 20-worker supercluster [skip ci]" || echo "No changes to commit"
+          git add data/pdf_lake/extracted_bctc_lake.json data/pdf_lake/extracted_corporate_actions.json
+          git commit -m "chore(data): auto-update BCTC & Corporate Data Lakes from 20-worker supercluster [skip ci]" || echo "No changes to commit"
           git push origin main
 
       - name: Publish Unified Data Lake Artifact Backup
         uses: actions/upload-artifact@v4
         with:
-          name: extracted_bctc_lake_latest
-          path: ./data/pdf_lake/extracted_bctc_lake.json
+          name: extracted_data_lakes_latest
+          path: |
+            ./data/pdf_lake/extracted_bctc_lake.json
+            ./data/pdf_lake/extracted_corporate_actions.json
           retention-days: 30

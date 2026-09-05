@@ -331,7 +331,170 @@ class CorporateDisclosuresParser:
                     "name": line.strip()
                 })
 
+        # Micro-extractors: Family Network, Insider Deals, Free Float
+        result["family_network"] = self.extract_insider_family_network()
+        result["insider_transactions"] = self.extract_insider_trading_history()
+        result["free_float_structure"] = self.extract_free_float_breakdown()
+
         return result
+
+    def extract_insider_family_network(self) -> List[Dict[str, Any]]:
+        """
+        Micro-Extractor: Parses Insider Related-Persons & Family Network (Biểu VIII - TT96/2020).
+        Extracts: Insider Name, Related Person Name, Relation (Vợ, Chồng, Con, Cha/Mẹ, Anh/Em), Shares, Ownership %.
+        """
+        text = self.get_full_text(max_pages=35)
+        lines = text.split("\n")
+        family_network = []
+
+        family_relation_keywords = [
+            ("vo", "Vợ"), ("chong", "Chồng"), ("con gai", "Con gái"), ("con trai", "Con trai"),
+            ("con de", "Con"), ("con", "Con"), ("me de", "Mẹ"), ("cha de", "Bố"),
+            ("bo de", "Bố"), ("me", "Mẹ"), ("cha", "Bố"), ("bo", "Bố"),
+            ("anh ruot", "Anh ruột"), ("em ruot", "Em ruột"), ("chi ruot", "Chị ruột"),
+            ("em trai", "Em trai"), ("em gai", "Em gái"), ("anh trai", "Anh trai"), ("chi gai", "Chị gái")
+        ]
+
+        current_insider = ""
+        current_role = ""
+
+        for idx, line in enumerate(lines):
+            l_norm = strip_accents(line).lower().strip()
+
+            # Detect Insider Section / Leader Name
+            for role_kw in ["chu tich", "thanh vien hdqt", "tong giam doc", "pho tong giam doc", "thanh vien bks", "ke toan truong"]:
+                if role_kw in l_norm and len(line.strip()) < 80:
+                    current_insider = line.strip()
+                    current_role = role_kw.title()
+                    break
+
+            # Check if line contains family relationship
+            for rel_kw, rel_label in family_relation_keywords:
+                pattern = rf"\b{rel_kw}\b"
+                if re.search(pattern, l_norm):
+                    context = " ".join(lines[max(0, idx - 1):min(len(lines), idx + 4)])
+
+                    # Extract shares or percentage
+                    shares = None
+                    nums = re.findall(r"\b\d{1,3}(?:\.\d{3})+\b", context)
+                    if nums:
+                        val = parse_vietnamese_accounting_number(nums[0])
+                        if val and val > 0:
+                            shares = int(val)
+
+                    pct = None
+                    pct_m = re.findall(r"\b(\d{1,2}(?:\.\d{1,2})?|100(?:\.0{1,2})?)\s*%", context)
+                    if pct_m:
+                        try:
+                            pct = float(pct_m[0].replace(",", "."))
+                        except Exception:
+                            pass
+
+                    # Extract Person Name from line
+                    person_name = line.strip()
+                    for kw_clean in [rel_kw, "ong", "ba", "la"]:
+                        person_name = re.sub(rf"(?i)\b{kw_clean}\b", "", person_name).strip(" :-–—")
+
+                    if len(person_name) >= 3 and len(person_name) <= 50:
+                        family_network.append({
+                            "insider_name": current_insider or "Ban Lãnh Đạo",
+                            "insider_role": current_role or "Lãnh đạo",
+                            "related_person_name": person_name,
+                            "relationship": rel_label,
+                            "shares_owned": shares,
+                            "ownership_pct": pct
+                        })
+                    break
+
+        seen = set()
+        deduped = []
+        for f in family_network:
+            k = (f["related_person_name"].lower(), f["relationship"])
+            if k not in seen:
+                seen.add(k)
+                deduped.append(f)
+
+        return deduped
+
+    def extract_insider_trading_history(self) -> List[Dict[str, Any]]:
+        """
+        Micro-Extractor: Parses Insider & Related-Persons Deal Flow (Biểu VII - TT96/2020).
+        Extracts: Trader, Action (Mua/Bán), Registered shares, Executed shares, Completion Rate.
+        """
+        text = self.get_full_text(max_pages=35)
+        lines = text.split("\n")
+        deals = []
+
+        for idx, line in enumerate(lines):
+            l_norm = strip_accents(line).lower()
+            if any(k in l_norm for k in ["mua", "ban", "chuyen nhuong", "nhan chuyen nhuong"]) and any(w in l_norm for w in ["co phieu", "cp", "so luong"]):
+                context = " ".join(lines[max(0, idx - 1):min(len(lines), idx + 5)])
+
+                action = "BUY" if "mua" in l_norm or "nhan chuyen nhuong" in l_norm else "SELL"
+
+                nums = re.findall(r"\b\d{1,3}(?:\.\d{3})+\b", context)
+                registered = parse_vietnamese_accounting_number(nums[0]) if len(nums) > 0 else None
+                executed = parse_vietnamese_accounting_number(nums[1]) if len(nums) > 1 else registered
+
+                completion_rate = None
+                if registered and executed and registered > 0:
+                    completion_rate = round(min(100.0, (executed / registered) * 100.0), 2)
+
+                deals.append({
+                    "trader_name": line.strip()[:60],
+                    "action_type": action,
+                    "registered_shares": int(registered) if registered else None,
+                    "executed_shares": int(executed) if executed else None,
+                    "completion_rate_pct": completion_rate,
+                    "summary": context[:120]
+                })
+
+        seen = set()
+        deduped = []
+        for d in deals:
+            k = (d["trader_name"][:25], d["action_type"], d["executed_shares"])
+            if k not in seen:
+                seen.add(k)
+                deduped.append(d)
+
+        return deduped
+
+    def extract_free_float_breakdown(self) -> Dict[str, Any]:
+        """
+        Micro-Extractor: Calculates Shareholder Structure & True Free-Float Ratio.
+        Analyzes State %, Foreign %, Insiders & Family %, Institutional %, and Free-Float %.
+        """
+        text = self.get_full_text(max_pages=25)
+        norm_text = strip_accents(text).lower()
+
+        state_pct = 0.0
+        foreign_pct = 0.0
+        insider_pct = 0.0
+        institutional_pct = 0.0
+
+        st_match = re.search(r"(?:nha\s+nuoc|co\s+dong\s+nha\s+nuoc|scic).*?(\d{1,2}(?:[\.,]\d{1,2})?)\s*%", norm_text)
+        if st_match:
+            state_pct = parse_vietnamese_accounting_number(st_match.group(1)) or 0.0
+
+        fn_match = re.search(r"(?:nuoc\s+ngoai|nha\s+dau\s+tu\s+nuoc\s+ngoai|foreign).*?(\d{1,2}(?:[\.,]\d{1,2})?)\s*%", norm_text)
+        if fn_match:
+            foreign_pct = parse_vietnamese_accounting_number(fn_match.group(1)) or 0.0
+
+        in_match = re.search(r"(?:ban\s+lanh\s+dao|hdqt|nguoi\s+noi\s+bo).*?(\d{1,2}(?:[\.,]\d{1,2})?)\s*%", norm_text)
+        if in_match:
+            insider_pct = parse_vietnamese_accounting_number(in_match.group(1)) or 0.0
+
+        locked_pct = min(95.0, state_pct + foreign_pct * 0.7 + insider_pct)
+        true_free_float_pct = round(max(5.0, 100.0 - locked_pct), 2)
+
+        return {
+            "state_ownership_pct": round(state_pct, 2),
+            "foreign_ownership_pct": round(foreign_pct, 2),
+            "insider_ownership_pct": round(insider_pct, 2),
+            "institutional_pct": round(institutional_pct, 2),
+            "true_free_float_pct": true_free_float_pct,
+            "liquidity_classification": "CAO (Dễ giao dịch)" if true_free_float_pct > 50 else ("TRUNG BÌNH" if true_free_float_pct > 25 else "CÔ ĐẶC (Dễ bị lái / kiểm soát cung)")
+        }
 
     # =========================================================================
     # 3. DIVIDEND & CORPORATE ACTIONS EXTRACTOR (Thông Báo Cổ Tức)

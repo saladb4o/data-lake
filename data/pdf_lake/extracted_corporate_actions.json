@@ -1105,5 +1105,340 @@
       }
     },
     "processed_at": 1788527193.5612667
+  },
+  "A32_governance_96379": {
+    "doc_id": "A32_governance_96379",
+    "symbol": "A32",
+    "category": "governance",
+    "title": "A32: Báo cáo quản trị công ty năm 2025",
+    "date": "19/01/2026 00:00",
+    "timestamp": 1768755600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/190126/a32-bao-cao-quan-tri-cong-ty-nam-2025-0-593717.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_GOVERNANCE_2026_A32__Báo_cáo_quản_trị_công_ty_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_GOVERNANCE_2026_A32__Báo_cáo_quản_trị_công_ty_.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 19,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "SCANNED_IMAGE",
+        "period": "Năm",
+        "board_members": [
+          {
+            "title": "thanh vien HDQT",
+            "name": "thanh vien HDQT"
+          }
+        ],
+        "related_party_transactions": [],
+        "insider_transactions": [],
+        "family_network": [
+          {
+            "insider_name": "Ban Lãnh Đạo",
+            "insider_role": "Lãnh đạo",
+            "related_person_name": "Thong qua To trinh ve sura doi,  sung Dieu le",
+            "relationship": "Bố",
+            "shares_owned": null,
+            "ownership_pct": null
+          },
+          {
+            "insider_name": "Ban Lãnh Đạo",
+            "insider_role": "Lãnh đạo",
+            "related_person_name": "Ngaybat dau/khong",
+            "relationship": "Con",
+            "shares_owned": null,
+            "ownership_pct": null
+          },
+          {
+            "insider_name": "thanh vien HDQT",
+            "insider_role": "Thanh Vien Hdqt",
+            "related_person_name": "Ngay  nhiem",
+            "relationship": "Bố",
+            "shares_owned": null,
+            "ownership_pct": null
+          },
+          {
+            "insider_name": "Chu tich",
+            "insider_role": "Chu Tich",
+            "related_person_name": "nhiem ngay",
+            "relationship": "Bố",
+            "shares_owned": null,
+            "ownership_pct": null
+          },
+          {
+            "insider_name": "Pho chu tich",
+            "insider_role": "Chu Tich",
+            "related_person_name": "soat, stra doi va  sung Dieu le,",
+            "relationship": "Bố",
+            "shares_owned": null,
+            "ownership_pct": null
+          }
+        ],
+        "free_float_structure": {
+          "state_ownership_pct": 0.0,
+          "foreign_ownership_pct": 0.0,
+          "insider_ownership_pct": 0.0,
+          "institutional_pct": 0.0,
+          "true_free_float_pct": 100.0,
+          "liquidity_classification": "CAO (Dễ giao dịch)"
+        }
+      }
+    },
+    "processed_at": 1788550724.0807
+  },
+  "A32_governance_22449": {
+    "doc_id": "A32_governance_22449",
+    "symbol": "A32",
+    "category": "governance",
+    "title": "A32: Báo cáo quản trị công ty bán niên 2025",
+    "date": "22/07/2025 00:00",
+    "timestamp": 1753117200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/220725/a32-bao-cao-quan-tri-cong-ty-ban-nien-2025-0-571638.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_GOVERNANCE_2025_A32__Báo_cáo_quản_trị_công_ty_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_GOVERNANCE_2025_A32__Báo_cáo_quản_trị_công_ty_.pdf",
+      "detected_category": "GOVERNANCE",
+      "document_type": "NATIVE",
+      "total_pages": 19,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "governance_data": {
+        "report_type": "GOVERNANCE",
+        "document_type": "NATIVE",
+        "period": "Năm",
+        "board_members": [],
+        "related_party_transactions": [],
+        "insider_transactions": [],
+        "family_network": [],
+        "free_float_structure": {
+          "state_ownership_pct": 0.0,
+          "foreign_ownership_pct": 0.0,
+          "insider_ownership_pct": 0.0,
+          "institutional_pct": 0.0,
+          "true_free_float_pct": 100.0,
+          "liquidity_classification": "CAO (Dễ giao dịch)"
+        }
+      }
+    },
+    "processed_at": 1788550725.146719
+  },
+  "A32_resolution_63019": {
+    "doc_id": "A32_resolution_63019",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Nghị quyết Đại hội đồng cổ đông thường niên năm 2026",
+    "date": "02/07/2026 16:35",
+    "timestamp": 1782984900,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/020726/a32-nghi-quyet-ai-hoi-dong-co-dong-thuong-nien-nam-2026-0-622702.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2026_A32__Nghị_quyết_Đại_hội_đồng_c.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2026_A32__Nghị_quyết_Đại_hội_đồng_c.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 50,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "SCANNED_IMAGE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788550741.848251
+  },
+  "A32_resolution_57886": {
+    "doc_id": "A32_resolution_57886",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Tài liệu họp Đại hội đồng cổ đông",
+    "date": "08/06/2026 00:00",
+    "timestamp": 1780851600,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/080626/a32-tai-lieu-hop-ai-hoi-dong-co-dong-0-618795.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2026_A32__Tài_liệu_họp_Đại_hội_đồng.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2026_A32__Tài_liệu_họp_Đại_hội_đồng.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 90,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788550743.3763068
+  },
+  "A32_resolution_20638": {
+    "doc_id": "A32_resolution_20638",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Nghị quyết Hội đồng quản trị",
+    "date": "06/04/2026 17:08",
+    "timestamp": 1775470080,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/060426/a32-nghi-quyet-hoi-dong-quan-tri-0-606951.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2026_A32__Nghị_quyết_Hội_đồng_quản_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2026_A32__Nghị_quyết_Hội_đồng_quản_.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788550743.907438
+  },
+  "A32_resolution_63832": {
+    "doc_id": "A32_resolution_63832",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Nghị quyết Hội đồng quản trị v.v tạm ứng cổ tức đợt 1 năm 2025 bằng tiền",
+    "date": "11/12/2025 00:00",
+    "timestamp": 1765386000,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/111225/a32-nghi-quyet-hoi-dong-quan-tri-0-590014.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Nghị_quyết_Hội_đồng_quản_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Nghị_quyết_Hội_đồng_quản_.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 1,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788550744.3540068
+  },
+  "A32_resolution_49526": {
+    "doc_id": "A32_resolution_49526",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Nghị quyết Đại hội đồng cổ đông thường niên năm 2025",
+    "date": "02/07/2025 00:00",
+    "timestamp": 1751389200,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/020725/a32-nghi-quyet-ai-hoi-dong-co-dong-thuong-nien-nam-2025-0-568840.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Nghị_quyết_Đại_hội_đồng_c.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Nghị_quyết_Đại_hội_đồng_c.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 48,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": 7.0,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": [
+          "doanh thu: 7 "
+        ]
+      }
+    },
+    "processed_at": 1788550745.205039
+  },
+  "A32_resolution_8166": {
+    "doc_id": "A32_resolution_8166",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Tài liệu họp Đại hội đồng cổ đông",
+    "date": "06/06/2025 00:00",
+    "timestamp": 1749142800,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/060625/a32-tai-lieu-hop-ai-hoi-dong-co-dong-0-565785.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Tài_liệu_họp_Đại_hội_đồng.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Tài_liệu_họp_Đại_hội_đồng.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 46,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788550746.084901
+  },
+  "A32_resolution_65384": {
+    "doc_id": "A32_resolution_65384",
+    "symbol": "A32",
+    "category": "resolution",
+    "title": "A32: Nghị quyết hội đồng quản trị",
+    "date": "29/04/2025 11:17",
+    "timestamp": 1745900220,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/290425/a32-nghi-quyet-hoi-dong-quan-tri-0-560927.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Nghị_quyết_hội_đồng_quản_.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\A32_RESOLUTION_2025_A32__Nghị_quyết_hội_đồng_quản_.pdf",
+      "detected_category": "RESOLUTION",
+      "document_type": "NATIVE",
+      "total_pages": 1,
+      "provenance": "CORPORATE_DISCLOSURES_PARSER_TT96",
+      "resolution_data": {
+        "report_type": "RESOLUTION",
+        "document_type": "NATIVE",
+        "target_revenue_vnd": null,
+        "target_pbt_vnd": null,
+        "target_npat_vnd": null,
+        "target_dividend_rate_pct": null,
+        "dividend_payout_form": null,
+        "subsidiary_investments": [],
+        "bond_and_credit_limits": [],
+        "resolution_date": null,
+        "raw_matches": []
+      }
+    },
+    "processed_at": 1788550746.112693
   }
 }

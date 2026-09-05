@@ -12498,5 +12498,1608 @@
       "provenance": "DUAL_ROUTE_PDF_PARSER_TT200"
     },
     "processed_at": 1788539384.9440897
+  },
+  "A32_2026_2986081734485044336": {
+    "doc_id": "A32_2026_2986081734485044336",
+    "symbol": "A32",
+    "title": "A32: Ký hợp đồng kiểm toán Báo cáo tài chính năm 2026",
+    "year": 2026,
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "2026",
+    "filing_date": "31/07/2026 00:00",
+    "filing_timestamp": 1785430800,
+    "is_audited": true,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/310726/a32-ky-hop-dong-kiem-toan-bao-cao-tai-chinh-nam-2026-0-628167.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\2026_A32_2026_2986081.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\2026_A32_2026_2986081.pdf",
+      "document_type": "NATIVE",
+      "total_pages": 1,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": 2026,
+        "period_label": "2026",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": null,
+        "cfi_vnd": null,
+        "cff_vnd": null,
+        "capex_vnd": null,
+        "net_cash_flow_vnd": null,
+        "cash_begin_period_vnd": null,
+        "cash_end_period_vnd": null,
+        "free_cash_flow_vnd": null,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": false,
+        "extraction_method": "NATIVE_VECTOR"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": null,
+          "cfo_vnd": null,
+          "accrual_vnd": null,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "UNKNOWN",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788550649.8786905
+  },
+  "A32_2026_9036003602846142662": {
+    "doc_id": "A32_2026_9036003602846142662",
+    "symbol": "A32",
+    "title": "A32: Báo cáo tài chính năm 2025",
+    "year": 2026,
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "2026",
+    "filing_date": "31/03/2026 18:03",
+    "filing_timestamp": 1774954980,
+    "is_audited": false,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/310326/a32-bao-cao-tai-chinh-nam-2025-0-605305.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\2026_A32_2026_9036003.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\2026_A32_2026_9036003.pdf",
+      "document_type": "NATIVE",
+      "total_pages": 37,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": 2026,
+        "period_label": "2026",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "RAPID_OCR_ONNX",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": null,
+        "cfi_vnd": null,
+        "cff_vnd": null,
+        "capex_vnd": null,
+        "net_cash_flow_vnd": null,
+        "cash_begin_period_vnd": null,
+        "cash_end_period_vnd": null,
+        "free_cash_flow_vnd": null,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": false,
+        "extraction_method": "NATIVE_VECTOR"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": null,
+          "cfo_vnd": null,
+          "accrual_vnd": null,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "UNKNOWN",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788550695.8783925
+  },
+  "A32_2025_4058186733652729864": {
+    "doc_id": "A32_2025_4058186733652729864",
+    "symbol": "A32",
+    "title": "A32: Ký hợp đồng kiểm toán báo cáo tài chính năm 2025",
+    "year": 2025,
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "2025",
+    "filing_date": "07/10/2025 00:00",
+    "filing_timestamp": 1759770000,
+    "is_audited": true,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/071025/a32-ky-hop-dong-kiem-toan-bao-cao-tai-chinh-nam-2025-0-582508.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\2025_A32_2025_4058186.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\A32\\2025_A32_2025_4058186.pdf",
+      "document_type": "NATIVE",
+      "total_pages": 1,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": 2025,
+        "period_label": "2025",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": null,
+        "cfi_vnd": null,
+        "cff_vnd": null,
+        "capex_vnd": null,
+        "net_cash_flow_vnd": null,
+        "cash_begin_period_vnd": null,
+        "cash_end_period_vnd": null,
+        "free_cash_flow_vnd": null,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": false,
+        "extraction_method": "NATIVE_VECTOR"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": null,
+          "cfo_vnd": null,
+          "accrual_vnd": null,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "UNKNOWN",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788550696.4728105
+  },
+  "PXL_2026_6205992155309908003": {
+    "doc_id": "PXL_2026_6205992155309908003",
+    "symbol": "PXL",
+    "title": "PXL: Báo cáo tài chính bán niên năm 2026",
+    "year": 2026,
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "2026",
+    "filing_date": "16/08/2026 22:30",
+    "filing_timestamp": 1786894200,
+    "is_audited": false,
+    "pdf_url": "https://cafefnew.mediacdn.vn/download/160826/pxl-bao-cao-tai-chinh-ban-nien-nam-2026-0-630926.pdf?v=1786894505365",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_6205992.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_6205992.pdf",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": 2026,
+        "period_label": "2026",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": null,
+        "cfi_vnd": null,
+        "cff_vnd": null,
+        "capex_vnd": null,
+        "net_cash_flow_vnd": null,
+        "cash_begin_period_vnd": null,
+        "cash_end_period_vnd": null,
+        "free_cash_flow_vnd": null,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": false,
+        "extraction_method": "NATIVE_VECTOR"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": null,
+          "cfo_vnd": null,
+          "accrual_vnd": null,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "UNKNOWN",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788550750.0313432
+  },
+  "PXL_2026_2534051050616238445": {
+    "doc_id": "PXL_2026_2534051050616238445",
+    "symbol": "PXL",
+    "title": "PXL: Báo cáo tài chính quý 2/2026",
+    "year": "2026",
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "UNKNOWN",
+    "filing_date": "16/07/2026 18:45",
+    "filing_timestamp": 1784202300,
+    "is_audited": false,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/160726/pxl-bao-cao-tai-chinh-quy-2-2026-0-624868.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_2534051.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_2534051.pdf",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 22,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": null,
+        "period_label": "UNKNOWN",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "RAPID_OCR_ONNX",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "RAPID_OCR_ONNX",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {
+          "2": {
+            "code": 2,
+            "name": "Điều chỉnh cho các khoản",
+            "current_val": -19225587378.0,
+            "previous_val": -4089524436.0
+          },
+          "3": {
+            "code": 3,
+            "name": "Lợi nhuận kinh doanh trước thay đổi VLĐ",
+            "current_val": -5648604195.0,
+            "previous_val": -4698156236.0
+          },
+          "20": {
+            "code": 20,
+            "name": "Lưu chuyển tiền thuần từ hoạt động kinh doanh (CFO)",
+            "current_val": -139715930697.0,
+            "previous_val": 936258984549.0
+          },
+          "21": {
+            "code": 21,
+            "name": "Tiền chi mua sắm, xây dựng TSCĐ và TSDH khác (CapEx)",
+            "current_val": -1377461890.0,
+            "previous_val": -2366156617.0
+          },
+          "22": {
+            "code": 22,
+            "name": "Tiền thu từ thanh lý, nhượng bán TSCĐ",
+            "current_val": -4624612.0,
+            "previous_val": null
+          },
+          "23": {
+            "code": 23,
+            "name": "Tiền chi cho vay, mua các công cụ nợ khác",
+            "current_val": -264320000000.0,
+            "previous_val": -1663969315068.0
+          },
+          "24": {
+            "code": 24,
+            "name": "Tiền thu hồi cho vay, bán lại công cụ nợ khác",
+            "current_val": 401465000000.0,
+            "previous_val": 705900000000.0
+          },
+          "27": {
+            "code": 27,
+            "name": "Tiền thu lãi cho vay, cổ tức và lợi nhuận được chia",
+            "current_val": 1489709639.0,
+            "previous_val": 1322918044.0
+          },
+          "30": {
+            "code": 30,
+            "name": "Lưu chuyển tiền thuần từ hoạt động đầu tư (CFI)",
+            "current_val": 137252623137.0,
+            "previous_val": -959112553641.0
+          },
+          "33": {
+            "code": 33,
+            "name": "Tiền vay gốc nhận được",
+            "current_val": 23045000000.0,
+            "previous_val": null
+          },
+          "40": {
+            "code": 40,
+            "name": "Lưu chuyển tiền thuần từ hoạt động tài chính (CFF)",
+            "current_val": 23045000000.0,
+            "previous_val": null
+          },
+          "50": {
+            "code": 50,
+            "name": "Lưu chuyển tiền thuần trong kỳ (Net Cash Flow)",
+            "current_val": -2463307560.0,
+            "previous_val": 191430908.0
+          },
+          "60": {
+            "code": 60,
+            "name": "Tiền và tương đương tiền đầu kỳ",
+            "current_val": 5827666243.0,
+            "previous_val": 213250012.0
+          },
+          "70": {
+            "code": 70,
+            "name": "Tiền và tương đương tiền cuối kỳ",
+            "current_val": 3364358683.0,
+            "previous_val": 404680920.0
+          }
+        },
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": -139715930697.0,
+        "cfi_vnd": 137252623137.0,
+        "cff_vnd": 23045000000.0,
+        "capex_vnd": 1377461890.0,
+        "net_cash_flow_vnd": -2463307560.0,
+        "cash_begin_period_vnd": 5827666243.0,
+        "cash_end_period_vnd": 3364358683.0,
+        "free_cash_flow_vnd": -141093392587.0,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": true,
+        "extraction_method": "RAPID_OCR_ONNX"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": null,
+          "cfo_vnd": -139715930697.0,
+          "accrual_vnd": null,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "UNKNOWN",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788550890.3736525
+  },
+  "PXL_2026_6384401413852241854": {
+    "doc_id": "PXL_2026_6384401413852241854",
+    "symbol": "PXL",
+    "title": "PXL: Ký hợp đồng kiểm toán báo cáo tài chính năm 2026",
+    "year": 2026,
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "2026",
+    "filing_date": "06/07/2026 00:00",
+    "filing_timestamp": 1783270800,
+    "is_audited": true,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/060726/pxl-ky-hop-dong-kiem-toan-bao-cao-tai-chinh-nam-2026-0-623254.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_6384401.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_6384401.pdf",
+      "document_type": "NATIVE",
+      "total_pages": 2,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": 2026,
+        "period_label": "2026",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": null,
+        "cfi_vnd": null,
+        "cff_vnd": null,
+        "capex_vnd": null,
+        "net_cash_flow_vnd": null,
+        "cash_begin_period_vnd": null,
+        "cash_end_period_vnd": null,
+        "free_cash_flow_vnd": null,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": false,
+        "extraction_method": "NATIVE_VECTOR"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": null,
+          "cfo_vnd": null,
+          "accrual_vnd": null,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "UNKNOWN",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788550890.9737475
+  },
+  "PXL_2026_4314756079519612135": {
+    "doc_id": "PXL_2026_4314756079519612135",
+    "symbol": "PXL",
+    "title": "PXL: Báo cáo tài chính quý 1/2026",
+    "year": "2026",
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "UNKNOWN",
+    "filing_date": "23/04/2026 17:11",
+    "filing_timestamp": 1776939060,
+    "is_audited": false,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/230426/pxl-bao-cao-tai-chinh-quy-1-2026-0-610973.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_4314756.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_4314756.pdf",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 22,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": null,
+        "period_label": "UNKNOWN",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": false,
+        "risk_flags": []
+      },
+      "balance_sheet": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "RAPID_OCR_ONNX",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {
+          "1": {
+            "code": 1,
+            "name": "Doanh thu bán hàng và cung cấp dịch vụ",
+            "current_val": 1460729704.0,
+            "previous_val": 2987146058.0
+          },
+          "10": {
+            "code": 10,
+            "name": "Doanh thu thuần về bán hàng và cung cấp dịch vụ",
+            "current_val": 2987146058.0,
+            "previous_val": 1460729704.0
+          },
+          "20": {
+            "code": 20,
+            "name": "Lợi nhuận gộp về bán hàng và cung cấp dịch vụ",
+            "current_val": 1691952889.0,
+            "previous_val": 756637783.0
+          },
+          "22": {
+            "code": 22,
+            "name": "Chi phí tài chính",
+            "current_val": 4412993425.0,
+            "previous_val": 16203196488.0
+          },
+          "23": {
+            "code": 23,
+            "name": "Trong đó: Chi phí lãi vay",
+            "current_val": 287273287.0,
+            "previous_val": 287273287.0
+          },
+          "25": {
+            "code": 25,
+            "name": "Chi phí bán hàng",
+            "current_val": 190431467.0,
+            "previous_val": 190431467.0
+          },
+          "26": {
+            "code": 26,
+            "name": "Chi phí quản lý doanh nghiệp",
+            "current_val": 17110061730.0,
+            "previous_val": 4759229811.0
+          },
+          "30": {
+            "code": 30,
+            "name": "Lợi nhuận thuần từ hoạt động kinh doanh",
+            "current_val": 594656180.0,
+            "previous_val": -71175285.0
+          },
+          "31": {
+            "code": 31,
+            "name": "Thu nhập khác",
+            "current_val": 325400000.0,
+            "previous_val": 325400000.0
+          },
+          "32": {
+            "code": 32,
+            "name": "Chi phí khác",
+            "current_val": 71294209.0,
+            "previous_val": 64753299.0
+          },
+          "40": {
+            "code": 40,
+            "name": "Lợi nhuận khác",
+            "current_val": 254105791.0,
+            "previous_val": -64753299.0
+          },
+          "50": {
+            "code": 50,
+            "name": "Tổng lợi nhuận kế toán trước thuế",
+            "current_val": 529902881.0,
+            "previous_val": 182930506.0
+          },
+          "51": {
+            "code": 51,
+            "name": "Chi phí thuế TNDN hiện hành",
+            "current_val": 188104100.0,
+            "previous_val": 88792225.0
+          },
+          "52": {
+            "code": 52,
+            "name": "Chi phí thuế TNDN hoãn lại",
+            "current_val": 341798781.0,
+            "previous_val": 94138281.0
+          },
+          "60": {
+            "code": 60,
+            "name": "Lợi nhuận sau thuế thu nhập doanh nghiệp",
+            "current_val": 94138281.0,
+            "previous_val": null
+          },
+          "2": {
+            "code": 2,
+            "name": "Các khoản giảm trừ doanh thu",
+            "current_val": -5341853454.0,
+            "previous_val": -2333184806.0
+          },
+          "21": {
+            "code": 21,
+            "name": "Doanh thu hoạt động tài chính",
+            "current_val": -184292807.0,
+            "previous_val": -313157576.0
+          },
+          "70": {
+            "code": 70,
+            "name": "Lãi cơ bản trên cổ phiếu (EPS)",
+            "current_val": 4772178966.0,
+            "previous_val": 372732032.0
+          }
+        },
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": 2987146058.0,
+        "cogs_vnd": null,
+        "gross_profit_vnd": 1691952889.0,
+        "financial_revenue_vnd": -184292807.0,
+        "financial_expense_vnd": 4412993425.0,
+        "interest_expense_vnd": 287273287.0,
+        "operating_profit_vnd": 594656180.0,
+        "pbt_vnd": 529902881.0,
+        "tax_expense_vnd": 188104100.0,
+        "npat_vnd": 94138281.0,
+        "parent_npat_vnd": 94138281.0,
+        "eps_vnd": 4772178966.0,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "RAPID_OCR_ONNX",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {
+          "1": {
+            "code": 1,
+            "name": "Lợi nhuận trước thuế / Tiền thu từ bán hàng",
+            "current_val": 3108705687.0,
+            "previous_val": 2199052885.0
+          },
+          "2": {
+            "code": 2,
+            "name": "Điều chỉnh cho các khoản",
+            "current_val": -5341853454.0,
+            "previous_val": -2333184806.0
+          },
+          "3": {
+            "code": 3,
+            "name": "Lợi nhuận kinh doanh trước thay đổi VLĐ",
+            "current_val": -3416180786.0,
+            "previous_val": -2602328814.0
+          },
+          "20": {
+            "code": 20,
+            "name": "Lưu chuyển tiền thuần từ hoạt động kinh doanh (CFO)",
+            "current_val": 1837031524.0,
+            "previous_val": 907566019632.0
+          },
+          "21": {
+            "code": 21,
+            "name": "Tiền chi mua sắm, xây dựng TSCĐ và TSDH khác (CapEx)",
+            "current_val": -184292807.0,
+            "previous_val": -313157576.0
+          },
+          "22": {
+            "code": 22,
+            "name": "Tiền thu từ thanh lý, nhượng bán TSCĐ",
+            "current_val": -3500000.0,
+            "previous_val": null
+          },
+          "23": {
+            "code": 23,
+            "name": "Tiền chi cho vay, mua các công cụ nợ khác",
+            "current_val": -82685000000.0,
+            "previous_val": -937420000000.0
+          },
+          "24": {
+            "code": 24,
+            "name": "Tiền thu hồi cho vay, bán lại công cụ nợ khác",
+            "current_val": 79750000000.0,
+            "previous_val": 7190000000.0
+          },
+          "27": {
+            "code": 27,
+            "name": "Tiền thu lãi cho vay, cổ tức và lợi nhuận được chia",
+            "current_val": 230274006.0,
+            "previous_val": 91619964.0
+          },
+          "30": {
+            "code": 30,
+            "name": "Lưu chuyển tiền thuần từ hoạt động đầu tư (CFI)",
+            "current_val": -2892518801.0,
+            "previous_val": -930451537612.0
+          },
+          "33": {
+            "code": 33,
+            "name": "Tiền vay gốc nhận được",
+            "current_val": 23045000000.0,
+            "previous_val": null
+          },
+          "40": {
+            "code": 40,
+            "name": "Lưu chuyển tiền thuần từ hoạt động tài chính (CFF)",
+            "current_val": 23045000000.0,
+            "previous_val": null
+          },
+          "50": {
+            "code": 50,
+            "name": "Lưu chuyển tiền thuần trong kỳ (Net Cash Flow)",
+            "current_val": -1055487277.0,
+            "previous_val": 159482020.0
+          },
+          "60": {
+            "code": 60,
+            "name": "Tiền và tương đương tiền đầu kỳ",
+            "current_val": 5827666243.0,
+            "previous_val": 213250012.0
+          },
+          "70": {
+            "code": 70,
+            "name": "Tiền và tương đương tiền cuối kỳ",
+            "current_val": 4772178966.0,
+            "previous_val": 372732032.0
+          }
+        },
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": 1837031524.0,
+        "cfi_vnd": -2892518801.0,
+        "cff_vnd": 23045000000.0,
+        "capex_vnd": 184292807.0,
+        "net_cash_flow_vnd": -1055487277.0,
+        "cash_begin_period_vnd": 5827666243.0,
+        "cash_end_period_vnd": 4772178966.0,
+        "free_cash_flow_vnd": 1652738717.0,
+        "is_net_cash_flow_balanced": false,
+        "is_cash_ending_balanced": true,
+        "extraction_method": "RAPID_OCR_ONNX"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": 94138281.0,
+          "cfo_vnd": 1837031524.0,
+          "accrual_vnd": -1742893243.0,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "EXCELLENT",
+          "is_cash_backed": true
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": 287273287.0,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": 529902881.0,
+          "tax_expense_vnd": 188104100.0,
+          "effective_tax_rate_pct": 35.5,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": 15.5
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 0.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": 2987146058.0,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": 94138281.0,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788551015.634792
+  },
+  "PXL_2026_5904596042392467225": {
+    "doc_id": "PXL_2026_5904596042392467225",
+    "symbol": "PXL",
+    "title": "PXL: Báo cáo tài chính năm 2025",
+    "year": "2026",
+    "quarter": null,
+    "period_type": "unknown",
+    "period_label": "UNKNOWN",
+    "filing_date": "23/03/2026 17:35",
+    "filing_timestamp": 1774262100,
+    "is_audited": false,
+    "pdf_url": "https://cafef1.mediacdn.vn/download/230326/pxl-bao-cao-tai-chinh-nam-2025-0-603335.pdf",
+    "local_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_5904596.pdf",
+    "extracted_data": {
+      "pdf_path": "C:\\Users\\Admin\\Documents\\Vibecoding vnstock\\data\\pdf_lake\\PXL\\2026_PXL_2026_5904596.pdf",
+      "document_type": "SCANNED_IMAGE",
+      "total_pages": 37,
+      "period_info": {
+        "period_type": "unknown",
+        "quarter": null,
+        "year": null,
+        "period_label": "UNKNOWN",
+        "is_audited": false
+      },
+      "currency_unit": "VND",
+      "scale_multiplier": 1.0,
+      "accounting_regime": "NON_FINANCE",
+      "auditor_summary": {
+        "auditor_firm": "Unknown",
+        "is_big4": false,
+        "opinion_type": "Chấp nhận toàn phần (Unqualified)",
+        "has_emphasis_of_matter": false,
+        "has_going_concern_issue": true,
+        "risk_flags": [
+          "GOING_CONCERN_RISK"
+        ]
+      },
+      "balance_sheet": {
+        "items": {
+          "300": {
+            "code": 300,
+            "name": "NỢ PHẢI TRẢ",
+            "current_val": 54886797029.0,
+            "previous_val": 49946308798.0
+          },
+          "310": {
+            "code": 310,
+            "name": "Nợ ngắn hạn",
+            "current_val": 54886797029.0,
+            "previous_val": 49946308798.0
+          },
+          "311": {
+            "code": 311,
+            "name": "Phải trả người bán ngắn hạn",
+            "current_val": 273280183.0,
+            "previous_val": 276482535.0
+          },
+          "312": {
+            "code": 312,
+            "name": "Người mua trả tiền trước ngắn hạn",
+            "current_val": 1837632322.0,
+            "previous_val": 1821177821.0
+          },
+          "400": {
+            "code": 400,
+            "name": "VỐN CHỦ SỞ HỮU",
+            "current_val": 1760851642293.0,
+            "previous_val": 825497451326.0
+          },
+          "410": {
+            "code": 410,
+            "name": "Vốn góp của chủ sở hữu",
+            "current_val": 1760851642293.0,
+            "previous_val": 825497451326.0
+          },
+          "411": {
+            "code": 411,
+            "name": "Cổ phiếu phổ thông có quyền biểu quyết",
+            "current_val": 1761455000000.0,
+            "previous_val": 827222120000.0
+          },
+          "418": {
+            "code": 418,
+            "name": "Quỹ đầu tư phát triển",
+            "current_val": 12264138227.0,
+            "previous_val": 12264138227.0
+          },
+          "421": {
+            "code": 421,
+            "name": "Lợi nhuận sau thuế chưa phân phối",
+            "current_val": -13081601825.0,
+            "previous_val": -14202912792.0
+          },
+          "440": {
+            "code": 440,
+            "name": "TỔNG CỘNG NGUỒN VỐN",
+            "current_val": 1815738439322.0,
+            "previous_val": 875443760124.0
+          }
+        },
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "is_balanced": false,
+        "difference_vnd": 0.0,
+        "extraction_method": "RAPID_OCR_ONNX",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "income_statement": {
+        "items": {},
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "revenue_vnd": null,
+        "cogs_vnd": null,
+        "gross_profit_vnd": null,
+        "financial_revenue_vnd": null,
+        "financial_expense_vnd": null,
+        "interest_expense_vnd": null,
+        "operating_profit_vnd": null,
+        "pbt_vnd": null,
+        "tax_expense_vnd": null,
+        "npat_vnd": null,
+        "parent_npat_vnd": null,
+        "eps_vnd": null,
+        "is_gross_profit_balanced": false,
+        "is_tax_balanced": false,
+        "extraction_method": "NATIVE_VECTOR",
+        "accounting_regime": "NON_FINANCE"
+      },
+      "cash_flow": {
+        "items": {
+          "1": {
+            "code": 1,
+            "name": "Lợi nhuận trước thuế / Tiền thu từ bán hàng",
+            "current_val": 1770886782.0,
+            "previous_val": 1369249738.0
+          },
+          "2": {
+            "code": 2,
+            "name": "Điều chỉnh cho các khoản",
+            "current_val": 3645230738.0,
+            "previous_val": 3700253783.0
+          },
+          "3": {
+            "code": 3,
+            "name": "Lợi nhuận kinh doanh trước thay đổi VLĐ",
+            "current_val": 39348968130.0,
+            "previous_val": 1412411335.0
+          },
+          "20": {
+            "code": 20,
+            "name": "Lưu chuyển tiền thuần từ hoạt động kinh doanh (CFO)",
+            "current_val": -640227756231.0,
+            "previous_val": -7494332151.0
+          },
+          "21": {
+            "code": 21,
+            "name": "Tiền chi mua sắm, xây dựng TSCĐ và TSDH khác (CapEx)",
+            "current_val": -75393266.0,
+            "previous_val": null
+          },
+          "23": {
+            "code": 23,
+            "name": "Tiền chi cho vay, mua các công cụ nợ khác",
+            "current_val": -331265000000.0,
+            "previous_val": -14815000000.0
+          },
+          "24": {
+            "code": 24,
+            "name": "Tiền thu hồi cho vay, bán lại công cụ nợ khác",
+            "current_val": 17775000000.0,
+            "previous_val": null
+          },
+          "27": {
+            "code": 27,
+            "name": "Tiền thu lãi cho vay, cổ tức và lợi nhuận được chia",
+            "current_val": 42973524578.0,
+            "previous_val": 254539149.0
+          },
+          "30": {
+            "code": 30,
+            "name": "Lưu chuyển tiền thuần từ hoạt động đầu tư (CFI)",
+            "current_val": -288366868688.0,
+            "previous_val": 3214539149.0
+          },
+          "31": {
+            "code": 31,
+            "name": "Tiền thu từ phát hành cổ phiếu, nhận vốn góp của CSH",
+            "current_val": 934232880000.0,
+            "previous_val": null
+          },
+          "33": {
+            "code": 33,
+            "name": "Tiền vay gốc nhận được",
+            "current_val": 23045000000.0,
+            "previous_val": null
+          },
+          "34": {
+            "code": 34,
+            "name": "Tiền trả nợ gốc vay",
+            "current_val": -23045000000.0,
+            "previous_val": null
+          },
+          "36": {
+            "code": 36,
+            "name": "Cổ tức, lợi nhuận đã trả cho chủ sở hữu",
+            "current_val": -23838850.0,
+            "previous_val": -14629750.0
+          },
+          "40": {
+            "code": 40,
+            "name": "Lưu chuyển tiền thuần từ hoạt động tài chính (CFF)",
+            "current_val": 934209041150.0,
+            "previous_val": -14629750.0
+          },
+          "50": {
+            "code": 50,
+            "name": "Lưu chuyển tiền thuần trong kỳ (Net Cash Flow)",
+            "current_val": 5614416231.0,
+            "previous_val": -4294422752.0
+          },
+          "60": {
+            "code": 60,
+            "name": "Tiền và tương đương tiền đầu kỳ",
+            "current_val": 213250012.0,
+            "previous_val": 4507672764.0
+          },
+          "70": {
+            "code": 70,
+            "name": "Tiền và tương đương tiền cuối kỳ",
+            "current_val": 5827666243.0,
+            "previous_val": 213250012.0
+          }
+        },
+        "currency_unit": "VND",
+        "scale_multiplier": 1.0,
+        "cfo_vnd": -640227756231.0,
+        "cfi_vnd": -288366868688.0,
+        "cff_vnd": 934209041150.0,
+        "capex_vnd": 75393266.0,
+        "net_cash_flow_vnd": 5614416231.0,
+        "cash_begin_period_vnd": 213250012.0,
+        "cash_end_period_vnd": 5827666243.0,
+        "free_cash_flow_vnd": -640303149497.0,
+        "is_net_cash_flow_balanced": true,
+        "is_cash_ending_balanced": true,
+        "extraction_method": "RAPID_OCR_ONNX"
+      },
+      "debt_schedule_footnotes": [],
+      "landbank_wip_footnotes": [],
+      "subsidiaries_and_affiliates": [],
+      "capex_cip_projects": [],
+      "debt_maturity_profile": {
+        "total_borrowings_vnd": 0.0,
+        "short_term_debt_vnd": 0.0,
+        "long_term_debt_vnd": 0.0,
+        "refinancing_wall_ratio": 0.0,
+        "refinancing_risk_level": "HEALTHY (Balanced maturity structure)",
+        "lenders_breakdown": []
+      },
+      "related_party_balances": [],
+      "bank_npl_footnotes": {},
+      "securities_margin_footnotes": {},
+      "real_estate_wip_footnotes": {},
+      "forensic_triangles": {
+        "regime": "NON_FINANCE",
+        "sloan_accrual_triangle": {
+          "npat_vnd": -13081601825.0,
+          "cfo_vnd": -640227756231.0,
+          "accrual_vnd": 627146154406.0,
+          "total_assets_vnd": 0.0,
+          "sloan_ratio": null,
+          "earnings_quality": "POOR (Negative CFO)",
+          "is_cash_backed": false
+        },
+        "bank_debt_triangle": {
+          "reported_borrowings_vnd": 0.0,
+          "footnote_debt_sum_vnd": 0,
+          "discrepancy_vnd": 0.0,
+          "reconciliation_pct": 100.0,
+          "transparency_rating": "ZERO_DEBT (No Borrowings on Balance Sheet)"
+        },
+        "effective_rates_triangle": {
+          "interest_expense_vnd": null,
+          "effective_borrowing_rate_pct": null,
+          "pbt_vnd": null,
+          "tax_expense_vnd": null,
+          "effective_tax_rate_pct": null,
+          "statutory_benchmark_pct": 20.0,
+          "tax_deviation_pct": null
+        },
+        "related_party_drain_triangle": {
+          "total_equity_vnd": 1760851642293.0,
+          "related_party_volume_vnd": 0,
+          "drain_ratio": 0.0,
+          "risk_assessment": "LOW (No significant related-party extraction)"
+        },
+        "agm_fulfillment_triangle": {
+          "target_revenue_vnd": null,
+          "actual_revenue_vnd": null,
+          "revenue_fulfillment_pct": null,
+          "target_npat_vnd": null,
+          "actual_npat_vnd": null,
+          "npat_fulfillment_pct": null,
+          "guidance_status": "NO_TARGET_AVAILABLE"
+        }
+      },
+      "provenance": "DUAL_ROUTE_PDF_PARSER_NON_FINANCE"
+    },
+    "processed_at": 1788551147.1046157
   }
 }

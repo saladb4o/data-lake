@@ -1280,7 +1280,12 @@ def load_source0_symbol_data(symbol: str) -> Optional[Dict[str, Any]]:
     and computes the 5 Forensic Accounting Triangles.
     """
     try:
-        from services.bctc_batch_processor import _get_lake_data, _get_corporate_actions_lake, calculate_source0_ttm
+        from services.bctc_batch_processor import (
+            _get_lake_data,
+            _get_corporate_actions_lake,
+            calculate_source0_ttm,
+            extract_records_from_lake
+        )
         from services.bctc_pdf_parser import calculate_forensic_triangles
 
         symbol_clean = symbol.upper().strip()
@@ -1297,8 +1302,8 @@ def load_source0_symbol_data(symbol: str) -> Optional[Dict[str, Any]]:
         bctc_lake = _get_lake_data()
         corp_lake = _get_corporate_actions_lake()
 
-        matching_bctc = [r for r in bctc_lake.values() if r.get("symbol") == symbol_clean]
-        matching_corp = [r for r in corp_lake.values() if r.get("symbol") == symbol_clean]
+        matching_bctc = extract_records_from_lake(bctc_lake, symbol_clean, key_field="periods")
+        matching_corp = extract_records_from_lake(corp_lake, symbol_clean, key_field="records")
 
         if not matching_bctc and not matching_corp:
             return None
@@ -1330,10 +1335,13 @@ def load_source0_symbol_data(symbol: str) -> Optional[Dict[str, Any]]:
             elif cat == "dividend" and not disclosures_combined["dividend_data"]:
                 disclosures_combined["dividend_data"] = ext.get("dividend_data", {})
 
-        forensics = calculate_forensic_triangles(bctc_extracted, disclosures_combined)
+        from services.bctc_pdf_parser import calculate_forensic_triangles, detect_accounting_regime
+        company_form = detect_accounting_regime(symbol=symbol_clean)
+        forensics = calculate_forensic_triangles(bctc_extracted, disclosures_combined, company_form=company_form)
 
         res = {
             "symbol": symbol_clean,
+            "company_form": company_form,
             "doc_id": latest_bctc.get("doc_id") if latest_bctc else None,
             "filing_date": latest_bctc.get("filing_date") if latest_bctc else None,
             "filing_timestamp": latest_bctc.get("filing_timestamp") if latest_bctc else None,
@@ -1344,9 +1352,12 @@ def load_source0_symbol_data(symbol: str) -> Optional[Dict[str, Any]]:
             "auditor_summary": bctc_extracted.get("auditor_summary", {}),
             "debt_schedule_footnotes": bctc_extracted.get("debt_schedule_footnotes", []),
             "landbank_wip_footnotes": bctc_extracted.get("landbank_wip_footnotes", []),
+            "bank_npl_footnotes": bctc_extracted.get("bank_npl_footnotes", {}),
+            "securities_margin_footnotes": bctc_extracted.get("securities_margin_footnotes", {}),
+            "real_estate_wip_footnotes": bctc_extracted.get("real_estate_wip_footnotes", {}),
             "disclosures": disclosures_combined,
             "forensic_triangles": forensics,
-            "provenance": "SOURCE_0_GROUND_TRUTH_PDF_LAKE"
+            "provenance": f"SOURCE_0_GROUND_TRUTH_PDF_LAKE_{company_form}"
         }
         if cache_engine is not None:
             cache_engine.set(cache_key, res, ttl_seconds=900)

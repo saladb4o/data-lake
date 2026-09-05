@@ -12,31 +12,52 @@ import json
 import shutil
 import urllib.request
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 LOCAL_PDF_LAKE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "pdf_lake")
 os.makedirs(LOCAL_PDF_LAKE, exist_ok=True)
-TARGET_FILE = os.path.join(LOCAL_PDF_LAKE, "extracted_bctc_lake.json")
+TARGET_BCTC_FILE = os.path.join(LOCAL_PDF_LAKE, "extracted_bctc_lake.json")
+TARGET_CORP_FILE = os.path.join(LOCAL_PDF_LAKE, "extracted_corporate_actions.json")
 
 
 def sync_from_google_drive() -> bool:
     gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data/pdf_lake")
-    gdrive_file = os.path.join(gdrive_dir, "extracted_bctc_lake.json")
-    if os.path.exists(gdrive_file):
+    gdrive_bctc = os.path.join(gdrive_dir, "extracted_bctc_lake.json")
+    gdrive_corp = os.path.join(gdrive_dir, "extracted_corporate_actions.json")
+    synced_any = False
+
+    if os.path.exists(gdrive_bctc):
         try:
-            sz_mb = os.path.getsize(gdrive_file) / (1024 * 1024)
-            shutil.copy2(gdrive_file, TARGET_FILE)
-            print(f"✅ Synced {round(sz_mb, 2)} MB directly from Google Drive: {gdrive_file}")
-            return True
+            sz_mb = os.path.getsize(gdrive_bctc) / (1024 * 1024)
+            shutil.copy2(gdrive_bctc, TARGET_BCTC_FILE)
+            print(f"✅ Synced BCTC Lake ({round(sz_mb, 2)} MB) from Google Drive: {gdrive_bctc}")
+            synced_any = True
         except Exception as e:
-            print(f"Error copying from Drive: {e}")
-    return False
+            print(f"Error copying BCTC from Drive: {e}")
+
+    if os.path.exists(gdrive_corp):
+        try:
+            sz_mb = os.path.getsize(gdrive_corp) / (1024 * 1024)
+            shutil.copy2(gdrive_corp, TARGET_CORP_FILE)
+            print(f"✅ Synced Corporate Actions Lake ({round(sz_mb, 2)} MB) from Google Drive: {gdrive_corp}")
+            synced_any = True
+        except Exception as e:
+            print(f"Error copying Corporate Actions from Drive: {e}")
+
+    return synced_any
 
 
 def main():
-    print("🔄 Checking for newest BCTC lake file...")
+    print("🔄 Checking for newest BCTC & Corporate Actions lake files...")
     if sync_from_google_drive():
-        print("🎉 Local Data Lake is 100% up-to-date!")
+        print("🎉 Local Data Lakes are 100% up-to-date!")
     else:
-        print("💡 Ensure Google Drive is mounted or download artifact from GitHub Actions Actions tab.")
+        print("💡 Ensure Google Drive is mounted or download artifacts from GitHub Actions tab.")
 
 
 if __name__ == "__main__":

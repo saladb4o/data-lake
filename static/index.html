@@ -259,6 +259,7 @@
               <button class="subtab-btn" data-subtab="stock_ecosystem">🌐 Hệ Sinh Thái</button>
               <button class="subtab-btn" data-subtab="stock_peers">🏢 Cùng Ngành (Peers)</button>
               <button class="subtab-btn" data-subtab="stock_financials">📊 Báo Cáo Tài Chính & Chỉ Số</button>
+              <button class="subtab-btn" data-subtab="stock_forensic" style="color:#38bdf8; font-weight:700;">🕵️ Giám Định BCTC & Rủi Ro</button>
               <button class="subtab-btn" data-subtab="stock_reports">📑 Hồ Sơ & File PDF</button>
               <button class="subtab-btn" data-subtab="stock_news">📰 Tin Tức & Báo Chí</button>
               <button class="subtab-btn" data-subtab="stock_events">📅 Lịch Sự Kiện & Cổ Tức</button>
@@ -391,6 +392,13 @@
 
               <div class="fin-table-wrapper" id="finTableWrapper">
                 <div id="finTableContainer"></div>
+              </div>
+            </div>
+
+            <!-- SUBTAB: GIÁM ĐỊNH BCTC & MA TRẬN RỦI RO (FORENSIC ACCOUNTING & RISK MATRIX) -->
+            <div class="subtab-content" id="subtab_stock_forensic">
+              <div class="forensic-overview-container" id="stockForensicContainer">
+                <div style="color:var(--text-muted); font-size:12px; padding:24px; text-align:center;">⏳ Đang khởi động Động cơ Giám định BCTC & Ma trận 5 Tam giác Đối soát...</div>
               </div>
             </div>
 
@@ -2672,6 +2680,25 @@
 
       <div id="savedStrategiesContainer" style="display:flex; flex-direction:column; gap:10px;">
         <!-- Populated dynamically via JS -->
+      </div>
+    </div>
+  </div>
+
+  <!-- DOCUMENT INTELLIGENCE DOSSIER PREVIEW MODAL -->
+  <div class="modal-overlay" id="documentDossierModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.78); z-index:9999; backdrop-filter:blur(6px); align-items:center; justify-content:center;">
+    <div class="modal-card" style="max-width:860px; width:95%; max-height:88vh; overflow-y:auto; padding:22px; background:#0f172a; border:1px solid rgba(56,189,248,0.3); border-radius:12px; box-shadow:0 20px 40px rgba(0,0,0,0.85);">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:12px; margin-bottom:16px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-size:24px;">⚡</span>
+          <div>
+            <div style="font-weight:800; font-size:16px; color:#38bdf8;" id="docDossierModalTitle">GIÁM ĐỊNH CHI TIẾT TÀI LIỆU CÔNG BỐ (AI INTELLIGENCE)</div>
+            <div style="font-size:11px; color:#94a3b8;" id="docDossierModalSubtitle">Số liệu số hóa từ văn bản gốc TT200 & TT96</div>
+          </div>
+        </div>
+        <button class="reader-ctrl-btn" onclick="app.closeDocumentDossier()" title="Đóng [Esc]" style="cursor:pointer; background:rgba(255,255,255,0.08); border-radius:6px; border:1px solid rgba(255,255,255,0.15); font-size:14px; width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:#fff;">✕</button>
+      </div>
+      <div id="docDossierModalBody" style="display:flex; flex-direction:column; gap:16px;">
+        <!-- Populated via JS -->
       </div>
     </div>
   </div>
