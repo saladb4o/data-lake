@@ -459,7 +459,7 @@ def build_complete_forensic_suite(symbol: str) -> Dict[str, Any]:
     lake = _get_lake_data()
     corp_lake = _get_corporate_actions_lake()
 
-    from services.bctc_batch_processor import extract_records_from_lake
+    from services.bctc_batch_processor import extract_records_from_lake, enrich_forensic_bctc_with_structured_financials
     matching_bctc = extract_records_from_lake(lake, symbol_clean, key_field="periods")
     bctc_record = None
     if matching_bctc:
@@ -467,9 +467,18 @@ def build_complete_forensic_suite(symbol: str) -> Dict[str, Any]:
             y = int(r.get("year") or 0) if str(r.get("year", "")).isdigit() else 0
             q = r.get("quarter") or 0
             ts = r.get("filing_timestamp") or 0
-            return (y, q, ts)
+            ext = r.get("extracted_data", {})
+            bs = ext.get("balance_sheet") or ext.get("b01_balance_sheet") or {}
+            bs_items = bs.get("items") or {}
+            ta = bs.get("total_assets_vnd") or bs.get("total_assets") or bs.get("code_270")
+            has_fin = 1 if (len(bs_items) > 0 or (ta and ta > 0)) else 0
+            return (has_fin, y, q, ts)
         matching_bctc.sort(key=_bctc_sort, reverse=True)
         bctc_record = matching_bctc[0]
+
+    if not bctc_record:
+        bctc_record = {"symbol": symbol_clean, "extracted_data": {}}
+    bctc_record["extracted_data"] = enrich_forensic_bctc_with_structured_financials(symbol_clean, bctc_record.get("extracted_data", {}))
 
     cip_data = CIPForensicEngine.analyze(symbol_clean, bctc_record=bctc_record)
     say_do_data = SayDoManagementIntegrityEngine.analyze(symbol_clean, bctc_record=bctc_record, corp_lake=corp_lake)

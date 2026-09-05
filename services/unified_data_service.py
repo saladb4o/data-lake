@@ -858,6 +858,7 @@ def reconstruct_financial_triangles(
         field_provenance["capex"] = 1
     else:
         calc_capex = 0.0
+        field_provenance["capex"] = 0
 
     if s0_fcf is not None:
         fcf_ttm = round(s0_fcf / 1_000_000_000.0, 1) if abs(s0_fcf) > 10_000_000 else round(s0_fcf, 1)
@@ -870,10 +871,10 @@ def reconstruct_financial_triangles(
         field_provenance["fcf_ttm"] = 3
     elif calc_cfo > 0:
         fcf_ttm = round(max(0.0, (calc_cfo - calc_capex)) / 1_000_000_000.0, 1) if abs(calc_cfo) > 10_000_000 else round(max(0.0, calc_cfo - calc_capex), 1)
-        _prop("fcf_ttm", 2, field_provenance["cfo"], field_provenance["capex"])
+        _prop("fcf_ttm", 2, field_provenance.get("cfo", 0), field_provenance.get("capex", 0))
     else:
         fcf_ttm = round(max(0.0, (net_income * 0.70) / 1_000_000_000.0), 1)
-        _prop("fcf_ttm", 1, field_provenance["net_income"])
+        _prop("fcf_ttm", 1, field_provenance.get("net_income", 0))
 
     # Margins
     gross_m_raw = _safe_float(tv_data.get("gross_margin_ttm") or tv_data.get("gross_margin_fq"))
@@ -1638,7 +1639,8 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 name=name,
                 sector_code=sec_code,
                 sector_name=sec_name,
-                tv_data=tv_entry
+                tv_data=tv_entry,
+                enable_source0_fallback=False
             )
             unified_stocks[sym_clean] = unified_stock
         else:
@@ -1658,7 +1660,8 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 sector_code=meta.get("sector_code", "VNIND"),
                 sector_name=meta.get("sector_name", "Công Nghiệp"),
                 vnstock_data=vn_data,
-                yf_data=yf_data
+                yf_data=yf_data,
+                enable_source0_fallback=False
             )
 
         with ThreadPoolExecutor(max_workers=8) as executor:

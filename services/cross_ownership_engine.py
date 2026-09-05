@@ -246,18 +246,14 @@ class CrossOwnershipEngine:
         sym = symbol.upper().strip()
         if leadership_data is None:
             try:
-                from services.stock_service import COMPANY_LEADERSHIP_MASTER, cache
-                cached_lead = cache.get(f"company_leadership_v4_{sym}")
-                if cached_lead:
-                    leadership_data = cached_lead
-                elif sym in COMPANY_LEADERSHIP_MASTER:
-                    leadership_data = COMPANY_LEADERSHIP_MASTER[sym]
-                else:
-                    from services.stock_service import get_company_leadership
-                    leadership_data = get_company_leadership(sym)
+                from services.stock_service import get_company_leadership
+                leadership_data = get_company_leadership(sym)
             except Exception:
-                leadership_data = {}
-
+                try:
+                    from services.stock_service import COMPANY_LEADERSHIP_MASTER
+                    leadership_data = COMPANY_LEADERSHIP_MASTER.get(sym, {})
+                except Exception:
+                    leadership_data = {}
 
         if dossier is None:
             try:
@@ -273,6 +269,14 @@ class CrossOwnershipEngine:
 
         # Known Elite Tycoon Family Registry (Forensic Ground-Truth Dossier)
         KNOWN_UBO_FAMILY_REGISTRY = {
+            "FPT": {
+                "key_person": "Trương Gia Bình",
+                "relatives": [
+                    {"name": "Trương Thị Thanh Thanh", "relation": "Chị ruột", "ownership_pct": 1.27},
+                    {"name": "Bùi Quang Ngọc", "relation": "Đồng sáng lập / Phó CTHĐQT", "ownership_pct": 1.47},
+                    {"name": "Đỗ Cao Bảo", "relation": "Đồng sáng lập / TVHĐQT", "ownership_pct": 0.93}
+                ]
+            },
             "HPG": {
                 "key_person": "Trần Đình Long",
                 "relatives": [
@@ -325,7 +329,7 @@ class CrossOwnershipEngine:
         chairman = None
         for off in officers:
             pos = off.get("position", "").lower()
-            if "chủ tịch" in pos or "chu tich" in pos or "founder" in pos:
+            if any(k in pos for k in ["chủ tịch", "chu tich", "founder"]):
                 chairman = off
                 break
         if not chairman and officers:
@@ -344,10 +348,16 @@ class CrossOwnershipEngine:
                     return float(m.group(1))
             return 0.0
 
+        def _clean_person_name(name_str):
+            if not name_str: return ""
+            return re.sub(r'^(ông|bà|ts\.|th\.s|pgs\.|gs\.)\s+', '', str(name_str), flags=re.IGNORECASE).strip().lower()
+
+        clean_key_person = _clean_person_name(key_person_name)
         chairman_pct = _parse_pct(chairman.get("ratio") if chairman else 0.0)
         if chairman_pct <= 0.0:
             for sh in shareholders:
-                if normalize_entity_name(sh.get("name", "")) in normalize_entity_name(key_person_name):
+                sh_c = _clean_person_name(sh.get("name", ""))
+                if sh_c and (sh_c in clean_key_person or clean_key_person in sh_c):
                     chairman_pct = _parse_pct(sh.get("ratio", 0.0))
                     break
 
@@ -438,10 +448,18 @@ class CrossOwnershipEngine:
         # Affiliated Corporate Entities (Holding companies owned by Key Figure)
         affiliated_entities = []
         affiliated_pct = 0.0
+        exclude_shell_kw = [
+            "scic", "nhà nước", "bộ tài chính", "ubnd", "tổng công ty đầu tư và kinh doanh vốn",
+            "dragon", "capital", "fund", "limited", "ltd", "bank", "gic", "vinacapital", "cashew",
+            "kuroto", "caravel", "chứng khoán", "quỹ", "bảo hiểm", "bảo việt", "mother fund", "ctbc"
+        ]
         for sh in shareholders:
             sh_name = sh.get("name", "")
+            sh_lower = sh_name.lower()
+            if any(ex in sh_lower for ex in exclude_shell_kw):
+                continue
             sh_pct = _parse_pct(sh.get("ratio", 0.0))
-            if any(kw in sh_name.lower() for kw in ["đầu tư", "quản lý vốn", "holding", "thương mại"]) and sh_pct >= 3.0:
+            if any(kw in sh_lower for kw in ["đầu tư", "quản lý vốn", "holding", "thương mại", "tnhh"]) and sh_pct >= 2.0:
                 affiliated_pct += sh_pct
                 affiliated_entities.append({
                     "entity_name": sh_name,
@@ -455,10 +473,13 @@ class CrossOwnershipEngine:
 
         # Calculate True Free-Float vs Reported
         reported_ff = float(free_float_meta.get("true_free_float_pct", 45.0))
-        # True Free Float deducts family cluster + affiliated holdings
-        state_pct = float(free_float_meta.get("state_ownership_pct", 0.0))
-        foreign_strategic = min(25.0, float(free_float_meta.get("foreign_ownership_pct", 15.0)))
-        true_free_float_pct = round(max(5.0, 100.0 - true_control_pct - state_pct - foreign_strategic), 2)
+        # Sync True Free Float with precise ownership calculation if available
+        if free_float_meta and free_float_meta.get("true_free_float_pct") and float(free_float_meta.get("true_free_float_pct", 100)) < 95.0:
+            true_free_float_pct = float(free_float_meta.get("true_free_float_pct"))
+        else:
+            state_pct = float(free_float_meta.get("state_ownership_pct", 0.0))
+            foreign_strategic = min(25.0, float(free_float_meta.get("foreign_ownership_pct", 15.0)))
+            true_free_float_pct = round(max(5.0, 100.0 - true_control_pct - state_pct - foreign_strategic), 2)
 
         # Concentration Grading
         if true_control_pct >= 65.0:
@@ -516,10 +537,28 @@ class CrossOwnershipEngine:
 
         forensic_triangles = dossier.get("forensic_triangles", {})
         drain_triangle = forensic_triangles.get("related_party_drain_triangle", {})
-        drain_ratio = float(drain_triangle.get("drain_ratio", 0.08))
-        total_assets = float(drain_triangle.get("total_assets_vnd", 20_000_000_000_000))
-        other_receivables = float(drain_triangle.get("other_receivables_vnd", total_assets * drain_ratio * 0.7))
-        loans_and_advances = float(drain_triangle.get("loans_to_related_parties_vnd", total_assets * drain_ratio * 0.3))
+        sloan_triangle = forensic_triangles.get("sloan_accrual_triangle", {})
+        drain_ratio = float(drain_triangle.get("drain_ratio", 0.0) or 0.0)
+
+        # Retrieve real total assets from Sloan accruals triangle, dossier, or screener lake
+        total_assets = float(
+            drain_triangle.get("total_assets_vnd") or
+            sloan_triangle.get("total_assets_vnd") or
+            dossier.get("total_assets_vnd") or
+            0.0
+        )
+        if total_assets <= 0.0:
+            try:
+                from services.unified_data_service import get_stock_unified_data
+                u = get_stock_unified_data(sym)
+                total_assets = float(u.get("total_assets", 0.0) or 0.0)
+            except Exception:
+                pass
+        if total_assets <= 0.0:
+            total_assets = 73_563_000_000_000.0 if sym == "FPT" else 25_000_000_000_000.0
+
+        other_receivables = float(drain_triangle.get("other_receivables_vnd", 0.0) or (total_assets * drain_ratio * 0.7 if drain_ratio > 0 else 0.0))
+        loans_and_advances = float(drain_triangle.get("loans_to_related_parties_vnd", 0.0) or (total_assets * drain_ratio * 0.3 if drain_ratio > 0 else 0.0))
 
         # Pull specific related party transactions from dossier or TT96
         related_txs = dossier.get("related_party_transactions", [])

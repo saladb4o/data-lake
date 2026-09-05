@@ -114,8 +114,13 @@ def main():
                     "count": len(res.get("results", [])),
                     "updated_at": int(time.time())
                 }
-                extracted_count = len(res.get("results", []))
-                print(f"  [{idx}/{len(symbols_to_run)}] {sym} BCTC: Extracted {extracted_count} filings")
+                filings = res.get("results", [])
+                extracted_count = len(filings)
+                total_bs = sum(len(p.get("extracted_data", {}).get("balance_sheet", {}).get("items", {})) for p in filings)
+                total_is = sum(len(p.get("extracted_data", {}).get("income_statement", {}).get("items", {})) for p in filings)
+                total_cf = sum(len(p.get("extracted_data", {}).get("cash_flow", {}).get("items", {})) for p in filings)
+                total_notes = sum(len(p.get("extracted_data", {}).get("debt_schedule_footnotes", [])) for p in filings)
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} BCTC: {extracted_count} filings (BS: {total_bs} items, IS: {total_is} items, CF: {total_cf} items, Notes: {total_notes})")
             except Exception as err:
                 print(f"  [{idx}/{len(symbols_to_run)}] {sym} BCTC Error: {err}")
                 shard_data[sym] = {"symbol": sym, "periods": [], "count": 0, "error": str(err), "updated_at": int(time.time())}

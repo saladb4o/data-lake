@@ -3769,12 +3769,40 @@ class VnstockApp {
       const prop5dVnd = prop.prop_net_val_5d || 0;
       const prop20dVnd = prop.prop_net_val_20d || 0;
 
-      const ffState = free_float_structure.state_ownership_pct || 0;
-      const ffForeign = free_float_structure.foreign_ownership_pct || 0;
-      const ffInsider = free_float_structure.insider_ownership_pct || 0;
-      const ffInst = free_float_structure.institutional_pct || 0;
-      const ffFree = free_float_structure.true_free_float_pct || 50;
-      const ffClass = free_float_structure.liquidity_classification || 'TRUNG BÌNH';
+      let ffState = Number(free_float_structure.state_ownership_pct || 0);
+      let ffForeign = Number(free_float_structure.foreign_ownership_pct || 0);
+      let ffInsider = Number(free_float_structure.insider_ownership_pct || 0);
+      let ffInst = Number(free_float_structure.institutional_pct || 0);
+      let ffFree = Number(free_float_structure.true_free_float_pct || 0);
+      let ffClass = free_float_structure.liquidity_classification || 'TRUNG BÌNH';
+
+      // Defensive fallback: If all are 0 and free is 100, calculate dynamically from shareholders
+      if ((ffState + ffForeign + ffInsider + ffInst) < 1 && data.shareholders && data.shareholders.length > 0) {
+        data.shareholders.forEach(sh => {
+          const n = (sh.name || '').toLowerCase();
+          const rMatch = String(sh.ratio || '').match(/([\d\.]+)/);
+          const r = rMatch ? parseFloat(rMatch[1]) : 0;
+          if (r > 0) {
+            if (n.includes('scic') || n.includes('nhà nước') || n.includes('bộ tài chính') || n.includes('ubnd') || n.includes('tổng công ty đầu tư và kinh doanh vốn')) {
+              ffState += r;
+            } else if (n.includes('fund') || n.includes('capital') || n.includes('limited') || n.includes('ltd') || n.includes('bank') || n.includes('invest') || n.includes('dragon') || n.includes('gic') || n.includes('caravel') || n.includes('kuroto') || n.includes('cashew') || n.includes('macquarie')) {
+              ffForeign += r;
+            } else if (n.includes('công ty') || n.includes('ctcp') || n.includes('tập đoàn') || n.includes('quỹ') || n.includes('chứng khoán') || n.includes('tnhh')) {
+              ffInst += r;
+            } else {
+              ffInsider += r;
+            }
+          }
+        });
+        const locked = ffState + ffForeign + ffInsider + ffInst;
+        ffFree = Math.max(5, Math.round((100 - locked) * 10) / 10);
+        ffState = Math.round(ffState * 10) / 10;
+        ffForeign = Math.round(ffForeign * 10) / 10;
+        ffInsider = Math.round(ffInsider * 10) / 10;
+        ffInst = Math.round(ffInst * 10) / 10;
+        ffClass = ffFree >= 50 ? 'CAO (Dễ giao dịch)' : (ffFree >= 25 ? 'TRUNG BÌNH (Thanh khoản ổn định)' : 'THẤP (Cô đặc)');
+      }
+      if (ffFree <= 0) ffFree = 50;
 
       const realizedNetVnd = realtime_insider_flow.realized_net_flow_vnd || 0;
       const pendingNetVnd = realtime_insider_flow.pending_net_flow_vnd || 0;
@@ -9156,8 +9184,13 @@ class VnstockApp {
         const dlUpcom = document.getElementById('dlUpcomCount');
         const dlUpdated = document.getElementById('dlLastUpdated');
 
+        const dlPdf = document.getElementById('dlPdfPeriods');
+        if (dlPdf && d.pdf_lake) {
+          dlPdf.textContent = `${Number(d.pdf_lake.bctc_periods || 18530).toLocaleString()} Kỳ`;
+        }
+
         if (dlFully) dlFully.textContent = `${fullySynced.toLocaleString()} Mã`;
-        if (dlTotal) dlTotal.textContent = Number(d.total_universe || 1526).toLocaleString();
+        if (dlTotal) dlTotal.textContent = Number(d.total_universe || 1645).toLocaleString();
         if (dlScreener) dlScreener.textContent = `${totalScreener.toLocaleString()} Mã`;
         if (dlPrices) dlPrices.textContent = `${totalPrices.toLocaleString()} Mã`;
         

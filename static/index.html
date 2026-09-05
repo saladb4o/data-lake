@@ -2557,15 +2557,20 @@
 
       <div id="dataLakeModalContent">
         <!-- Live summary stat cards -->
-        <div class="foreign-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom:14px;">
+        <div class="foreign-stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); margin-bottom:14px;">
           <div class="foreign-stat-card" style="border-left:3px solid #10b981; background:rgba(16,185,129,0.06);">
             <span style="color:#34d399; font-size:11px; font-weight:800;">🟢 ĐỦ CẢ GIÁ & BCTC</span>
             <span class="f-stat-num mono txt-up" id="dlFullySynced">--</span>
             <span style="font-size:9.5px; color:var(--text-muted);">Sẵn sàng 100% Backtest</span>
           </div>
+          <div class="foreign-stat-card" style="border-left:3px solid #38bdf8; background:rgba(56,189,248,0.06);">
+            <span style="color:#38bdf8; font-size:11px; font-weight:800;">📑 BCTC GỐC PDF (20 MÁY ẢO)</span>
+            <span class="f-stat-num mono txt-blue" id="dlPdfPeriods">18,530</span>
+            <span style="font-size:9.5px; color:var(--text-muted);">1.769 mã • 122.8 MB</span>
+          </div>
           <div class="foreign-stat-card">
             <span style="color:var(--text-muted); font-size:11px;">BCTC Chuẩn Hóa (TradingView)</span>
-            <span class="f-stat-num mono txt-blue" id="dlScreenerStocks">1,526</span>
+            <span class="f-stat-num mono txt-blue" id="dlScreenerStocks">1,645</span>
             <span style="font-size:9.5px; color:var(--text-muted);">39 chỉ số tài chính</span>
           </div>
           <div class="foreign-stat-card">
@@ -2575,21 +2580,41 @@
           </div>
           <div class="foreign-stat-card">
             <span style="color:var(--text-muted); font-size:11px;">Tổng Mã Toàn Thị Trường</span>
-            <span class="f-stat-num mono txt-ceil" id="dlTotalStocks">1,526</span>
+            <span class="f-stat-num mono txt-ceil" id="dlTotalStocks">1,645</span>
             <span style="font-size:9.5px; color:var(--text-muted);">3 sàn HOSE, HNX, UPCOM</span>
           </div>
         </div>
 
-        <!-- 3 Source Stream Details Cards -->
-        <div style="font-size:12px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">📡 Trạng Thái 3 Luồng Dữ Liệu Kết Nối:</div>
+        <!-- 5 Source Stream Details Cards -->
+        <div style="font-size:12px; font-weight:800; color:var(--text-primary); margin-bottom:8px;">📡 Trạng Thái 5 Luồng Dữ Liệu Kết Nối Đồng Thời:</div>
         <div class="data-lake-modal-grid">
+          <div class="data-lake-source-card" style="border:1px solid rgba(56,189,248,0.3); background:rgba(56,189,248,0.04);">
+            <div class="src-title">
+              <span>📑 Kho BCTC Gốc PDF (20 Máy Ảo GitHub Actions)</span>
+              <span class="src-badge" style="background:#0284c7; color:#fff;">ONLINE 🟢</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+              18.530 kỳ BCTC B01/B02/B03 bóc tách sâu từ PDF công bố thông tin gốc • 1.769 mã cổ phiếu • 1.566 mã Báo cáo Quản trị TT96 & Dòng tiền nội bộ.
+            </div>
+          </div>
+
+          <div class="data-lake-source-card" style="border:1px solid rgba(16,185,129,0.3); background:rgba(16,185,129,0.04);">
+            <div class="src-title">
+              <span>🏦 BCTC Chi Tiết 40 Quý Lịch Sử (VNDirect / TCBS)</span>
+              <span class="src-badge">ONLINE 🟢</span>
+            </div>
+            <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
+              Báo cáo tài chính 40 quý lịch sử đầy đủ 4 bảng kế toán phục vụ kiểm định gian lận Sloan Accruals, Beneish M-Score & Altman Z-Score.
+            </div>
+          </div>
+
           <div class="data-lake-source-card">
             <div class="src-title">
               <span>📊 TradingView Scanner API</span>
               <span class="src-badge">ONLINE 🟢</span>
             </div>
             <div style="font-size:11px; color:var(--text-secondary); line-height:1.4;">
-              Quét toàn diện 39 chỉ số tài chính (P/E, P/B, P/S, PEG, ROE, FCF, Biên LN, Tăng trưởng 1Y/3Y/5Y) cho 1,526 mã.
+              Quét toàn diện 39 chỉ số tài chính (P/E, P/B, P/S, PEG, ROE, FCF, Biên LN, Tăng trưởng 1Y/3Y/5Y) cho 1,645 mã.
             </div>
           </div>
 

@@ -186,3 +186,45 @@ def test_bctc_batch_processor_local_flow(tmp_path, sample_synthetic_bctc_pdf):
     parser = BCTCPdfParser(target_pdf)
     res = parser.extract_full_report()
     assert res["auditor_summary"]["is_big4"] is True
+
+
+def test_semantic_title_matching_without_code_column(sample_synthetic_bctc_pdf):
+    """Verifies that rows lacking numeric code columns are correctly resolved via semantic title matching."""
+    parser = BCTCPdfParser(sample_synthetic_bctc_pdf)
+
+    # 1. Balance Sheet: "TỔNG CỘNG TÀI SẢN" without code column
+    bs_items = {}
+    row_bs = ["TỔNG CỘNG TÀI SẢN", "50.000.000", "40.000.000"]
+    parser._parse_balance_sheet_row(row_bs, bs_items)
+    assert 270 in bs_items
+    assert bs_items[270]["name"] == "TỔNG CỘNG TÀI SẢN"
+
+    # 2. Income Statement: "Doanh thu thuần" without code column
+    is_items = {}
+    row_is = ["Doanh thu thuần về bán hàng và cung cấp dịch vụ", "100.000.000", "80.000.000"]
+    parser._parse_income_row(row_is, is_items)
+    assert 10 in is_items
+    assert is_items[10]["name"] == "Doanh thu thuần về bán hàng và cung cấp dịch vụ"
+
+    # 3. Cash Flow: "Lưu chuyển tiền thuần từ hoạt động kinh doanh" without code column
+    cf_items = {}
+    row_cf = ["Lưu chuyển tiền thuần từ hoạt động kinh doanh", "15.000.000", "12.000.000"]
+    parser._parse_cash_flow_row(row_cf, cf_items)
+    assert 20 in cf_items
+    assert "kinh doanh" in cf_items[20]["name"].lower()
+
+
+def test_negative_keyword_filtering_in_batch_processor():
+    """Verifies that corporate explanation memos and notices are filtered out."""
+    from services.bctc_batch_processor import BCTC_NEGATIVE_KEYWORDS
+    bad_titles = [
+        "Công văn giải trình chênh lệch LNST BCTC kiểm toán 2024",
+        "Thông báo phát hành BCTC năm 2024",
+        "Nghị quyết HĐQT thông qua BCTC soát xét bán niên",
+        "Biên bản họp ĐHĐCĐ thường niên 2024",
+        "CBTT Báo cáo tài chính quý 4/2024"
+    ]
+    for title in bad_titles:
+        t_low = title.lower()
+        assert any(kw in t_low for kw in BCTC_NEGATIVE_KEYWORDS), f"Failed to detect negative keyword in: {title}"
+

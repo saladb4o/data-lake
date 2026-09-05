@@ -2336,6 +2336,20 @@ class ValuationEngine:
         structured payload for API serialization and institutional reports.
         """
         if fundamental_data is None:
+            # Auto-resolve from data lake screener snapshot if available
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            local_cand = os.path.join(base_dir, "data", "screener_snapshot.json")
+            if os.path.exists(local_cand):
+                try:
+                    with open(local_cand, "r", encoding="utf-8") as f:
+                        stocks = json.load(f).get("stocks", {})
+                        clean_sym = symbol.strip().upper()
+                        if clean_sym in stocks:
+                            fundamental_data = stocks[clean_sym]
+                except Exception as e:
+                    logger.debug("Error loading screener data for valuation of %s: %s", symbol, e)
+
+        if fundamental_data is None:
             raise ValueError(f"Fundamental data is required for quantitative valuation of {symbol}. Fallback to mock data is disabled.")
 
         # Sanitize NaN / Inf / invalid string values → None for safe fallbacks

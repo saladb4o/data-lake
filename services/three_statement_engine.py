@@ -446,8 +446,10 @@ class ThreeStatementEngine:
                 base_rev = market_cap * 0.80
 
         # Base Gross Margin & COGS
-        hist_gm = sanitize_float(raw_data.get("gross_margin"), 0.25)
-        hist_gm = clamp(hist_gm, 0.05, 0.90)
+        raw_gm = sanitize_float(raw_data.get("gross_margin"), 0.25)
+        if abs(raw_gm) > 1.0:
+            raw_gm /= 100.0
+        hist_gm = clamp(raw_gm, 0.05, 0.90)
         if "cogs" in raw_data:
             raw_cogs_in = sanitize_float(raw_data.get("cogs"), 0.0)
             base_cogs = raw_cogs_in * 1e9 if 0 < raw_cogs_in < 1e9 else max(0.0, raw_cogs_in)
@@ -455,8 +457,10 @@ class ThreeStatementEngine:
             base_cogs = base_rev * (1.0 - hist_gm)
 
         # Base EBIT Margin & SGA
-        hist_opm = sanitize_float(raw_data.get("op_margin") or raw_data.get("ebit_margin"), 0.15)
-        hist_opm = clamp(hist_opm, 0.01, hist_gm - 0.02)
+        raw_opm = sanitize_float(raw_data.get("op_margin") or raw_data.get("ebit_margin"), 0.15)
+        if abs(raw_opm) > 1.0:
+            raw_opm /= 100.0
+        hist_opm = clamp(raw_opm, 0.01, hist_gm - 0.02)
         if "ebit" in raw_data:
             raw_ebit_in = sanitize_float(raw_data.get("ebit"), 0.0)
             base_ebit = raw_ebit_in * 1e9 if 0 < abs(raw_ebit_in) < 1e9 else raw_ebit_in
@@ -506,6 +510,12 @@ class ThreeStatementEngine:
             raw_c_in = raw_data.get("cash") if "cash" in raw_data else raw_data.get("cash_and_equivalents")
             raw_c = sanitize_float(raw_c_in, 0.0)
             base_cash = raw_c * 1e9 if 0 < raw_c < 1e9 else max(0.0, raw_c)
+        elif "cash_to_assets" in raw_data:
+            cta = sanitize_float(raw_data.get("cash_to_assets"), 0.0)
+            if abs(cta) > 1.0:
+                cta /= 100.0
+            approx_ta = base_equity * (1.0 + de_ratio)
+            base_cash = max(approx_ta * cta, base_rev * 0.10)
         else:
             base_cash = max(50e9 if base_rev >= 1e9 else 50.0, base_rev * 0.12)
 
@@ -537,7 +547,10 @@ class ThreeStatementEngine:
         years = [start_year + i for i in range(num_years)]
         
         # Default revenue growth series: Mean-reverting towards long-term nominal GDP (6.5%)
-        base_g1 = clamp(sanitize_float(raw_data.get("rev_1y_growth"), 0.12), -0.20, 0.40)
+        raw_g1 = sanitize_float(raw_data.get("rev_1y_growth"), 0.12)
+        if abs(raw_g1) > 1.0:
+            raw_g1 /= 100.0
+        base_g1 = clamp(raw_g1, -0.20, 0.40)
         if revenue_growth_series is not None and len(revenue_growth_series) >= num_years:
             rev_g_list = [sanitize_float(g) for g in revenue_growth_series[:num_years]]
         else:

@@ -149,6 +149,108 @@ TT200_CASH_FLOW_CODES = {
     70: "Tiền và tương đương tiền cuối kỳ"
 }
 
+# Semantic Title Matching Rules (Fallback when table does not have an explicit code column)
+TITLE_TO_BS_CODES = [
+    ("tong cong tai san", 270),
+    ("tong tai san", 270),
+    ("tai san ngan han", 100),
+    ("tien va cac khoan tuong duong tien", 110),
+    ("tien va tuong duong tien", 110),
+    ("dau tu tai chinh ngan han", 120),
+    ("phai thu ngan han cua khach hang", 131),
+    ("tra truoc cho nguoi ban ngan han", 132),
+    ("cac khoan phai thu ngan han", 130),
+    ("phai thu ngan han", 130),
+    ("hang ton kho", 140),
+    ("tai san ngan han khac", 150),
+    ("tai san dai han", 200),
+    ("phai thu dai han", 210),
+    ("tai san co dinh", 220),
+    ("nguyen gia", 221),
+    ("gia tri hao mon luy ke", 222),
+    ("bat dong san dau tu", 230),
+    ("tai san do dang dai han", 240),
+    ("chi phi xay dung co ban do dang", 242),
+    ("dau tu tai chinh dai han", 250),
+    ("tai san dai han khac", 260),
+    ("no phai tra", 300),
+    ("no ngan han", 310),
+    ("phai tra nguoi ban ngan han", 311),
+    ("phai tra nguoi ban", 311),
+    ("nguoi mua tra tien truoc ngan han", 312),
+    ("vay va no thue tai chinh ngan han", 320),
+    ("vay ngan han", 320),
+    ("no dai han", 330),
+    ("vay va no thue tai chinh dai han", 338),
+    ("vay dai han", 338),
+    ("von chu so huu", 400),
+    ("von gop cua chu so huu", 410),
+    ("von dau tu cua chu so huu", 411),
+    ("thang du von co phan", 412),
+    ("loi nhuan sau thue chua phan phoi", 421),
+    ("tong cong nguon von", 440)
+]
+
+TITLE_TO_IS_CODES = [
+    ("doanh thu ban hang va cung cap dich vu", 1),
+    ("cac khoan giam tru doanh thu", 2),
+    ("doanh thu thuan ve ban hang va cung cap dich vu", 10),
+    ("doanh thu thuan", 10),
+    ("gia von hang ban", 11),
+    ("loi nhuan gop ve ban hang va cung cap dich vu", 20),
+    ("loi nhuan gop", 20),
+    ("doanh thu hoat dong tai chinh", 21),
+    ("chi phi tai chinh", 22),
+    ("chi phi lai vay", 23),
+    ("chi phi ban hang", 25),
+    ("chi phi quan ly doanh nghiep", 26),
+    ("loi nhuan thuan tu hoat dong kinh doanh", 30),
+    ("thu nhap khac", 31),
+    ("chi phi khac", 32),
+    ("loi nhuan khac", 40),
+    ("tong loi nhuan ke toan truoc thue", 50),
+    ("loi nhuan truoc thue", 50),
+    ("chi phi thue tndn hien hanh", 51),
+    ("chi phi thue thu nhap doanh nghiep", 51),
+    ("chi phi thue tndn hoan lai", 52),
+    ("loi nhuan sau thue thu nhap doanh nghiep", 60),
+    ("loi nhuan sau thue", 60),
+    ("loi nhuan sau thue cua co dong cong ty me", 61),
+    ("loi nhuan sau thue cong ty me", 61),
+    ("lai co ban tren co phieu", 70),
+    ("lai suy giam tren co phieu", 71)
+]
+
+TITLE_TO_CF_CODES = [
+    ("luu chuyen tien thuan tu hoat dong kinh doanh", 20),
+    ("tien thu tu ban hang, cung cap dich vu", 1),
+    ("tien chi tra cho nguoi cung cap hang hoa", 2),
+    ("tien chi tra cho nguoi lao dong", 3),
+    ("tien chi tra lai vay", 4),
+    ("tien chi nop thue thu nhap doanh nghiep", 5),
+    ("tien chi mua sam, xay dung tscd", 21),
+    ("tien chi mua sam tscd", 21),
+    ("tien thu tu thanh ly, nhuong ban tscd", 22),
+    ("tien chi cho vay, mua cac cong cu no", 23),
+    ("tien thu hoi cho vay", 24),
+    ("tien chi dau tu gop von vao don vi khac", 25),
+    ("tien thu hoi dau tu gop von", 26),
+    ("tien thu lai cho vay, co tuc", 27),
+    ("luu chuyen tien thuan tu hoat dong dau tu", 30),
+    ("tien thu tu phat hanh co phieu", 31),
+    ("tien chi tra von gop cho chu so huu", 32),
+    ("tien vay goc nhan duoc", 33),
+    ("tien tra no goc vay", 34),
+    ("tien tra no goc thue tai chinh", 35),
+    ("co tuc, loi nhuan da tra cho chu so huu", 36),
+    ("luu chuyen tien thuan tu hoat dong tai chinh", 40),
+    ("luu chuyen tien thuan trong ky", 50),
+    ("tien va tuong duong tien dau ky", 60),
+    ("anh huong cua thay doi ty gia", 61),
+    ("tien va tuong duong tien cuoi ky", 70)
+]
+
+
 # Standard Banking Accounting Code Mappings (Thông tư 49/2014/TT-NHNN - B01/TCTD)
 TT49_BANK_BALANCE_CODES = {
     100: "Tiền mặt, vàng bạc, đá quý",
@@ -718,9 +820,16 @@ class BCTCPdfParser:
                     if p_idx >= len(pdf.pages):
                         continue
                     tables = pdf.pages[p_idx].extract_tables()
+                    if not tables:
+                        tables = pdf.pages[p_idx].extract_tables({
+                            "vertical_strategy": "text",
+                            "horizontal_strategy": "text",
+                            "snap_y_tolerance": 4,
+                            "intersection_x_tolerance": 15
+                        })
                     for table in tables:
                         for row in table:
-                            if not row or len(row) < 3:
+                            if not row or len(row) < 2:
                                 continue
                             self._parse_balance_sheet_row(row, items)
 
@@ -793,17 +902,28 @@ class BCTCPdfParser:
                     }
 
     def _parse_balance_sheet_row(self, row: List[Any], items_dict: Dict[int, Any]) -> None:
-        """Helper to match row cells against active Balance Sheet codes."""
+        """Helper to match row cells against active Balance Sheet codes with regex & semantic title fallback."""
         text_row = [str(c).strip() if c is not None else "" for c in row]
         code_found = None
         code_idx = -1
+
+        # Strategy A: Scan for 3-digit TT200/TT49 code in columns 0..3
         for idx, col in enumerate(text_row[:4]):
-            m = re.fullmatch(r"([1-4][0-9]{2})", col)
+            m = re.search(r"\b([1-4][0-9]{2})\b", col)
             if m:
                 c_cand = int(m.group(1))
                 if c_cand in self.active_balance_codes:
                     code_found = c_cand
                     code_idx = idx
+                    break
+
+        # Strategy B: Semantic Title Matching if code column is absent/merged
+        if code_found is None:
+            norm_title = strip_accents(" ".join(text_row[:3])).lower()
+            for pattern, c_target in TITLE_TO_BS_CODES:
+                if pattern in norm_title and c_target in self.active_balance_codes:
+                    code_found = c_target
+                    code_idx = 0
                     break
 
         if code_found and code_found in self.active_balance_codes:
@@ -813,7 +933,7 @@ class BCTCPdfParser:
                 if num is not None:
                     vals.append(num * self.currency_scale)
 
-            if vals:
+            if vals and code_found not in items_dict:
                 curr_val = vals[0]
                 prev_val = vals[1] if len(vals) > 1 else None
                 items_dict[code_found] = {
@@ -839,9 +959,16 @@ class BCTCPdfParser:
                     if p_idx >= len(pdf.pages):
                         continue
                     tables = pdf.pages[p_idx].extract_tables()
+                    if not tables:
+                        tables = pdf.pages[p_idx].extract_tables({
+                            "vertical_strategy": "text",
+                            "horizontal_strategy": "text",
+                            "snap_y_tolerance": 4,
+                            "intersection_x_tolerance": 15
+                        })
                     for table in tables:
                         for row in table:
-                            if not row or len(row) < 3:
+                            if not row or len(row) < 2:
                                 continue
                             self._parse_income_row(row, items)
 
@@ -1011,17 +1138,28 @@ class BCTCPdfParser:
                     }
 
     def _parse_income_row(self, row: List[Any], items_dict: Dict[int, Any]) -> None:
-        """Helper to match row cells against active Income Statement codes."""
+        """Helper to match row cells against active Income Statement codes with regex & semantic title fallback."""
         text_row = [str(c).strip() if c is not None else "" for c in row]
         code_found = None
         code_idx = -1
+
+        # Strategy A: Scan for numeric code in columns 0..3
         for idx, col in enumerate(text_row[:4]):
-            m = re.fullmatch(r"0?([0-9]{1,3})", col)
+            m = re.search(r"\b0?([0-9]{1,3})\b", col)
             if m:
                 val = int(m.group(1))
                 if val in self.active_income_codes:
                     code_found = val
                     code_idx = idx
+                    break
+
+        # Strategy B: Semantic Title Matching if code column is absent/merged
+        if code_found is None:
+            norm_title = strip_accents(" ".join(text_row[:3])).lower()
+            for pattern, c_target in TITLE_TO_IS_CODES:
+                if pattern in norm_title and c_target in self.active_income_codes:
+                    code_found = c_target
+                    code_idx = 0
                     break
 
         if code_found and code_found in self.active_income_codes:
@@ -1031,7 +1169,7 @@ class BCTCPdfParser:
                 if num is not None:
                     vals.append(num * self.currency_scale)
 
-            if vals:
+            if vals and code_found not in items_dict:
                 curr_val = vals[0]
                 prev_val = vals[1] if len(vals) > 1 else None
                 items_dict[code_found] = {
@@ -1057,9 +1195,16 @@ class BCTCPdfParser:
                     if p_idx >= len(pdf.pages):
                         continue
                     tables = pdf.pages[p_idx].extract_tables()
+                    if not tables:
+                        tables = pdf.pages[p_idx].extract_tables({
+                            "vertical_strategy": "text",
+                            "horizontal_strategy": "text",
+                            "snap_y_tolerance": 4,
+                            "intersection_x_tolerance": 15
+                        })
                     for table in tables:
                         for row in table:
-                            if not row or len(row) < 3:
+                            if not row or len(row) < 2:
                                 continue
                             self._parse_cash_flow_row(row, items)
 
@@ -1136,17 +1281,28 @@ class BCTCPdfParser:
                     }
 
     def _parse_cash_flow_row(self, row: List[Any], items_dict: Dict[int, Any]) -> None:
-        """Helper to match row cells against TT200 Cash Flow codes."""
+        """Helper to match row cells against TT200 Cash Flow codes with regex & semantic title fallback."""
         text_row = [str(c).strip() if c is not None else "" for c in row]
         code_found = None
         code_idx = -1
+
+        # Strategy A: Scan for numeric code in columns 0..3
         for idx, col in enumerate(text_row[:4]):
-            m = re.fullmatch(r"0?([1-7][0-9]?)", col)
+            m = re.search(r"\b0?([1-7][0-9]?)\b", col)
             if m:
                 val = int(m.group(1))
                 if val in TT200_CASH_FLOW_CODES:
                     code_found = val
                     code_idx = idx
+                    break
+
+        # Strategy B: Semantic Title Matching if code column is absent/merged
+        if code_found is None:
+            norm_title = strip_accents(" ".join(text_row[:3])).lower()
+            for pattern, c_target in TITLE_TO_CF_CODES:
+                if pattern in norm_title and c_target in TT200_CASH_FLOW_CODES:
+                    code_found = c_target
+                    code_idx = 0
                     break
 
         if code_found and code_found in TT200_CASH_FLOW_CODES:
@@ -1156,7 +1312,7 @@ class BCTCPdfParser:
                 if num is not None:
                     vals.append(num * self.currency_scale)
 
-            if vals:
+            if vals and code_found not in items_dict:
                 curr_val = vals[0]
                 prev_val = vals[1] if len(vals) > 1 else None
                 items_dict[code_found] = {
