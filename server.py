@@ -415,6 +415,16 @@ def api_company_ecosystem(
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
+@app.get("/api/company/commodity-spread")
+def api_company_commodity_spread(symbol: str = Query(..., description="Stock ticker symbol (e.g. HPG, DPM, DBC, BSR)")):
+    """Returns Commodity Crack Spread, Peter Lynch Cycle Phase, and Margin Forecasts"""
+    try:
+        from services.stock_service import get_commodity_spread_analysis
+        data = get_commodity_spread_analysis(symbol=symbol)
+        return JSONResponse(content={"status": "success", "data": data})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+
 @app.get("/api/company/forensics")
 def api_company_forensics(symbol: str = Query(..., description="Stock ticker symbol (e.g. HPG, VNM, FPT)")):
     """Returns comprehensive Forensic Accounting Intelligence, 5-Triangle Matrix, Debt Wall, CapEx Projects & Integrity Score"""

@@ -1,0 +1,63 @@
+name: Recovery Merge 20 Shards To Repo
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Run ID chua 20 Shards can merge (Mac dinh run vua xong)'
+        required: true
+        default: '33949724830'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  merge_and_publish:
+    name: Merge 20 Shards tu Run ID
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Download All 20 Shards from Run
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.inputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./all_shards
+
+      - name: Merge Shards to data/pdf_lake/
+        run: |
+          python scripts/merge_shards.py \
+            --input-dir ./all_shards \
+            --output-file ./data/pdf_lake/extracted_bctc_lake.json \
+            --base-lake ./data/pdf_lake/extracted_bctc_lake.json \
+            --corp-output-file ./data/pdf_lake/extracted_corporate_actions.json \
+            --corp-base-lake ./data/pdf_lake/extracted_corporate_actions.json
+
+      - name: Auto-Commit & Push thang vao Repo (with Rebase)
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/pdf_lake/extracted_bctc_lake.json data/pdf_lake/extracted_corporate_actions.json
+          git commit -m "chore(data): auto-update BCTC & Corporate Data Lakes from recovered run ${{ github.event.inputs.run_id }} [skip ci]" || echo "No changes to commit"
+          git pull --rebase origin main
+          git push origin main || (git pull --rebase origin main && git push origin main)
+
+      - name: Publish Unified Data Lake Artifact Backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted_data_lakes_recovered
+          path: |
+            ./data/pdf_lake/extracted_bctc_lake.json
+            ./data/pdf_lake/extracted_corporate_actions.json
+          retention-days: 30

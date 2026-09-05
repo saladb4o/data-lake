@@ -3678,12 +3678,43 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
     except Exception:
         pass
 
+    # 9. Real-time Insider & Shareholder Flow Intelligence
+    realtime_insider_flow = {
+        "deals_count": 0,
+        "recent_deals": [],
+        "realized_net_shares": 0.0,
+        "realized_net_flow_vnd": 0.0,
+        "pending_net_shares": 0.0,
+        "pending_net_flow_vnd": 0.0,
+        "forced_sell_count": 0,
+        "has_forced_sell_alert": False,
+        "sentiment": "CÂN BẰNG",
+        "sentiment_color": "#38bdf8"
+    }
+    try:
+        from services.insider_flow_engine import fetch_realtime_insider_deals, compute_insider_flow_analytics
+        deals = fetch_realtime_insider_deals(symbol, lookback_pages=2)
+        if deals:
+            realtime_insider_flow = compute_insider_flow_analytics(deals, current_price=25000.0)
+    except Exception as e:
+        logger.warning(f"Error computing realtime insider flow for {symbol}: {e}")
+
+    # 10. Smart Money Order Flow & COT Matrix (Wyckoff & Larry Williams)
+    smart_money_flow = {}
+    try:
+        from services.smart_money_flow_engine import compute_smart_money_analytics
+        smart_money_flow = compute_smart_money_analytics(symbol)
+    except Exception as e:
+        logger.warning(f"Error computing smart money flow for {symbol}: {e}")
+
     result = {
         "symbol": symbol,
         "officers": final_officers[:20],
         "shareholders": final_shareholders[:20],
         "family_network": family_network,
         "insider_transactions": insider_transactions,
+        "realtime_insider_flow": realtime_insider_flow,
+        "smart_money_flow": smart_money_flow,
         "free_float_structure": free_float_structure
     }
     cache.set(cache_key, result, ttl_seconds=3600)
@@ -7498,6 +7529,13 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
     except Exception as e:
         logger.debug(f"Error supercharging ecosystem with forensic intelligence for {symbol}: {e}")
 
+    recent_insider_events = []
+    try:
+        from services.insider_flow_engine import fetch_realtime_insider_deals
+        recent_insider_events = fetch_realtime_insider_deals(symbol, lookback_pages=1)[:5]
+    except Exception:
+        pass
+
     result = {
         "symbol": symbol,
         "company_name": company_name,
@@ -7529,6 +7567,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
         "ubo_family_group": ubo_family_group,
         "capital_funnel": capital_funnel,
         "forensic_flags": forensic_flags,
+        "recent_insider_events": recent_insider_events,
         "graph_data": {
             "nodes": nodes,
             "edges": edges
@@ -7595,11 +7634,50 @@ def get_company_forensic_report(symbol: str) -> Dict[str, Any]:
                 "true_free_float_pct": 55.0,
                 "liquidity_classification": "TRUNG BÌNH"
             },
+            "cip_forensic_tracker": {},
+            "say_do_management_integrity": {},
+            "pledged_shares_margin_risk": {},
+            "dividend_dilution_radar": {},
             "provenance": "FALLBACK"
         }
 
+    # Enrich with the 4 Institutional Forensic Pillars
+    try:
+        from services.forensic_intelligence_engine import build_complete_forensic_suite
+        suite = build_complete_forensic_suite(symbol)
+        report["cip_forensic_tracker"] = suite.get("cip_forensic_tracker", {})
+        report["say_do_management_integrity"] = suite.get("say_do_management_integrity", {})
+        report["pledged_shares_margin_risk"] = suite.get("pledged_shares_margin_risk", {})
+        report["dividend_dilution_radar"] = suite.get("dividend_dilution_radar", {})
+    except Exception as e:
+        logger.error(f"Error enriching 4 forensic pillars for {symbol}: {e}")
+
+    # Enrich with Related-Party Tunneling Radar (Shleifer T-Index & Schilit Shenanigans)
+    try:
+        from services.related_party_tunneling_engine import RelatedPartyTunnelingEngine
+        report["related_party_tunneling"] = RelatedPartyTunnelingEngine.analyze(symbol)
+    except Exception as e:
+        logger.error(f"Error enriching related party tunneling for {symbol}: {e}")
+        report["related_party_tunneling"] = {}
+
     cache.set(cache_key, report, ttl_seconds=1800)
     return report
+
+def get_commodity_spread_analysis(symbol: str) -> Dict[str, Any]:
+    """
+    Computes Commodity Crack Spread & Peter Lynch Cyclical Analysis for a stock.
+    """
+    symbol = symbol.upper().strip()
+    cache_key = f"commodity_spread_v1_{symbol}"
+    cached = cache.get(cache_key)
+    if cached:
+        return cached
+
+    from services.commodity_spread_engine import get_commodity_spread_for_symbol
+    res = get_commodity_spread_for_symbol(symbol)
+    cache.set(cache_key, res, ttl_seconds=300)
+    return res
+
 
 # ==============================================================================
 # VNSTOCK QUANT ENGINE & 3-SCENARIO EARNINGS VALUATION SYSTEM

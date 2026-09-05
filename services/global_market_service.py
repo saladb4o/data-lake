@@ -193,18 +193,19 @@ def _fetch_single_yahoo_ticker(key: str, meta: Dict[str, Any]) -> Dict[str, Any]
     return {
         "key": key,
         "ticker": ticker,
-        "name": meta["name"],
-        "category": meta["category"],
-        "unit": meta["unit"],
-        "icon": meta["icon"],
+        "name": meta.get("name", ""),
+        "category": meta.get("category", "COMMODITY"),
+        "unit": meta.get("unit", ""),
+        "icon": meta.get("icon", "📈"),
         "price": current_price,
+        "current_price": current_price,
         "previous_close": previous_close,
         "change": change,
         "change_pct": change_pct,
         "direction": "UP" if change > 0 else "DOWN" if change < 0 else "UNCHANGED",
         "sparkline": sparkline[-15:] if sparkline else [],
-        "impact_symbols": meta["impact_symbols"],
-        "impact_desc": meta["impact_desc"],
+        "impact_symbols": meta.get("impact_symbols", []),
+        "impact_desc": meta.get("impact_desc", ""),
         "updated_at": updated_at
     }
 

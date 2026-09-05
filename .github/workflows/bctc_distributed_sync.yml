@@ -98,7 +98,8 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data/pdf_lake/extracted_bctc_lake.json data/pdf_lake/extracted_corporate_actions.json
           git commit -m "chore(data): auto-update BCTC & Corporate Data Lakes from 20-worker supercluster [skip ci]" || echo "No changes to commit"
-          git push origin main
+          git pull --rebase origin main
+          git push origin main || (git pull --rebase origin main && git push origin main)
 
       - name: Publish Unified Data Lake Artifact Backup
         uses: actions/upload-artifact@v4

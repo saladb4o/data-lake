@@ -1188,17 +1188,38 @@ class BCTCPdfParser:
                 txt_norm = strip_accents(raw_txt).upper()
                 if any(k in txt_norm for k in ["VAY VA NO THUE TAI CHINH", "VAY NGAN HAN", "VAY DAI HAN", "BORROWINGS"]):
                     lines = raw_txt.split("\n")
-                    for line in lines:
+                    for l_idx, line in enumerate(lines):
                         for b in known_banks:
                             if strip_accents(b).lower() in strip_accents(line).lower():
                                 nums = re.findall(r"\b\d{1,3}(?:\.\d{3}){1,}\b", line)
                                 if nums:
                                     amt = parse_vietnamese_accounting_number(nums[0])
                                     if amt and amt > 0:
+                                        # Detect collateral context from surrounding lines
+                                        ctx_start = max(0, l_idx - 2)
+                                        ctx_end = min(len(lines), l_idx + 6)
+                                        surrounding_txt = " ".join(lines[ctx_start:ctx_end])
+                                        surrounding_norm = strip_accents(surrounding_txt).lower()
+
+                                        collateral_type = "TÀI SẢN KHÁC / CHUNG"
+                                        is_share_pledged = False
+
+                                        if any(w in surrounding_norm for w in ["co phieu", "co phan", "shares", "ben thu ba", "co dong sang lap"]):
+                                            collateral_type = "CỔ PHIẾU / CỔ PHẦN"
+                                            is_share_pledged = True
+                                        elif any(w in surrounding_norm for w in ["quyen su dung dat", "bat dong san", "nha xuong", "du an"]):
+                                            collateral_type = "BẤT ĐỘNG SẢN / DỰ ÁN"
+                                        elif any(w in surrounding_norm for w in ["tien gui", "so tiet kiem", "tien mat"]):
+                                            collateral_type = "TIỀN GỬI / SỔ TIẾT KIỆM"
+                                        elif any(w in surrounding_norm for w in ["tin chap", "khong co tai san bao dam"]):
+                                            collateral_type = "TÍN CHẤP / KHÔNG TSĐB"
+
                                         debt_facilities.append({
                                             "lender": b,
                                             "raw_line": line.strip(),
                                             "amount_vnd": amt * self.currency_scale,
+                                            "collateral_type": collateral_type,
+                                            "is_share_pledged": is_share_pledged,
                                             "page": p_idx + 1
                                         })
                                 break
@@ -1206,7 +1227,7 @@ class BCTCPdfParser:
         seen = set()
         deduped = []
         for d in debt_facilities:
-            k = (d["lender"], round(d["amount_vnd"] / 1_000_000_000.0, 1))
+            k = (d["lender"], round(d["amount_vnd"] / 1_000_000_000.0, 1), d.get("collateral_type", ""))
             if k not in seen:
                 seen.add(k)
                 deduped.append(d)
