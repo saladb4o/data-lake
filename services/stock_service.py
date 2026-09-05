@@ -7320,9 +7320,10 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
                     })
 
     # 5. Dynamic Enrichment: Incorporate Subsidiaries & Associates from Source 0 BCTC Footnotes
+    dossier = None
     try:
         from services.bctc_batch_processor import get_stock_forensic_dossier
-        dossier = get_stock_forensic_dossier(symbol)
+        dossier = get_stock_forensic_dossier(symbol, enable_ondemand=False)
         bctc_subs = dossier.get("subsidiaries_and_affiliates", [])
         if bctc_subs:
             existing_sub_names = {s.get("name", "").lower() for s in unlisted_subs}
@@ -7370,6 +7371,133 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
     except Exception as e:
         logger.debug(f"Failed to enrich ecosystem from BCTC notes: {e}")
 
+    # 6. SUPERCHARGE: Forensic Intelligence, Inverted Cross-Ownership, UBO Family & Capital Funnel
+    inbound_cross_holdings = []
+    ubo_family_group = {}
+    capital_funnel = {}
+    forensic_flags = []
+
+    try:
+        from services.cross_ownership_engine import get_cross_ownership_engine
+        cross_engine = get_cross_ownership_engine()
+        node_ids_set = {n["id"] for n in nodes}
+
+        # A. Inverted Cross-Ownership (Ai đang nắm giữ cổ phần mã này?)
+        inbound_cross_holdings = cross_engine.get_inbound_cross_holdings(symbol)
+        for inh in inbound_cross_holdings:
+            h_sym = inh.get("holder_symbol")
+            h_name = inh.get("holder_name") or f"CTCP {h_sym}"
+            own_v = inh.get("ownership_pct", 0.0)
+            own_s = inh.get("ownership_str") or f"{own_v:.1f}%"
+            inh_id = f"inbound_{h_sym}"
+
+            if inh_id not in node_ids_set and h_sym not in node_ids_set:
+                nodes.append({
+                    "id": inh_id,
+                    "label": h_sym,
+                    "name": f"Đơn vị đầu tư: {h_name} ({own_s})",
+                    "type": "inbound_investor",
+                    "size": 28 if own_v >= 5.0 else 24,
+                    "color": "#ec4899",
+                    "border_color": "#be185d",
+                    "ownership_val": own_v,
+                    "tier": "major" if own_v >= 5.0 else "minor",
+                    "hop": 1,
+                    "is_inbound": True
+                })
+                node_ids_set.add(inh_id)
+
+                edges.append({
+                    "from": inh_id,
+                    "to": symbol,
+                    "label": own_s,
+                    "relation": "Rót vốn sở hữu",
+                    "ownership_val": own_v,
+                    "tier": "inbound",
+                    "stroke_width": 2.2 if own_v >= 5.0 else 1.5,
+                    "stroke_color": "#ec4899",
+                    "stroke_dash": "none" if own_v >= 5.0 else "3,3",
+                    "glow": own_v >= 5.0
+                })
+
+        # B. UBO & Family Power Clustering
+        lead_data = leadership_data if 'leadership_data' in locals() else None
+        dossier_data = dossier if 'dossier' in locals() else None
+        ubo_family_group = cross_engine.cluster_family_and_ubo_power(symbol, leadership_data=lead_data, dossier=dossier_data)
+
+        # Connect key family members to graph if depth >= 2
+        if depth >= 2 and ubo_family_group:
+            for fam in ubo_family_group.get("family_members", [])[:3]:
+                fam_name = fam.get("name", "")
+                fam_id = f"fam_{abs(hash(fam_name)) % 100000}"
+                f_own = fam.get("ownership_pct", 0.0)
+                if fam_name and fam_id not in node_ids_set:
+                    nodes.append({
+                        "id": fam_id,
+                        "label": fam_name.split()[-1] if fam_name else "Người nhà",
+                        "name": f"{fam.get('relation', 'Người thân')}: {fam_name} ({f_own:.2f}%)",
+                        "type": "person",
+                        "size": 22 if f_own >= 2.0 else 18,
+                        "color": "#c084fc",
+                        "border_color": "#9333ea",
+                        "ownership_val": f_own,
+                        "hop": 2
+                    })
+                    node_ids_set.add(fam_id)
+                    edges.append({
+                        "from": fam_id,
+                        "to": core_symbol if core_symbol in node_ids_set else symbol,
+                        "label": fam.get("relation", "Gia tộc"),
+                        "relation": "Quan hệ gia đình",
+                        "stroke_width": 1.5,
+                        "stroke_color": "#c084fc",
+                        "stroke_dash": "2,2",
+                        "tier": "family"
+                    })
+
+        # C. Related-Party Capital Funnel & Drain Detector
+        capital_funnel = cross_engine.analyze_capital_funnel(symbol, dossier=dossier_data)
+
+        # D. Assemble Forensic Detective Flags
+        if inbound_cross_holdings:
+            stealth_count = sum(1 for h in inbound_cross_holdings if h.get("is_minor"))
+            if stealth_count > 0:
+                forensic_flags.append({
+                    "type": "WARNING",
+                    "title": f"Phát hiện {stealth_count} doanh nghiệp niêm yết gom ngầm dưới 5%",
+                    "detail": f"Có {len(inbound_cross_holdings)} tổ chức niêm yết đang hạch toán cổ phần {symbol} trong danh mục đầu tư tài chính.",
+                    "icon": "🔍"
+                })
+            else:
+                forensic_flags.append({
+                    "type": "INFO",
+                    "title": f"Cơ cấu sở hữu chéo với {len(inbound_cross_holdings)} doanh nghiệp niêm yết",
+                    "detail": f"Được nắm giữ bởi các doanh nghiệp liên minh trong hệ sinh thái.",
+                    "icon": "🌐"
+                })
+
+        if ubo_family_group:
+            c_grade = ubo_family_group.get("concentration_grade", "")
+            t_ctrl = ubo_family_group.get("true_control_pct", 0.0)
+            t_ff = ubo_family_group.get("true_free_float_pct", 0.0)
+            forensic_flags.append({
+                "type": "SUCCESS" if t_ff >= 30.0 else "WARNING",
+                "title": f"Quyền lực gia tộc: {c_grade} ({t_ctrl}%)",
+                "detail": f"Tỷ lệ trôi nổi thực tế ngoài thị trường (True Free-Float) ước tính đạt {t_ff}%.",
+                "icon": "👑"
+            })
+
+        if capital_funnel:
+            d_pct = capital_funnel.get("drain_ratio_pct", 0.0)
+            forensic_flags.append({
+                "type": "DANGER" if d_pct > 25.0 else ("WARNING" if d_pct > 12.0 else "SUCCESS"),
+                "title": f"Radar Rút Ruột Vốn: Drain Ratio {d_pct}%",
+                "detail": capital_funnel.get("risk_advice", ""),
+                "icon": "⚖️"
+            })
+    except Exception as e:
+        logger.debug(f"Error supercharging ecosystem with forensic intelligence for {symbol}: {e}")
+
     result = {
         "symbol": symbol,
         "company_name": company_name,
@@ -7397,6 +7525,10 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
         "laggard": laggard,
         "members": members_data,
         "unlisted_subsidiaries": unlisted_subs,
+        "inbound_cross_holdings": inbound_cross_holdings,
+        "ubo_family_group": ubo_family_group,
+        "capital_funnel": capital_funnel,
+        "forensic_flags": forensic_flags,
         "graph_data": {
             "nodes": nodes,
             "edges": edges

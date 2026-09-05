@@ -6185,6 +6185,13 @@ class VnstockApp {
     }
   }
 
+  setEcosystemSubTab(subTab) {
+    this.ecoSubTab = subTab;
+    if (this.currentEcosystemData) {
+      this.renderCompanyEcosystem(this.currentEcosystemData);
+    }
+  }
+
   setEcosystemView(viewMode) {
     this.ecosystemViewMode = viewMode;
     if (this.currentEcosystemData) {
@@ -6198,15 +6205,53 @@ class VnstockApp {
 
     const members = data.members || [];
     const unlisted = data.unlisted_subsidiaries || [];
+    const inbound = data.inbound_cross_holdings || [];
+    const uboGroup = data.ubo_family_group || {};
+    const capitalFunnel = data.capital_funnel || {};
+    const forensicFlags = data.forensic_flags || [];
     const graphData = data.graph_data || { nodes: [], edges: [] };
     const b = data.breadth || { advances: 0, declines: 0, unchanged: 0 };
     const leader = data.leader || {};
     const mode = this.ecosystemViewMode || 'matrix';
+    const subTab = this.ecoSubTab || 'outbound';
     const curDepth = this.ecoDepth || 2;
     const curMinOwn = this.ecoMinOwnership || 0.0;
 
     const avgSign = data.avg_change_pct > 0 ? '+' : '';
     const avgColorClass = data.avg_change_pct > 0 ? 'txt-up' : (data.avg_change_pct < 0 ? 'txt-down' : 'txt-ref');
+
+    // Forensic Intelligence Flags Strip
+    const flagsHtml = forensicFlags.length > 0 ? `
+      <div class="eco-forensic-flags-strip" style="display:flex; flex-wrap:wrap; gap:8px; margin-top:12px;">
+        ${forensicFlags.map(flag => {
+          let bg = 'rgba(56, 189, 248, 0.12)';
+          let border = 'rgba(56, 189, 248, 0.3)';
+          let col = '#38bdf8';
+          if (flag.type === 'DANGER') {
+            bg = 'rgba(239, 68, 68, 0.12)';
+            border = 'rgba(239, 68, 68, 0.35)';
+            col = '#ef4444';
+          } else if (flag.type === 'WARNING') {
+            bg = 'rgba(245, 158, 11, 0.12)';
+            border = 'rgba(245, 158, 11, 0.35)';
+            col = '#f59e0b';
+          } else if (flag.type === 'SUCCESS') {
+            bg = 'rgba(16, 185, 129, 0.12)';
+            border = 'rgba(16, 185, 129, 0.35)';
+            col = '#10b981';
+          }
+          return `
+            <div style="background:${bg}; border:1px solid ${border}; border-radius:6px; padding:6px 12px; display:flex; align-items:center; gap:8px; font-size:12px; flex:1; min-width:260px;">
+              <span style="font-size:16px;">${flag.icon || '📌'}</span>
+              <div>
+                <div style="font-weight:700; color:${col};">${escapeHTML(flag.title)}</div>
+                <div style="font-size:11px; color:var(--text-secondary);">${escapeHTML(flag.detail)}</div>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : '';
 
     // Header Hero HTML
     const headerHtml = `
@@ -6219,6 +6264,7 @@ class VnstockApp {
               <span class="eco-tier-stat-tag">🔴 ${data.controlling_count || 0} Chi phối</span>
               <span class="eco-tier-stat-tag" style="background:rgba(245,158,11,0.15); color:#f59e0b; border-color:rgba(245,158,11,0.3);">🟡 ${data.associate_count || 0} Liên kết</span>
               <span class="eco-tier-stat-tag" style="background:rgba(56,189,248,0.15); color:#38bdf8; border-color:rgba(56,189,248,0.3);">🔵 ${data.major_count || 0} Cổ đông lớn</span>
+              <span class="eco-tier-stat-tag" style="background:rgba(236,72,153,0.15); color:#ec4899; border-color:rgba(236,72,153,0.3);">🔍 ${inbound.length} Cổ đông niêm yết</span>
             </div>
             <h2 class="eco-main-title">${escapeHTML(data.ecosystem_name)}</h2>
             <p class="eco-desc">${escapeHTML(data.description)}</p>
@@ -6251,11 +6297,12 @@ class VnstockApp {
             </span>
           </div>
         </div>
+
+        ${flagsHtml}
       </div>
 
       <!-- Advanced Multi-Hop & Ownership Controls Toolbar -->
       <div class="eco-toolbar-panel">
-        
         <!-- Depth Selector Group -->
         <div class="eco-toolbar-group">
           <span class="eco-toolbar-label">🔍 Độ sâu mạng lưới:</span>
@@ -6290,20 +6337,22 @@ class VnstockApp {
             </button>
           </div>
         </div>
-
       </div>
 
-      <!-- View Switcher -->
+      <!-- Supercharged View Switcher -->
       <div class="eco-view-controls">
         <div class="eco-view-btn-group">
           <button class="eco-view-btn ${mode === 'matrix' ? 'active' : ''}" onclick="app.setEcosystemView('matrix')">
-            📊 Bảng Ma Trận Niêm Yết (${members.length})
+            📊 Ma Trận Hai Chiều (${members.length + inbound.length})
           </button>
           <button class="eco-view-btn ${mode === 'graph' ? 'active' : ''}" onclick="app.setEcosystemView('graph')">
-            🕸️ Sơ Đồ Mạng Lưới Sở Hữu (Weighted Graph)
+            🕸️ Sơ Đồ Mạng Lưới (${graphData.nodes.length} Nút)
+          </button>
+          <button class="eco-view-btn ${mode === 'ubo' ? 'active' : ''}" onclick="app.setEcosystemView('ubo')">
+            🕵️ Hồ Sơ Quyền Lực UBO & Dòng Tiền
           </button>
           <button class="eco-view-btn ${mode === 'unlisted' ? 'active' : ''}" onclick="app.setEcosystemView('unlisted')">
-            📑 Công Ty Con & Liên Kết Chưa Niêm Yết (${unlisted.length})
+            📑 Công Ty Con Chưa Niêm Yết (${unlisted.length})
           </button>
         </div>
         <div style="font-size:11px; color:var(--text-muted);">
@@ -6316,68 +6365,271 @@ class VnstockApp {
     let bodyHtml = '';
 
     if (mode === 'matrix') {
-      bodyHtml = `
-        <div class="table-responsive" style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden;">
-          <table class="trading-board-table clean-board-table">
-            <thead>
-              <tr>
-                <th style="width:75px; text-align:left;">Mã CK</th>
-                <th style="text-align:left;">Tên Doanh Nghiệp</th>
-                <th style="width:200px; text-align:left;">Quan Hệ Sở Hữu 2 Chiều</th>
-                <th style="width:140px; text-align:center;">Phân Loại % Sở Hữu</th>
-                <th style="width:65px; text-align:center;">Sàn</th>
-                <th style="width:85px; text-align:right;">Thị Giá</th>
-                <th style="width:80px; text-align:right;">% Biến Động</th>
-                <th style="width:105px; text-align:right;">Khối Lượng</th>
-                <th style="width:100px; text-align:right;">Vốn Hóa (Tỷ)</th>
-                <th style="width:65px; text-align:right;">P/E</th>
-                <th style="width:65px; text-align:right;">ROE</th>
-                <th style="width:80px; text-align:center;">Thao Tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${members.map(m => {
-                const isCurrent = m.is_current ? 'background:rgba(56, 189, 248, 0.12); border-left:3px solid #38bdf8;' : '';
-                const isCore = m.is_core ? 'background:rgba(245, 158, 11, 0.08);' : '';
-                const sign = m.change_pct > 0 ? '+' : '';
-                const colorClass = m.change_pct > 0 ? 'txt-up' : (m.change_pct < 0 ? 'txt-down' : 'txt-ref');
-                
-                let tierBadgeClass = 'badge-eco-member';
-                if (m.ownership_tier === 'controlling' || m.ownership_val >= 50) tierBadgeClass = 'badge-eco-controlling';
-                else if (m.ownership_tier === 'associate' || m.ownership_val >= 20) tierBadgeClass = 'badge-eco-associate';
-                else if (m.ownership_tier === 'major' || m.ownership_val >= 5) tierBadgeClass = 'badge-eco-major';
+      // Sub-Tabs for Matrix: Outbound (Trực tiếp) vs Inbound (Đảo ngược)
+      const subTabsHtml = `
+        <div style="display:flex; gap:8px; margin-bottom:10px; background:rgba(0,0,0,0.2); padding:4px; border-radius:6px; width:fit-content;">
+          <button class="eco-view-btn ${subTab === 'outbound' ? 'active' : ''}" style="padding:4px 14px; font-size:11.5px;" onclick="app.setEcosystemSubTab('outbound')">
+            🏢 Sở Hữu Trực Tiếp (Outbound: ${members.length})
+          </button>
+          <button class="eco-view-btn ${subTab === 'inbound' ? 'active' : ''}" style="padding:4px 14px; font-size:11.5px; ${inbound.length > 0 ? 'color:#ec4899;' : ''}" onclick="app.setEcosystemSubTab('inbound')">
+            🔥 Ma Trận Đảo Ngược - Ai Đang Âm Thầm Sở Hữu? (${inbound.length})
+          </button>
+        </div>
+      `;
 
-                return `
-                  <tr style="${isCurrent || isCore}">
-                    <td class="col-symbol" onclick="app.inspectStock('${m.symbol}')" style="font-weight:800; color:${m.is_current ? '#38bdf8' : (m.is_core ? '#f59e0b' : 'var(--text-primary)')}; cursor:pointer;">
-                      ${m.symbol} ${m.is_current ? '📍' : (m.is_core ? '👑' : '')}
-                    </td>
-                    <td style="text-align:left; font-size:11px; color:var(--text-secondary); max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
-                      ${escapeHTML(m.name)}
-                    </td>
-                    <td style="text-align:left; font-size:11.5px; font-weight:600; color:var(--text-primary);">
-                      ${escapeHTML(m.relation || m.role)}
-                    </td>
-                    <td style="text-align:center;">
-                      <span class="${tierBadgeClass}" title="${escapeHTML(m.ownership || '')}">
-                        ${escapeHTML(m.tier_badge || m.ownership || '--')}
-                      </span>
-                    </td>
-                    <td style="text-align:center; font-size:10px; color:var(--text-muted); font-weight:700;">${m.exchange}</td>
-                    <td class="mono" style="font-weight:800; text-align:right;">${m.price.toFixed(2)}</td>
-                    <td class="mono ${colorClass}" style="text-align:right; font-weight:700;">${sign}${m.change_pct.toFixed(2)}%</td>
-                    <td class="mono" style="text-align:right; color:var(--text-muted);">${m.volume.toLocaleString()}</td>
-                    <td class="mono" style="text-align:right; color:var(--text-primary); font-weight:600;">${m.market_cap.toLocaleString()}</td>
-                    <td class="mono" style="text-align:right;">${m.pe}x</td>
-                    <td class="mono" style="text-align:right; color:#10b981; font-weight:700;">${m.roe}%</td>
-                    <td style="text-align:center;">
-                      <button class="btn-inspect" onclick="app.inspectStock('${m.symbol}')" style="font-size:10px; padding:2px 8px;">📈 Phân Tích</button>
-                    </td>
+      if (subTab === 'outbound') {
+        bodyHtml = `
+          ${subTabsHtml}
+          <div class="table-responsive" style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden;">
+            <table class="trading-board-table clean-board-table">
+              <thead>
+                <tr>
+                  <th style="width:75px; text-align:left;">Mã CK</th>
+                  <th style="text-align:left;">Tên Doanh Nghiệp</th>
+                  <th style="width:200px; text-align:left;">Quan Hệ Sở Hữu 2 Chiều</th>
+                  <th style="width:140px; text-align:center;">Phân Loại % Sở Hữu</th>
+                  <th style="width:65px; text-align:center;">Sàn</th>
+                  <th style="width:85px; text-align:right;">Thị Giá</th>
+                  <th style="width:80px; text-align:right;">% Biến Động</th>
+                  <th style="width:105px; text-align:right;">Khối Lượng</th>
+                  <th style="width:100px; text-align:right;">Vốn Hóa (Tỷ)</th>
+                  <th style="width:65px; text-align:right;">P/E</th>
+                  <th style="width:65px; text-align:right;">ROE</th>
+                  <th style="width:80px; text-align:center;">Thao Tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${members.map(m => {
+                  const isCurrent = m.is_current ? 'background:rgba(56, 189, 248, 0.12); border-left:3px solid #38bdf8;' : '';
+                  const isCore = m.is_core ? 'background:rgba(245, 158, 11, 0.08);' : '';
+                  const sign = m.change_pct > 0 ? '+' : '';
+                  const colorClass = m.change_pct > 0 ? 'txt-up' : (m.change_pct < 0 ? 'txt-down' : 'txt-ref');
+                  
+                  let tierBadgeClass = 'badge-eco-member';
+                  if (m.ownership_tier === 'controlling' || m.ownership_val >= 50) tierBadgeClass = 'badge-eco-controlling';
+                  else if (m.ownership_tier === 'associate' || m.ownership_val >= 20) tierBadgeClass = 'badge-eco-associate';
+                  else if (m.ownership_tier === 'major' || m.ownership_val >= 5) tierBadgeClass = 'badge-eco-major';
+
+                  return `
+                    <tr style="${isCurrent || isCore}">
+                      <td class="col-symbol" onclick="app.inspectStock('${m.symbol}')" style="font-weight:800; color:${m.is_current ? '#38bdf8' : (m.is_core ? '#f59e0b' : 'var(--text-primary)')}; cursor:pointer;">
+                        ${m.symbol} ${m.is_current ? '📍' : (m.is_core ? '👑' : '')}
+                      </td>
+                      <td style="text-align:left; font-size:11px; color:var(--text-secondary); max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                        ${escapeHTML(m.name)}
+                      </td>
+                      <td style="text-align:left; font-size:11.5px; font-weight:600; color:var(--text-primary);">
+                        ${escapeHTML(m.relation || m.role)}
+                      </td>
+                      <td style="text-align:center;">
+                        <span class="${tierBadgeClass}" title="${escapeHTML(m.ownership || '')}">
+                          ${escapeHTML(m.tier_badge || m.ownership || '--')}
+                        </span>
+                      </td>
+                      <td style="text-align:center; font-size:10px; color:var(--text-muted); font-weight:700;">${m.exchange}</td>
+                      <td class="mono" style="font-weight:800; text-align:right;">${m.price.toFixed(2)}</td>
+                      <td class="mono ${colorClass}" style="text-align:right; font-weight:700;">${sign}${m.change_pct.toFixed(2)}%</td>
+                      <td class="mono" style="text-align:right; color:var(--text-muted);">${m.volume.toLocaleString()}</td>
+                      <td class="mono" style="text-align:right; color:var(--text-primary); font-weight:600;">${m.market_cap.toLocaleString()}</td>
+                      <td class="mono" style="text-align:right;">${m.pe}x</td>
+                      <td class="mono" style="text-align:right; color:#10b981; font-weight:700;">${m.roe}%</td>
+                      <td style="text-align:center;">
+                        <button class="btn-inspect" onclick="app.inspectStock('${m.symbol}')" style="font-size:10px; padding:2px 8px;">📈 Phân Tích</button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        // Inbound / Reverse Cross-Ownership Table
+        if (inbound.length === 0) {
+          bodyHtml = `
+            ${subTabsHtml}
+            <div style="color:var(--text-muted); font-size:12px; padding:40px; text-align:center; background:rgba(255,255,255,0.02); border-radius:8px;">
+              🔍 Chưa phát hiện doanh nghiệp niêm yết nào khác trên 3 sàn (HOSE/HNX/UPCOM) hạch toán nắm giữ cổ phiếu ${data.symbol} trong danh mục đầu tư tài chính.
+            </div>
+          `;
+        } else {
+          bodyHtml = `
+            ${subTabsHtml}
+            <div class="table-responsive" style="border:1px solid var(--border-subtle); border-radius:8px; overflow:hidden;">
+              <table class="trading-board-table clean-board-table">
+                <thead>
+                  <tr>
+                    <th style="width:85px; text-align:left;">Mã Cổ Đông</th>
+                    <th style="text-align:left;">Tên Doanh Nghiệp Đang Nắm Giữ</th>
+                    <th style="width:190px; text-align:left;">Tính Chất Khoản Đầu Tư</th>
+                    <th style="width:160px; text-align:center;">Tỷ Lệ Sở Hữu</th>
+                    <th style="width:150px; text-align:left;">Nguồn Dữ Liệu Bóc Tách</th>
+                    <th style="width:80px; text-align:center;">Thao Tác</th>
                   </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  ${inbound.map(h => {
+                    let badge = 'badge-eco-member';
+                    if (h.ownership_pct >= 50) badge = 'badge-eco-controlling';
+                    else if (h.ownership_pct >= 20) badge = 'badge-eco-associate';
+                    else if (h.ownership_pct >= 5) badge = 'badge-eco-major';
+                    else if (h.is_minor) badge = 'badge-eco-warning';
+
+                    return `
+                      <tr>
+                        <td class="col-symbol" onclick="app.inspectStock('${h.holder_symbol}')" style="font-weight:800; color:#ec4899; cursor:pointer;">
+                          ${h.holder_symbol} 🔍
+                        </td>
+                        <td style="text-align:left; font-size:12px; font-weight:600; color:var(--text-primary);">
+                          ${escapeHTML(h.holder_name)}
+                        </td>
+                        <td style="text-align:left; font-size:11px; color:var(--text-secondary);">
+                          ${escapeHTML(h.relation || h.role || 'Đầu tư tài chính')}
+                        </td>
+                        <td style="text-align:center;">
+                          <span class="${badge}" style="${h.is_minor ? 'background:rgba(236,72,153,0.15); color:#ec4899; border:1px solid rgba(236,72,153,0.3);' : ''}">
+                            ${h.is_minor ? '⚠️ Gom ngầm ' : ''}${escapeHTML(h.ownership_str || (h.ownership_pct ? h.ownership_pct + '%' : '--'))}
+                          </span>
+                        </td>
+                        <td style="text-align:left; font-size:10.5px; color:var(--text-muted);">
+                          📑 ${escapeHTML(h.source === 'BCTC_FOOTNOTES_GROUND_TRUTH' ? 'Thuyết minh BCTC Kiểm toán' : 'Mạng lưới Sở hữu Master')}
+                        </td>
+                        <td style="text-align:center;">
+                          <button class="btn-inspect" onclick="app.inspectStock('${h.holder_symbol}')" style="font-size:10px; padding:2px 8px;">📈 Soi Mã Này</button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            </div>
+          `;
+        }
+      }
+    } else if (mode === 'ubo') {
+      // UBO & Capital Funnel Forensic Dossier
+      const keyP = uboGroup.key_person || {};
+      const famList = uboGroup.family_members || [];
+      const affList = uboGroup.affiliated_entities || [];
+      const txList = capitalFunnel.related_transactions || [];
+
+      bodyHtml = `
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:16px;">
+          <!-- Left Card: UBO & Family Power -->
+          <div style="background:var(--bg-card, #111827); border:1px solid var(--border-subtle, #374151); border-radius:8px; padding:16px; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle, #374151); padding-bottom:8px;">
+              <h3 style="font-size:14px; font-weight:700; color:var(--text-primary); margin:0; display:flex; align-items:center; gap:6px;">
+                👑 Cây Phả Hệ Gia Tộc & Quyền Lực Kiểm Soát Thực Tế
+              </h3>
+              <span style="background:${uboGroup.concentration_color || '#38bdf8'}22; color:${uboGroup.concentration_color || '#38bdf8'}; border:1px solid ${uboGroup.concentration_color || '#38bdf8'}44; padding:2px 8px; border-radius:4px; font-size:10.5px; font-weight:700;">
+                ${escapeHTML(uboGroup.concentration_grade || 'CƠ CẤU PHÂN TÁN')}
+              </span>
+            </div>
+
+            <!-- Key Figure Box -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:10px; display:flex; justify-content:space-between; align-items:center;">
+              <div>
+                <span style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:700;">Nhân Vật Trọng Yếu (UBO):</span>
+                <div style="font-size:13px; font-weight:800; color:#38bdf8; margin-top:2px;">
+                  👤 ${escapeHTML(keyP.name || 'Ban Lãnh Đạo')}
+                </div>
+                <div style="font-size:11px; color:var(--text-secondary);">${escapeHTML(keyP.position || 'Hội đồng Quản trị')}</div>
+              </div>
+              <div style="text-align:right;">
+                <span style="font-size:10px; color:var(--text-muted);">Sở hữu cá nhân:</span>
+                <div class="mono" style="font-size:14px; font-weight:800; color:#10b981;">${keyP.personal_pct || 0}%</div>
+              </div>
+            </div>
+
+            <!-- Free-Float Comparison Progress Bar -->
+            <div style="background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05); border-radius:6px; padding:10px;">
+              <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:4px;">
+                <span><strong>Quyền lực chi phối gia tộc:</strong> <span class="mono" style="color:#a855f7; font-weight:700;">${uboGroup.true_control_pct || 0}%</span></span>
+                <span><strong>True Free-Float (Thực tế):</strong> <span class="mono" style="color:#38bdf8; font-weight:700;">${uboGroup.true_free_float_pct || 0}%</span></span>
+              </div>
+              <div style="height:8px; border-radius:4px; background:#1e293b; overflow:hidden; display:flex;">
+                <div style="width:${Math.min(100, uboGroup.true_control_pct || 0)}%; background:#a855f7;" title="Gia tộc & Pháp nhân kiểm soát"></div>
+                <div style="flex:1; background:#0284c7;" title="True Free Float trôi nổi"></div>
+              </div>
+              <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                ${escapeHTML(uboGroup.concentration_desc || '')}
+              </div>
+            </div>
+
+            <!-- Family Members List -->
+            <div>
+              <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Danh sách thành viên gia đình liên quan (${famList.length}):</span>
+              ${famList.length === 0 ? '<div style="font-size:11px; color:var(--text-muted); padding:10px 0;">Không có người thân đứng tên cổ phần lớn trong báo cáo quản trị.</div>' : `
+                <div style="margin-top:6px; display:flex; flex-direction:column; gap:6px;">
+                  ${famList.map(fam => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:6px 10px; border-radius:4px; font-size:11.5px;">
+                      <div>
+                        <strong>${escapeHTML(fam.name)}</strong>
+                        <span style="font-size:10px; color:#c084fc; margin-left:6px;">${escapeHTML(fam.relation)}</span>
+                      </div>
+                      <div class="mono" style="font-weight:700; color:#10b981;">
+                        ${fam.ownership_pct > 0 ? fam.ownership_pct.toFixed(2) + '%' : '--'}
+                      </div>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          </div>
+
+          <!-- Right Card: Capital Funnel & Drain Detector -->
+          <div style="background:var(--bg-card, #111827); border:1px solid var(--border-subtle, #374151); border-radius:8px; padding:16px; display:flex; flex-direction:column; gap:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--border-subtle, #374151); padding-bottom:8px;">
+              <h3 style="font-size:14px; font-weight:700; color:var(--text-primary); margin:0; display:flex; align-items:center; gap:6px;">
+                ⚖️ Radar Dòng Tiền Tuần Hoàn & Phễu Rút Ruột
+              </h3>
+              <span style="background:${capitalFunnel.risk_color || '#10b981'}22; color:${capitalFunnel.risk_color || '#10b981'}; border:1px solid ${capitalFunnel.risk_color || '#10b981'}44; padding:2px 8px; border-radius:4px; font-size:10.5px; font-weight:700;">
+                ${escapeHTML(capitalFunnel.risk_level || 'AN TOÀN')}
+              </span>
+            </div>
+
+            <!-- Drain Ratio Metric Strip -->
+            <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:12px; display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+              <div>
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Chỉ Số Rút Ruột (Drain Ratio):</span>
+                <div class="mono" style="font-size:22px; font-weight:900; color:${capitalFunnel.risk_color || '#10b981'}; margin-top:2px;">
+                  ${capitalFunnel.drain_ratio_pct || 0}%
+                </div>
+                <div style="font-size:10px; color:var(--text-muted);">Ngưỡng an toàn: &lt; 12% | Báo động: &gt; 25%</div>
+              </div>
+              <div>
+                <span style="font-size:10px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Vốn Chiếm Dụng Ngoài:</span>
+                <div class="mono" style="font-size:16px; font-weight:800; color:#f59e0b; margin-top:4px;">
+                  ${Number(capitalFunnel.total_drain_capital_billion || 0).toLocaleString()} Tỷ
+                </div>
+                <div style="font-size:10.5px; color:var(--text-secondary);">Tổng tài sản: ${Number(capitalFunnel.total_assets_billion || 0).toLocaleString()} Tỷ</div>
+              </div>
+            </div>
+
+            <div style="font-size:11px; color:var(--text-secondary); background:rgba(0,0,0,0.2); padding:8px 10px; border-radius:6px; line-height:1.5;">
+              💡 <strong>Nhận định chuyên gia:</strong> ${escapeHTML(capitalFunnel.risk_advice || 'Dòng tiền hoạt động ổn định, không có dấu hiệu rút ruột qua các công ty sân sau.')}
+            </div>
+
+            <!-- Related Party Transactions Table -->
+            <div>
+              <span style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase;">Giao dịch trọng yếu với bên liên quan (TT96 Biểu VIII):</span>
+              ${txList.length === 0 ? '<div style="font-size:11px; color:var(--text-muted); padding:10px 0;">Không phát sinh giao dịch vốn đáng ngờ trong kỳ báo cáo.</div>' : `
+                <div style="margin-top:6px; display:flex; flex-direction:column; gap:6px;">
+                  ${txList.map(tx => `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:6px 10px; border-radius:4px; font-size:11px;">
+                      <div>
+                        <strong>${escapeHTML(tx.entity)}</strong>
+                        <div style="font-size:10px; color:var(--text-muted);">${escapeHTML(tx.context)}</div>
+                      </div>
+                      <span style="font-size:10px; padding:2px 6px; border-radius:3px; background:rgba(255,255,255,0.05); font-weight:700;">
+                        ${escapeHTML(tx.risk_badge || 'Thường kỳ')}
+                      </span>
+                    </div>
+                  `).join('')}
+                </div>
+              `}
+            </div>
+          </div>
         </div>
       `;
     } else if (mode === 'graph') {
@@ -6387,9 +6639,10 @@ class VnstockApp {
             <span><span class="legend-line" style="background:#f43f5e; height:3px;"></span> 🔴 Chi phối (&gt;50%)</span>
             <span><span class="legend-line" style="background:#f59e0b; height:2.2px;"></span> 🟡 Liên kết (20-50%)</span>
             <span><span class="legend-line" style="background:#38bdf8; height:1.8px; border-top:1px dashed #38bdf8;"></span> 🔵 Cổ đông lớn (5-20%)</span>
+            <span><span class="legend-dot" style="background:#ec4899;"></span> 🔍 Cổ đông ngầm / Đảo ngược</span>
+            <span><span class="legend-dot" style="background:#c084fc;"></span> 👥 Người thân UBO</span>
             <span><span class="legend-dot" style="background:#38bdf8;"></span> Mã đang soi</span>
             <span><span class="legend-dot" style="background:#f59e0b;"></span> Tập đoàn mẹ / Hạt nhân</span>
-            <span><span class="legend-dot" style="background:#a855f7;"></span> Cổ đông / Lãnh đạo (UBO)</span>
           </div>
           <div class="eco-graph-canvas-box" id="ecoGraphSvgContainer">
             ${this.generateEcosystemSvgGraph(graphData, data.symbol, data.core_symbol)}
