@@ -255,39 +255,48 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
 # 1.5. VNDIRECT FINFO DEEP FINANCIAL STATEMENTS (TIER 2 WITNESS)
 # =============================================================================
 
-def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: int = 120) -> Dict[str, Any]:
+def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: int = 4000) -> Dict[str, Any]:
     """
     Tier 2 Reported Witness: Fetches deep historical statements from VNDIRECT Finfo API with L1/L2 Disk Lake caching.
     Maps 2,500 item codes across Banking, Securities, Insurance, and Non-Finance entities.
     Returns normalized metrics in VND (TTM Revenue, TTM Net Income, Total Assets, Total Equity, etc.).
     """
     symbol = symbol.upper().strip()
-    cache_key = f"vndirect_finfo_v5_{symbol}_{report_type}_{size}"
+    cache_key = f"vndirect_finfo_v6_{symbol}_{report_type}"
     
     # 1. Check L1 Memory Cache
     try:
-        from services.stock_service import cache, disk_lake
+        from services.stock_service import cache, disk_lake, fetch_vndirect_raw_statements
         cached = cache.get(cache_key)
         if cached:
             return cached
     except Exception:
         cache = None
         disk_lake = None
+        fetch_vndirect_raw_statements = None
 
-    url = f"https://api-finfo.vndirect.com.vn/v4/financial_statements?q=code:{symbol}~reportType:{report_type}&size={size}&sort=fiscalDate:desc"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json, text/plain, */*'
-    }
-    resp = _request_with_retry("GET", url, headers=headers, timeout=8)
-    if resp is None:
-        return {}
-    try:
-        data = resp.json()
-    except Exception:
-        return {}
+    raw_items = []
+    if fetch_vndirect_raw_statements is not None:
+        try:
+            raw_items = fetch_vndirect_raw_statements(symbol, report_type=report_type, target_quarters=16)
+        except Exception as e:
+            logger.debug(f"fetch_vndirect_raw_statements call failed: {e}")
+
+    if not raw_items:
+        url = f"https://api-finfo.vndirect.com.vn/v4/financial_statements?q=code:{symbol}~reportType:{report_type}&size={size}&sort=fiscalDate:desc"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*'
+        }
+        resp = _request_with_retry("GET", url, headers=headers, timeout=10)
+        if resp is None:
+            return {}
+        try:
+            data = resp.json()
+            raw_items = data.get("data", []) if isinstance(data, dict) else []
+        except Exception:
+            return {}
     
-    raw_items = data.get("data", []) if isinstance(data, dict) else []
     if not raw_items:
         return {}
         
@@ -329,7 +338,7 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
     ni_ttm = _sum_ttm([23000, 23800, 23001])
     ebit_ttm = _sum_ttm([21020, 22000])
     da_ttm = _sum_ttm([31110, 31010]) # Depreciation and Amortization from Cash Flow
-    capex_ttm = _sum_ttm([32110, 32010]) # Purchase of Fixed Assets (CapEx)
+    capex_ttm = _sum_ttm([32100, 32110, 32010]) # Purchase of Fixed Assets / CapEx (32100 is primary VAS line)
     cfo_ttm = _sum_ttm([31000, 31100]) # Net Cash Flows from Operating Activities
     
     # Granular Working Capital & Industry Items
@@ -351,6 +360,30 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
     bank_loans = _latest([112000]) # Bank Gross Loans
     bank_loan_loss = _latest([112900]) # Bank Loan Loss Reserves
     
+    # Detect entity form
+    raw_mts = set(float(it.get('modelType')) for it in raw_items if it.get('modelType'))
+    if raw_mts & {89.0, 90.0, 91.0, 201.0, 202.0, 203.0}:
+        detected_form = "SECURITIES"
+    elif raw_mts & {101.0, 102.0, 103.0, 111.0, 112.0, 113.0}:
+        detected_form = "BANK"
+    elif raw_mts & {411.0, 412.0, 413.0, 414.0, 420.0}:
+        detected_form = "INSURANCE"
+    elif raw_mts & {1.0, 2.0, 3.0, 11.0, 12.0, 13.0}:
+        detected_form = "NON_FINANCE"
+    else:
+        try:
+            from services.stock_service import _FINANCIAL_MODELS_BY_CODE
+            code_set = set(int(it.get('itemCode', 0)) for it in raw_items if it.get('itemCode'))
+            form_scores = {"NON_FINANCE": 0, "BANK": 0, "SECURITIES": 0, "INSURANCE": 0}
+            for c in code_set:
+                for meta in _FINANCIAL_MODELS_BY_CODE.get(c, []):
+                    cf = meta.get('companyForm')
+                    if cf in form_scores:
+                        form_scores[cf] += 1
+            detected_form = max(form_scores, key=form_scores.get) if any(form_scores.values()) else "NON_FINANCE"
+        except Exception:
+            detected_form = "NON_FINANCE"
+
     res = {
         "revenue_ttm": rev_ttm,
         "net_income_ttm": ni_ttm,
@@ -372,6 +405,7 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         "bank_loans_fq": bank_loans,
         "bank_loan_loss_fq": bank_loan_loss,
         "latest_fiscal_date": latest_d,
+        "company_form": detected_form,
         "source": "VNDIRECT_FINFO"
     }
     

@@ -366,9 +366,9 @@ def api_company_financials(
     symbol: str = Query("FPT", description="Stock ticker symbol"),
     statement_type: str = Query("income", description="income (KQKD), balance (CĐKT), cashflow (LCTT), ratios (Chỉ số)"),
     period: str = Query("quarter", description="quarter (Theo Quý) or year (Theo Năm)"),
-    periods_count: str = Query("8", description="Number of periods (4, 8, 12, 16, or 'all')")
+    periods_count: str = Query("8", description="Number of periods (4, 8, 12, 16, 40, or 'all')")
 ):
-    """Returns structured, interactive financial statement tables (Income, Balance, CashFlow, Ratios) across multiple periods"""
+    """Returns structured, interactive financial statement tables (Income, Balance, CashFlow, Ratios) across multiple periods (up to 40 quarters / 10 years)"""
     try:
         data = get_company_financial_statements(symbol=symbol, statement_type=statement_type, period=period, periods_count=periods_count)
         return JSONResponse(content={"status": "success", "data": data})

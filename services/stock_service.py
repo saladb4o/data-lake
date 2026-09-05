@@ -4971,12 +4971,97 @@ def _init_financial_models_cache():
 
 _init_financial_models_cache()
 
+def fetch_vndirect_raw_statements(symbol: str, report_type: str = "QUARTER", target_quarters: int = 40, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    """
+    Fetches raw financial statement line items from VNDIRECT Finfo API.
+    Ensures deep historical coverage (up to target_quarters, default 40 quarters / 10 full years).
+    Implements auto-pagination (size=10000), backoff retry, User-Agent, and L1/L2 caching.
+    """
+    symbol = symbol.upper().strip()
+    rep_type = report_type.upper().strip()
+    cache_key = f"vndirect_raw_v6_{symbol}_{rep_type}"
+    
+    # 1. Check L1 Memory Cache
+    if not force_refresh:
+        cached_raw = cache.get(cache_key)
+        if cached_raw and isinstance(cached_raw, list) and cached_raw:
+            cached_dates = set(it.get('fiscalDate') for it in cached_raw if it.get('fiscalDate'))
+            if len(cached_dates) >= target_quarters or len(cached_dates) >= 36:
+                return cached_raw
+
+        # 2. Check L2 Persistent Disk Lake
+        disk_key = f"{symbol}_{rep_type}"
+        try:
+            disk_data = disk_lake.read_json("vndirect_raw_statements.json").get(disk_key)
+            if disk_data and isinstance(disk_data, list) and disk_data:
+                disk_dates = set(it.get('fiscalDate') for it in disk_data if it.get('fiscalDate'))
+                if len(disk_dates) >= target_quarters or len(disk_dates) >= 36:
+                    cache.set(cache_key, disk_data, ttl_seconds=86400)
+                    return disk_data
+        except Exception as e:
+            logging.debug(f"Disk lake raw statement check skipped for {symbol}: {e}")
+
+    # 3. Fetch from VNDIRECT API with pagination
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://dchart.vndirect.com.vn/'
+    }
+    
+    raw_items = []
+    seen_keys = set()
+    distinct_dates = set()
+    page_size = 10000
+    max_pages = 4  # 4 * 10,000 = 40,000 items max
+    
+    for page in range(1, max_pages + 1):
+        url = f"https://api-finfo.vndirect.com.vn/v4/financial_statements?q=code:{symbol}~reportType:{rep_type}&size={page_size}&page={page}&sort=fiscalDate:desc"
+        batch = []
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, context=ssl_ctx, timeout=12.0) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+                    batch = data.get('data', [])
+                    break
+            except Exception as e:
+                if attempt == 0:
+                    time.sleep(0.4)
+                else:
+                    logging.warning(f"VNDIRECT Finfo fetch attempt {attempt+1} failed for {symbol} page {page}: {e}")
+                    
+        if not batch:
+            break
+            
+        for it in batch:
+            fdate = it.get('fiscalDate')
+            icode = it.get('itemCode')
+            mtype = it.get('modelType')
+            k = (fdate, icode, mtype)
+            if k not in seen_keys:
+                seen_keys.add(k)
+                raw_items.append(it)
+                if fdate:
+                    distinct_dates.add(fdate)
+                    
+        if len(distinct_dates) >= target_quarters or len(batch) < page_size:
+            break
+            
+    if raw_items:
+        cache.set(cache_key, raw_items, ttl_seconds=86400)
+        try:
+            executor.submit(disk_lake.save_symbol_record, "vndirect_raw_statements.json", f"{symbol}_{rep_type}", raw_items)
+        except Exception as e:
+            logging.error(f"Failed to persist raw statements to disk lake for {symbol}: {e}")
+            
+    return raw_items
+
 def get_company_financial_statements(symbol: str, statement_type: str = "income", period: str = "quarter", periods_count: Any = 8) -> Dict[str, Any]:
     """
     Retrieves and parses interactive financial statement data for a symbol:
     - statement_type: 'income' (KQKD), 'balance' (CĐKT), 'cashflow' (LCTT), 'ratios' (Chỉ số tài chính)
     - period: 'quarter' (Theo Quý) or 'year' (Theo Năm)
-    - periods_count: Number of periods to show (4, 8, 12, 16, or 'all' for complete history)
+    - periods_count: Number of periods to show (4, 8, 12, 16, 40, or 'all' for complete history)
     - Automatically adapts to 4 industry forms: Non-finance, Banking, Securities, Insurance
     """
     symbol = symbol.upper().strip()
@@ -4995,36 +5080,28 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
             p_slice = 8
             p_count_key = "8"
     
-    cache_key = f"company_financials_v5_{symbol}_{st_type}_{period_type}_{p_count_key}"
+    cache_key = f"company_financials_v6_{symbol}_{st_type}_{period_type}_{p_count_key}"
     cached = cache.get(cache_key)
-    if cached:
-        return cached
+    if cached and isinstance(cached, dict) and cached.get("rows"):
+        saved_p_len = len(cached.get("periods", []))
+        if (p_slice and saved_p_len >= p_slice) or (is_all and saved_p_len >= 36) or (saved_p_len >= 40):
+            return cached
 
     # Check L2 persistent disk lake
     disk_key = f"{symbol}_{st_type}_{period_type}_{p_count_key}"
     disk_saved = disk_lake.read_json("financial_statements.json").get(disk_key)
     if disk_saved and isinstance(disk_saved, dict) and disk_saved.get("rows"):
-        cache.set(cache_key, disk_saved, ttl_seconds=86400)
-        return disk_saved
+        saved_p_len = len(disk_saved.get("periods", []))
+        if (p_slice and saved_p_len >= p_slice) or (is_all and saved_p_len >= 36) or (saved_p_len >= 40):
+            cache.set(cache_key, disk_saved, ttl_seconds=86400)
+            return disk_saved
         
     _init_financial_models_cache()
     report_type = "QUARTER" if period_type == "quarter" else "ANNUAL"
+    target_depth = 60 if is_all else (max(40, p_slice) if report_type == "QUARTER" else 20)
     
-    # 1. Fetch raw data from VNDIRECT Finfo API with size=800 for full historical depth
-    url = f"https://api-finfo.vndirect.com.vn/v4/financial_statements?q=code:{symbol}~reportType:{report_type}&size=800&sort=fiscalDate:desc"
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': 'application/json, text/plain, */*'
-    }
-    
-    raw_items = []
-    try:
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, context=ssl_ctx, timeout=8.0) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            raw_items = data.get('data', [])
-    except Exception as e:
-        logging.error(f"Error fetching financial statements for {symbol}: {e}")
+    # 1. Fetch deep raw data from VNDIRECT Finfo API (up to 40+ quarters)
+    raw_items = fetch_vndirect_raw_statements(symbol, report_type=report_type, target_quarters=target_depth)
         
     if not raw_items:
         return {
@@ -5052,16 +5129,25 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
         else:
             period_labels.append(f"{parts[0]}")
             
-    # 3. Detect company form from itemCodes
-    code_set = set(int(it.get('itemCode', 0)) for it in raw_items if it.get('itemCode'))
-    form_scores = {"NON_FINANCE": 0, "BANK": 0, "SECURITIES": 0, "INSURANCE": 0}
-    for c in code_set:
-        for meta in _FINANCIAL_MODELS_BY_CODE.get(c, []):
-            cf = meta.get('companyForm')
-            if cf in form_scores:
-                form_scores[cf] += 1
-                
-    detected_form = max(form_scores, key=form_scores.get) if any(form_scores.values()) else "NON_FINANCE"
+    # 3. Detect company form from API modelTypes and itemCodes
+    raw_mts = set(float(it.get('modelType')) for it in raw_items if it.get('modelType'))
+    if raw_mts & {89.0, 90.0, 91.0, 201.0, 202.0, 203.0}:
+        detected_form = "SECURITIES"
+    elif raw_mts & {101.0, 102.0, 103.0, 111.0, 112.0, 113.0}:
+        detected_form = "BANK"
+    elif raw_mts & {411.0, 412.0, 413.0, 414.0, 420.0}:
+        detected_form = "INSURANCE"
+    elif raw_mts & {1.0, 2.0, 3.0, 11.0, 12.0, 13.0}:
+        detected_form = "NON_FINANCE"
+    else:
+        code_set = set(int(it.get('itemCode', 0)) for it in raw_items if it.get('itemCode'))
+        form_scores = {"NON_FINANCE": 0, "BANK": 0, "SECURITIES": 0, "INSURANCE": 0}
+        for c in code_set:
+            for meta in _FINANCIAL_MODELS_BY_CODE.get(c, []):
+                cf = meta.get('companyForm')
+                if cf in form_scores:
+                    form_scores[cf] += 1
+        detected_form = max(form_scores, key=form_scores.get) if any(form_scores.values()) else "NON_FINANCE"
     form_name_map = {
         "NON_FINANCE": "Doanh nghiệp Sản xuất / Thương mại / Dịch vụ",
         "BANK": "Ngân hàng Thương mại",
@@ -5172,6 +5258,13 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
                 inv = val_lookup.get(inventory_code, {}).get(d) or 0.0
                 int_exp = val_lookup.get(interest_exp_code, {}).get(d)
                 
+                # Rolling TTM profit for smooth annualization across quarterly history
+                if report_type == "QUARTER":
+                    ttm_profits = [val_lookup.get(net_profit_code, {}).get(distinct_dates[idx + k]) for k in range(4) if idx + k < len(distinct_dates) and val_lookup.get(net_profit_code, {}).get(distinct_dates[idx + k]) is not None]
+                    np_ttm = sum(ttm_profits) * (4.0 / len(ttm_profits)) if ttm_profits else (np_val * 4.0 if np_val else None)
+                else:
+                    np_ttm = np_val
+
                 if calc_type == "gross_margin":
                     cogs = val_lookup.get(cogs_code, {}).get(d)
                     if rev and rev > 0:
@@ -5185,13 +5278,11 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
                     if rev and np_val and rev > 0:
                         val_str = f"{(np_val / rev * 100):.1f}%"
                 elif calc_type == "roa":
-                    if np_val and ast and ast > 0:
-                        mult = 4.0 if report_type == "QUARTER" else 1.0
-                        val_str = f"{(np_val * mult / ast * 100):.1f}%"
+                    if np_ttm and ast and ast > 0:
+                        val_str = f"{(np_ttm / ast * 100):.1f}%"
                 elif calc_type == "roe":
-                    if np_val and eq and eq > 0:
-                        mult = 4.0 if report_type == "QUARTER" else 1.0
-                        val_str = f"{(np_val * mult / eq * 100):.1f}%"
+                    if np_ttm and eq and eq > 0:
+                        val_str = f"{(np_ttm / eq * 100):.1f}%"
                 elif calc_type == "de":
                     if debt and eq and eq > 0:
                         val_str = f"{(debt / eq):.2f}"
@@ -5211,10 +5302,9 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
                     if np_val and int_exp and int_exp > 0:
                         val_str = f"{((np_val * 1.25 + int_exp) / int_exp):.1f}"
                 elif calc_type == "eps":
-                    if np_val and eq and eq > 0:
-                        # Estimate shares or use master info
+                    if np_ttm and eq and eq > 0:
                         est_shares = (eq / latest_market_price) * 1.5 if latest_market_price > 0 else 1e8
-                        eps_val = (np_val * 4.0 / est_shares) if report_type == "QUARTER" else (np_val / est_shares)
+                        eps_val = np_ttm / est_shares
                         val_str = f"{max(500, int(eps_val)):,}"
                 elif calc_type == "bvps":
                     if eq and eq > 0:
@@ -5222,9 +5312,9 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
                         bvps_val = eq / est_shares
                         val_str = f"{int(bvps_val):,}"
                 elif calc_type == "pe":
-                    if np_val and eq and eq > 0 and latest_market_price > 0:
+                    if np_ttm and eq and eq > 0 and latest_market_price > 0:
                         est_shares = (eq / latest_market_price) * 1.5
-                        eps_val = (np_val * 4.0 / est_shares) if report_type == "QUARTER" else (np_val / est_shares)
+                        eps_val = np_ttm / est_shares
                         if eps_val > 0:
                             pe_val = latest_market_price / eps_val
                             val_str = f"{pe_val:.1f}"
@@ -5323,7 +5413,11 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
                     row_vals.append("--")
 
             growth_yoy = None
-            if len(raw_vals) >= 2 and raw_vals[0] is not None and raw_vals[1] is not None and raw_vals[1] != 0:
+            step = 4 if report_type == "QUARTER" else 1
+            if len(raw_vals) > step and raw_vals[0] is not None and raw_vals[step] is not None and raw_vals[step] != 0:
+                pct = (raw_vals[0] - raw_vals[step]) / abs(raw_vals[step]) * 100
+                growth_yoy = f"{'+' if pct > 0 else ''}{pct:.1f}%"
+            elif len(raw_vals) >= 2 and report_type != "QUARTER" and raw_vals[0] is not None and raw_vals[1] is not None and raw_vals[1] != 0:
                 pct = (raw_vals[0] - raw_vals[1]) / abs(raw_vals[1]) * 100
                 growth_yoy = f"{'+' if pct > 0 else ''}{pct:.1f}%"
 
