@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--output-dir", type=str, default="./output", help="Directory to save shard output")
     parser.add_argument("--symbols-file", type=str, default="", help="Optional JSON path to all_symbols")
     parser.add_argument("--max-bctc", type=int, default=4, help="Max BCTC PDFs per symbol")
+    parser.add_argument("--crawl-10y-annual", action="store_true", default=False, help="Deep scan and parse 10 years of Audited Annual BCTC PDFs")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -102,7 +103,11 @@ def main():
         # 1. BCTC & Sector Footnotes Processing
         if sym not in shard_data:
             try:
-                res = processor.process_single_company(symbol=sym, max_reports=args.max_bctc)
+                res = processor.process_single_company(
+                    symbol=sym,
+                    max_reports=args.max_bctc,
+                    fetch_10y_annual=args.crawl_10y_annual
+                )
                 shard_data[sym] = {
                     "symbol": sym,
                     "periods": res.get("results", []),

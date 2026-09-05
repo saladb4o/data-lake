@@ -7,6 +7,10 @@ on:
         description: 'Số quý BCTC mỗi mã (mặc định 8 quý = 2 năm)'
         required: false
         default: '8'
+      crawl_10y_annual:
+        description: 'Cào quét sâu 10 năm BCTC Kiểm toán từ PDF (true/false)'
+        required: false
+        default: 'true'
   schedule:
     # Chạy tự động vào 01:00 sáng Chủ Nhật hàng tuần (Giờ VN = 18:00 UTC Thứ 7)
     - cron: '0 18 * * 6'
@@ -44,7 +48,8 @@ jobs:
             --worker-id ${{ matrix.worker_id }} \
             --total-workers 20 \
             --output-dir ./output \
-            --max-bctc ${{ github.event.inputs.max_bctc || 8 }}
+            --max-bctc ${{ github.event.inputs.max_bctc || 8 }} \
+            ${{ (github.event.inputs.crawl_10y_annual == 'false') && '' || '--crawl-10y-annual' }}
 
       - name: Upload Shard Artifact
         uses: actions/upload-artifact@v4

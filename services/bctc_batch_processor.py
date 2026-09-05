@@ -19,7 +19,12 @@ import urllib.request
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from services.stock_service import get_company_reports, resolve_data_file
+from services.stock_service import (
+    get_company_reports,
+    resolve_data_file,
+    fetch_single_detail_pdf,
+    _fetch_cafef_single_page_raw
+)
 from services.bctc_pdf_parser import BCTCPdfParser
 
 logger = logging.getLogger(__name__)
@@ -196,20 +201,151 @@ class BCTCBatchProcessor:
 
         return None
 
+    def discover_10y_annual_reports(
+        self,
+        symbol: str,
+        max_pages: int = 70,
+        target_years: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Scans historical disclosures across multiple CafeF pages concurrently to discover
+        authoritative Audited Annual Financial Reports (BCTC Kiểm toán năm) spanning up to 10 years.
+
+        Leverages the 2-year dual reporting principle:
+        Each audited annual report contains both Current Year (Năm nay) and Previous Year (Năm trước),
+        allowing 5-10 annual reports to comprehensively reconstruct 10-12 full fiscal years.
+        """
+        symbol = symbol.upper().strip()
+        logger.info(f"Scanning up to {max_pages} pages for {symbol} 10-year audited annual reports...")
+
+        with ThreadPoolExecutor(max_workers=25) as ex:
+            futures = [ex.submit(_fetch_cafef_single_page_raw, symbol, p) for p in range(1, max_pages + 1)]
+            pages = [f.result() for f in futures]
+
+        all_items = [it for p in pages for it in p]
+        if not all_items:
+            return []
+
+        # Filter candidate annual audited BCTC filings
+        # Preference: Consolidated (Hợp nhất) > Separate (Công ty mẹ / Riêng)
+        candidate_map: Dict[str, List[Dict[str, Any]]] = {}
+
+        for item in all_items:
+            title = item.get("title", "")
+            t_low = title.lower()
+
+            is_bctc = any(kw in t_low for kw in [
+                "báo cáo tài chính", "bctc", "kết quả kinh doanh", "bảng cân đối", "kiểm toán", "báo cáo kt"
+            ])
+            if not is_bctc:
+                continue
+
+            # Must be annual or audited, avoid purely quarterly / 6M interim if possible
+            is_annual = ("năm" in t_low or "cả năm" in t_low) and not any(kw in t_low for kw in [
+                "quý 1", "quý i", "quý 2", "quý ii", "quý 3", "quý iii", "quý 4", "quý iv",
+                "quý i/", "quý ii/", "quý iii/", "quý iv/", "bán niên", "6 tháng"
+            ])
+            is_audited = ("kiểm toán" in t_low) or (item.get("audit_badge") is not None)
+
+            if not (is_annual or is_audited):
+                continue
+
+            # Extract 4-digit fiscal year from title or date
+            y_m = re.search(r'(?:năm|kt|bctc)\s*(201[4-9]|202[0-9])', t_low)
+            if not y_m:
+                y_m = re.search(r'\b(201[4-9]|202[0-9])\b', t_low)
+            if not y_m and item.get("year") and str(item.get("year")).isdigit():
+                y_val = str(item.get("year"))
+            elif y_m:
+                y_val = y_m.group(1)
+            else:
+                continue
+
+            # Scoring preference for annual report quality
+            score = 0
+            if "kiểm toán" in t_low:
+                score += 20
+            if "hợp nhất" in t_low:
+                score += 15
+            elif "công ty mẹ" in t_low or "riêng" in t_low:
+                score += 5
+            if "báo cáo tài chính" in t_low or "bctc" in t_low:
+                score += 10
+            if "giải trình" in t_low:
+                score -= 5
+            if "nghị quyết" in t_low:
+                score -= 8
+
+            item_copy = dict(item)
+            item_copy["fiscal_year"] = y_val
+            item_copy["candidate_score"] = score
+
+            if y_val not in candidate_map:
+                candidate_map[y_val] = []
+            candidate_map[y_val].append(item_copy)
+
+        chosen_filings: List[Dict[str, Any]] = []
+        for y in sorted(candidate_map.keys(), reverse=True)[:target_years]:
+            filings_sorted = sorted(candidate_map[y], key=lambda x: x["candidate_score"], reverse=True)
+            chosen_filings.append(filings_sorted[0])
+
+        # Resolve direct PDF download links concurrently
+        with ThreadPoolExecutor(max_workers=10) as ex:
+            pdf_futures = {ex.submit(fetch_single_detail_pdf, f["detail_url"]): f for f in chosen_filings}
+            for fut in as_completed(pdf_futures):
+                filing = pdf_futures[fut]
+                try:
+                    pdf_url = fut.result()
+                    filing["pdf_url"] = pdf_url
+                    filing["has_pdf"] = bool(pdf_url)
+                except Exception:
+                    filing["pdf_url"] = ""
+                    filing["has_pdf"] = False
+
+        valid_reports = [f for f in chosen_filings if f.get("pdf_url")]
+        logger.info(f"Discovered {len(valid_reports)} annual audited BCTC PDFs for {symbol}")
+        return valid_reports
+
     def process_single_company(
         self,
         symbol: str,
         year: str = "all",
-        max_reports: int = 5
+        max_reports: int = 5,
+        fetch_10y_annual: bool = False
     ) -> Dict[str, Any]:
         """
         Retrieves company disclosures, downloads available BCTC PDFs, and parses them.
+        When fetch_10y_annual=True, deep scans historical CafeF disclosures to discover and parse
+        Audited Annual Reports spanning 10-12 continuous fiscal years.
         """
         symbol = symbol.upper().strip()
+        reports = []
+
+        # 1. Fetch historical 10-year Audited Annual Reports if requested
+        if fetch_10y_annual:
+            try:
+                annual_reps = self.discover_10y_annual_reports(symbol=symbol, max_pages=70, target_years=10)
+                reports.extend(annual_reps)
+            except Exception as e:
+                logger.warning(f"Error discovering 10y annual reports for {symbol}: {e}")
+
+        # 2. Fetch standard recent quarterly filings (for latest TTM / quarterly resolution)
         reports_meta = get_company_reports(symbol=symbol, report_type="bctc", fetch_pdf=True, page=1, page_size=max_reports, year=year)
-        reports = reports_meta.get("reports", []) or reports_meta.get("data", {}).get("reports", [])
-        if not reports and "reports_all" in reports_meta:
-            reports = reports_meta["reports_all"][:max_reports]
+        recent_reports = reports_meta.get("reports", []) or reports_meta.get("data", {}).get("reports", [])
+        if not recent_reports and "reports_all" in reports_meta:
+            recent_reports = reports_meta["reports_all"][:max_reports]
+
+        reports.extend(recent_reports)
+
+        # Deduplicate reports
+        seen_keys = set()
+        deduped_reports = []
+        for r in reports:
+            k = r.get("pdf_url") or r.get("detail_url") or r.get("title")
+            if k and k not in seen_keys:
+                seen_keys.add(k)
+                deduped_reports.append(r)
+        reports = deduped_reports
 
         lake = _get_lake_data()
         results = []
@@ -219,13 +355,13 @@ class BCTCBatchProcessor:
             if not pdf_url:
                 continue
 
-            doc_id = f"{symbol}_{rep.get('year', '2024')}_{abs(hash(rep.get('title', '')))}"
+            doc_id = f"{symbol}_{rep.get('fiscal_year') or rep.get('year', '2024')}_{abs(hash(rep.get('title', '')))}"
             # Check if already processed in lake
             if doc_id in lake:
                 results.append(lake[doc_id])
                 continue
 
-            prefix = f"{rep.get('year', '2024')}_{doc_id[:16]}"
+            prefix = f"{rep.get('fiscal_year') or rep.get('year', '2024')}_{doc_id[:16]}"
             local_pdf = self.download_report_pdf(symbol, pdf_url, prefix)
             if not local_pdf:
                 continue
@@ -238,13 +374,13 @@ class BCTCBatchProcessor:
                     "doc_id": doc_id,
                     "symbol": symbol,
                     "title": rep.get("title", ""),
-                    "year": p_info.get("year") or rep.get("year", ""),
+                    "year": p_info.get("year") or rep.get("fiscal_year") or rep.get("year", ""),
                     "quarter": p_info.get("quarter"),
                     "period_type": p_info.get("period_type", "unknown"),
                     "period_label": p_info.get("period_label", ""),
                     "filing_date": rep.get("date", ""),
                     "filing_timestamp": rep.get("timestamp", 0),
-                    "is_audited": p_info.get("is_audited", False) or (rep.get("audit_badge") is not None),
+                    "is_audited": p_info.get("is_audited", False) or (rep.get("audit_badge") is not None) or ("kiểm toán" in rep.get("title", "").lower()),
                     "pdf_url": pdf_url,
                     "local_path": local_pdf,
                     "extracted_data": extracted,
