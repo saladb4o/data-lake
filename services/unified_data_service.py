@@ -1411,7 +1411,7 @@ def normalize_stock_data(
     yf_data: Optional[Dict[str, Any]] = None,
     vndirect_data: Optional[Dict[str, Any]] = None,
     source0_data: Optional[Dict[str, Any]] = None,
-    enable_source0_fallback: bool = False
+    enable_source0_fallback: bool = True
 ) -> Dict[str, Any]:
     """
     Merges and normalizes stock metrics from multiple sources (TradingView, VNDIRECT, TCBS, Yahoo, PDF Lake)

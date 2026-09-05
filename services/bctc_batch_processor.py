@@ -659,7 +659,7 @@ def extract_records_from_lake(lake: Dict[str, Any], symbol: str, key_field: str 
     return results
 
 
-def get_stock_forensic_dossier(symbol: str) -> Dict[str, Any]:
+def get_stock_forensic_dossier(symbol: str, enable_ondemand: bool = True) -> Dict[str, Any]:
     """
     Assembles a unified Forensic Intelligence Dossier for a stock symbol:
       1. Accounting Integrity Score (0 - 100) & Qualitative Rating
@@ -686,14 +686,15 @@ def get_stock_forensic_dossier(symbol: str) -> Dict[str, Any]:
     lake = _get_lake_data()
     corp_lake = _get_corporate_actions_lake()
 
+    def _bctc_sort(r):
+        y = int(r.get("year") or 0) if str(r.get("year", "")).isdigit() else 0
+        q = r.get("quarter") or 0
+        ts = r.get("filing_timestamp") or 0
+        return (y, q, ts)
+
     matching_bctc = extract_records_from_lake(lake, symbol_clean, key_field="periods")
     latest_bctc = None
     if matching_bctc:
-        def _bctc_sort(r):
-            y = int(r.get("year") or 0) if str(r.get("year", "")).isdigit() else 0
-            q = r.get("quarter") or 0
-            ts = r.get("filing_timestamp") or 0
-            return (y, q, ts)
         matching_bctc.sort(key=_bctc_sort, reverse=True)
         latest_bctc = matching_bctc[0]
 
@@ -702,6 +703,38 @@ def get_stock_forensic_dossier(symbol: str) -> Dict[str, Any]:
     if matching_corp:
         matching_corp.sort(key=lambda r: r.get("filing_timestamp", 0), reverse=True)
         latest_corp = matching_corp[0]
+
+    # On-demand Fallback: If BCTC or Corporate Governance (TT96) is missing in lake,
+    # automatically fetch and parse the latest filings directly on-demand!
+    if enable_ondemand and not os.environ.get("PYTEST_CURRENT_TEST"):
+        if not matching_bctc or not matching_corp:
+            try:
+                batch_processor = BCTCBatchProcessor()
+                if not matching_bctc:
+                    logger.info(f"On-demand fetching latest BCTC for {symbol_clean}...")
+                    bctc_res = batch_processor.process_single_company(symbol=symbol_clean, max_reports=2, fetch_10y_annual=False)
+                    if bctc_res.get("reports_processed", 0) > 0:
+                        lake = _get_lake_data()
+                        matching_bctc = extract_records_from_lake(lake, symbol_clean, key_field="periods")
+                        if matching_bctc:
+                            matching_bctc.sort(key=_bctc_sort, reverse=True)
+                            latest_bctc = matching_bctc[0]
+
+                if not matching_corp:
+                    logger.info(f"On-demand fetching latest Governance/AGM disclosure for {symbol_clean}...")
+                    corp_res = batch_processor.process_corporate_disclosures(
+                        symbol=symbol_clean,
+                        report_types=["governance", "resolution"],
+                        limit_per_type=1
+                    )
+                    if corp_res.get("disclosures_processed", 0) > 0 or len(corp_res.get("results", [])) > 0:
+                        corp_lake = _get_corporate_actions_lake()
+                        matching_corp = extract_records_from_lake(corp_lake, symbol_clean, key_field="records")
+                        if matching_corp:
+                            matching_corp.sort(key=lambda r: r.get("filing_timestamp", 0), reverse=True)
+                            latest_corp = matching_corp[0]
+            except Exception as err:
+                logger.warning(f"On-demand fallback fetch for {symbol_clean} skipped: {err}")
 
     ext_bctc = (latest_bctc or {}).get("extracted_data", {})
     ext_corp = (latest_corp or {}).get("extracted_data", {})
