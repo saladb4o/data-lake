@@ -551,7 +551,7 @@ def calculate_source0_ttm(symbol: str, lake_data: Optional[Dict[str, Any]] = Non
     symbol_clean = symbol.upper().strip()
     lake = lake_data if lake_data is not None else _get_lake_data()
 
-    matching = [r for r in lake.values() if r.get("symbol") == symbol_clean]
+    matching = extract_records_from_lake(lake, symbol_clean, key_field="periods")
     if not matching:
         return None
 
