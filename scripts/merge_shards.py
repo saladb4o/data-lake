@@ -37,9 +37,24 @@ def merge_shards(input_dir: str, output_file: str, base_lake_file: str = "") -> 
                             sdata = json.load(f)
                         if isinstance(sdata, dict):
                             for sym, sinfo in sdata.items():
-                                existing_p = len(merged_data.get(sym, {}).get("periods", []))
-                                new_p = len(sinfo.get("periods", []))
-                                if sym not in merged_data or new_p >= existing_p:
+                                existing_entry = merged_data.get(sym, {})
+                                existing_periods = existing_entry.get("periods", [])
+                                new_periods = sinfo.get("periods", [])
+
+                                # Calculate quality score: real balance sheet items + footnotes
+                                existing_score = sum(
+                                    len(p.get("extracted_data", {}).get("balance_sheet", {}).get("items", {})) +
+                                    len(p.get("extracted_data", {}).get("footnotes", {}).get("debt_facilities", []))
+                                    for p in existing_periods
+                                ) if isinstance(existing_entry, dict) else 0
+
+                                new_score = sum(
+                                    len(p.get("extracted_data", {}).get("balance_sheet", {}).get("items", {})) +
+                                    len(p.get("extracted_data", {}).get("footnotes", {}).get("debt_facilities", []))
+                                    for p in new_periods
+                                )
+
+                                if sym not in merged_data or new_score > existing_score or (new_score == existing_score and len(new_periods) >= len(existing_periods)):
                                     merged_data[sym] = sinfo
                             shard_count += 1
                             print(f"  ✅ Merged {fname} ({len(sdata)} symbols)")

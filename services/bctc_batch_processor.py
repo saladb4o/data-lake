@@ -37,7 +37,10 @@ logger = logging.getLogger(__name__)
 BCTC_NEGATIVE_KEYWORDS = [
     "giải trình", "chênh lệch", "biến động", "đính chính", "nghị quyết",
     "thông báo", "công văn", "cbtt", "biên bản", "tờ trình", "thư mời",
-    "quyết định", "điều lệ", "thay đổi nhân sự", "bổ nhiệm", "miễn nhiệm"
+    "quyết định", "điều lệ", "thay đổi nhân sự", "bổ nhiệm", "miễn nhiệm",
+    "ký hợp đồng", "hop dong kiem toan", "hợp đồng kiểm toán", "đơn vị kiểm toán",
+    "lựa chọn kiểm toán", "lựa chọn công ty kiểm toán", "đơn xin thôi", "đơn nghỉ việc",
+    "kết quả giao dịch", "đăng ký giao dịch", "thay đổi sở hữu"
 ]
 
 PDF_LAKE_DIR = os.path.join(os.path.dirname(resolve_data_file("screener_snapshot.json")), "pdf_lake")

@@ -3148,10 +3148,27 @@ def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
     # 2. From extracted_bctc_lake.json
     try:
         bctc_lake = _get_lake_data()
+        all_docs = []
+        if symbol_clean in bctc_lake and isinstance(bctc_lake[symbol_clean], dict):
+            sym_entry = bctc_lake[symbol_clean]
+            if "periods" in sym_entry and isinstance(sym_entry["periods"], list):
+                all_docs.extend(sym_entry["periods"])
+            else:
+                all_docs.append(sym_entry)
         for doc_id, doc in bctc_lake.items():
+            if doc_id == symbol_clean:
+                continue
+            if isinstance(doc, dict) and (doc.get("symbol") or doc.get("ticker") or "").upper().strip() == symbol_clean:
+                if "periods" in doc and isinstance(doc["periods"], list):
+                    all_docs.extend(doc["periods"])
+                else:
+                    all_docs.append(doc)
+
+        for doc in all_docs:
             if not isinstance(doc, dict):
                 continue
-            if (doc.get("symbol") or doc.get("ticker") or "").upper().strip() == symbol_clean:
+            doc_id = doc.get("doc_id") or ""
+            if True:
                 title = doc.get("title") or f"{symbol_clean} Báo cáo tài chính"
                 if not title.lower().startswith(symbol_clean.lower()) and "bctc" not in title.lower():
                     title = f"{symbol_clean}: Báo cáo tài chính {doc.get('period_label') or doc.get('year') or ''}"
