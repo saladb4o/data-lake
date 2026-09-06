@@ -438,6 +438,11 @@ class InputResolver:
     #: from other reported lines, 1 = sector-median stand-in, 0 = fabricated.
     #: Tier 2 is a definitional derivation from real inputs, so it counts as
     #: evidence; tiers 0 and 1 carry no company-specific information.
+    #:
+    #: The cut sits between 1 and 2 deliberately. Refusing tier 2 as well would
+    #: blank out every company whose equity came from assets minus liabilities
+    #: rather than from an explicit equity line - a bookkeeping identity, not a
+    #: guess - and that is a large share of a real universe.
     MIN_TRUSTED_UPSTREAM_TIER = 2
 
     def __init__(self, data: Dict[str, Any]):
@@ -457,10 +462,18 @@ class InputResolver:
         numbers still resolves to REAL exactly as before.
         """
         for key in keys:
-            if self._upstream_imputed.get(key) is True:
-                return True
+            # The tier is the finer signal and wins wherever it exists. The
+            # boolean is coarser by design - upstream builds it as `tier < 3`,
+            # which lumps tier 2 (an identity like assets - liabilities, from
+            # reported lines) in with tier 1 sector stand-ins. Reading the
+            # boolean first would refuse to value every triangulated balance
+            # sheet in the universe, which is most of them.
             tier = self._upstream_tiers.get(key)
-            if isinstance(tier, (int, float)) and tier < self.MIN_TRUSTED_UPSTREAM_TIER:
+            if isinstance(tier, (int, float)) and not isinstance(tier, bool):
+                if tier < self.MIN_TRUSTED_UPSTREAM_TIER:
+                    return True
+                continue
+            if self._upstream_imputed.get(key) is True:
                 return True
         return False
 

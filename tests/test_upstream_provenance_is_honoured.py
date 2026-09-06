@@ -180,3 +180,59 @@ def test_real_filings_still_value_normally():
     data["is_imputed"] = {k: False for k in RECONSTRUCTED_KEYS}
     models = engine.calculate_all_models("TEST", data)
     assert [m for m in models if m.active], "reported filings were refused"
+
+
+# --------------------------------------------------------------------------
+# Calibration: the gate must refuse reconstruction without blanking the app
+# --------------------------------------------------------------------------
+
+def test_tier_wins_over_the_coarser_boolean():
+    """upstream builds is_imputed as `tier < 3`, which lumps tier 2 in with 1.
+
+    Reading the boolean first would refuse every balance sheet whose equity
+    came from assets minus liabilities - a bookkeeping identity, not a guess -
+    and that is a large share of a real universe. The tier is the finer signal
+    and wins wherever it exists.
+    """
+    payload = {
+        "eps": 2500.0,
+        "field_provenance": {"eps": 2},
+        "is_imputed": {"eps": True},   # exactly what the module emits for tier 2
+    }
+    r = InputResolver(payload)
+    r.resolve("eps", ("eps",))
+    assert r.provenance["eps"] == REAL
+
+
+def test_boolean_still_applies_when_no_tier_is_given():
+    payload = {"eps": 2500.0, "is_imputed": {"eps": True}}
+    r = InputResolver(payload)
+    r.resolve("eps", ("eps",))
+    assert r.provenance["eps"] == IMPUTED
+
+
+def _valued_at(tier: int) -> int:
+    """Active model count for a payload whose every field carries `tier`."""
+    engine = ValuationEngine()
+    data = _payload(40_000.0, flagged=False)
+    fields = [k for k in data if k not in ("symbol", "sector_code")]
+    data["field_provenance"] = {k: tier for k in fields}
+    data["is_imputed"] = {k: tier < 3 for k in fields}
+    return len([m for m in engine.calculate_all_models("TEST", data) if m.active])
+
+
+@pytest.mark.parametrize("tier", [4, 3, 2])
+def test_evidence_grade_data_is_still_valued(tier):
+    """The gate must not blank out a universe built from real filings."""
+    assert _valued_at(tier) > 0, f"tier {tier} produced no valuation at all"
+
+
+@pytest.mark.parametrize("tier", [1, 0])
+def test_reconstructed_data_is_refused(tier):
+    assert _valued_at(tier) == 0, f"tier {tier} was valued despite being invented"
+
+
+def test_the_cut_sits_between_one_and_two():
+    """Pins the boundary itself, so moving it has to be deliberate."""
+    assert InputResolver.MIN_TRUSTED_UPSTREAM_TIER == 2
+    assert _valued_at(2) > 0 and _valued_at(1) == 0

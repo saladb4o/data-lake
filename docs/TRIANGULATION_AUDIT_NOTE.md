@@ -315,3 +315,59 @@ with `total_trades`, which sits beside it. `profit_factor`, Calmar, Sharpe,
 Sortino, the payoff ratio and walk-forward efficiency are all withheld (None)
 when undefined, and `static/js/app.js` renders that as "n/a" rather than the
 string "null".
+
+
+## 7. Does the app go blank?
+
+A fair question after four passes of removing fabricated numbers: if most of
+what filled the screens was invented, is anything left?
+
+### 7.1 One miscalibration, found by asking
+
+The section-6 gate refused any field the upstream layer called imputed. But
+`unified_data_service` builds that boolean as `tier < 3`, which lumps tier 2
+in with tier 1 - and tier 2 is a bookkeeping identity from reported lines
+(`equity = assets - liabilities`), not a guess. Reading the boolean first
+would have refused every triangulated balance sheet in the universe.
+
+The tier is the finer signal and now wins wherever it exists; the boolean
+applies only when no tier is given. The cut sits between 1 and 2, and
+`test_the_cut_sits_between_one_and_two` pins it so moving it has to be
+deliberate.
+
+| driver tier | meaning | valued? |
+|---|---|---|
+| 4 | audited primary filing | yes |
+| 3 | vendor reported | yes |
+| 2 | triangulated from reported lines | yes |
+| 1 | sector-median stand-in, from market cap | no |
+| 0 | fabricated | no |
+
+### 7.2 Five of 22 models is a full house, not a failure
+
+On a payload with perfect audited inputs, 5 of the 22 models are active. That
+is by design and predates this work: `SECTOR_MODEL_MAP` allows only 5-6 models
+per sector, because a REIT RNAV model has nothing to say about a bank. Of the
+17 inactive, 10 are BYPASSED as not applicable to the sector and 7 are
+INSUFFICIENT_DATA for drivers a real filing would carry but a synthetic payload
+does not (`rwa` for banks, `landbank` for REITs, `roic`, `invested_capital`).
+
+### 7.3 Measure it on your own data
+
+`scripts/audit_valuation_coverage.py` reads your screener snapshot - no
+network, no writes - and reports the tier distribution, how many symbols the
+engine can value, and which drivers block the rest.
+
+```
+python scripts/audit_valuation_coverage.py
+python scripts/audit_valuation_coverage.py --json coverage.json
+```
+
+Against a mixed universe (5% tier 4, 25% tier 3, 30% tier 2, 35% tier 1, 5%
+tier 0) it reports 60% valued and 40% refused, and names the blocking driver
+for every refusal.
+
+If that report says most of your universe is tier 1, the honest reading is
+that the fundamentals really were reconstructed from price. Loosening the gate
+would not create the missing information, only hide its absence - the fix is
+`scripts/build_historical_fundamentals.py` and the BCTC lake (open items 1-3).
