@@ -438,3 +438,89 @@ and `scripts/calibrate_sector_weight_priors.py`. Nothing in the live screener
 path reads it. Running it will not change live valuation coverage, and the
 closing advice in `scripts/audit_valuation_coverage.py` has been corrected to
 say so.
+
+## 9. The same break, one layer down
+
+Section 8 fixed `reconstruct_financial_triangles()`. It was not enough, and the
+way that became visible is worth recording.
+
+An audit run on the real 1,526-symbol universe, with a freshly synced snapshot
+written by the fixed code, still reported every symbol blocked by the same five
+drivers and `no provenance metadata: 1526 (100.0%)`. The triangles were
+publishing the lines; something downstream was dropping them again.
+
+`normalize_stock_data()` builds the record that becomes the snapshot. It
+assembled that record from a hand-written list of ratio keys — `pe`, `pb`,
+`roe`, `de_ratio` and so on — and put `field_provenance` and `is_imputed` inside
+a `"_metadata"` sub-dict. `InputResolver` reads `data["field_provenance"]` at
+the top level, and looks up `debt`, `cash`, `ebit`, `equity` at the top level.
+Neither was there. The identical defect, at the next layer, for the identical
+reason: a hand-maintained key list that nobody updates when an upstream field
+appears.
+
+The record now copies whatever the triangles published, by iterating a tuple of
+line names rather than restating each one, and hoists provenance to the top
+level. The `_metadata` copies stay for existing consumers.
+
+### The unit trap this exposed
+
+`market_cap` in the record is in **billions** — it is a display field, read by
+the screener front end. The engine works in raw VND: it derives market cap as
+`price * shares`. Simply making the engine see the record's `market_cap` would
+have understated every enterprise-value model by a factor of 1e9, silently, with
+no error and no NaN — just fair values that are wrong in a way that looks
+plausible on a chart.
+
+The record now publishes `market_cap_vnd` alongside it, tiered identically, and
+the engine reads that key first. One key, one unit.
+`tests/test_absolute_lines_reach_the_engine.py::
+test_market_cap_units_are_not_overloaded` pins both the 1e9 relationship and the
+agreement with `price * shares`.
+
+### Measured
+
+Through the real path (`normalize_stock_data` -> `ValuationEngine`), a fully
+reported payload in sector VNMAT: **1 active model -> 6 of 22**. VNMAT allows
+exactly 6 by design, so that is a full house. A record built from nothing but a
+price still yields 0 models and a composite of 0.0 at every price tested.
+
+### The ceiling, finally measured
+
+The open question from section 8 — how much the vendor feed actually returns —
+now has an answer, measured across all 1,526 listed symbols:
+
+| field | symbols | % universe |
+|---|---|---|
+| `total_assets_fq` | 803 | 52.6% |
+| `total_liabilities_fq` | 803 | 52.6% |
+| `total_debt_fq` | 801 | 52.5% |
+| `diluted_shares_outstanding_fq` | 792 | 51.9% |
+| `cash_n_short_term_invest_fq` | 767 | 50.3% |
+| `total_revenue_ttm` | 758 | 49.7% |
+| `net_income_ttm` | 758 | 49.7% |
+| `cash_f_operating_activities_ttm` | 752 | 49.3% |
+| `ebit_ttm` | 725 | 47.5% |
+| `ebitda_ttm` | 695 | 45.5% |
+| `capital_expenditures_ttm` | 677 | 44.4% |
+
+Roughly half the market has a balance sheet in the feed and half does not. That
+is the real ceiling on valuation coverage, and no change to this codebase can
+raise it. The honest reading is not "half the app is empty": it is that half the
+universe can be valued from evidence and the other half now says so, where
+before it returned a number that was a fixed multiple of its own price.
+
+Note that per-field coverage is an upper bound per field, not for the set. A
+model needs several drivers at once, so the symbols with all of `debt`, `cash`,
+`ebit` and `shares` together are fewer than 801.
+
+### Not a code defect: the path-resolution tests
+
+The same audit run reported five failures in
+`tests/test_path_resolution_is_lazy.py` that do not reproduce in CI.
+`resolve_data_file()` falls back to a hardcoded `"G:/My Drive/vnstock_data"`
+when `GOOGLE_DRIVE_DATA_DIR` is unset, and prefers it when it exists, so on a
+machine with the Drive actually mounted those tests asserted against the real
+data lake instead of `tmp_path`. Unsetting the variable does not help - it has
+to point at a path that does not exist. An autouse fixture now does that.
+Reproduced with a simulated mount (4 failures), fixed, and verified green both
+with and without one.

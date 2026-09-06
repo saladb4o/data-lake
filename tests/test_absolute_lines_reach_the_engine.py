@@ -137,3 +137,83 @@ def test_ebit_is_not_back_solved_from_a_sector_margin():
         "ebit was invented from revenue times a sector margin and published "
         "as if it were trustworthy"
     )
+
+
+# ---------------------------------------------------------------------------
+# The second layer.
+#
+# reconstruct_financial_triangles() publishing the lines is not enough:
+# normalize_stock_data() builds the screener record, and it used to rebuild it
+# from a hand-written list of ratio keys and bury the provenance inside
+# "_metadata". Both were dropped a second time, one layer further down. These
+# tests pin the record the snapshot is actually written from.
+# ---------------------------------------------------------------------------
+
+from services.unified_data_service import normalize_stock_data
+
+
+def reported_record_via_normalize():
+    tv = dict(reported_payload(), market_cap_basic=145.369e12)
+    return normalize_stock_data(
+        "TEST", "HOSE", "Test", "VNMAT", "Vat lieu",
+        tv_data=tv, enable_source0_fallback=False,
+    )
+
+
+@pytest.fixture(scope="module")
+def screener_record():
+    return reported_record_via_normalize()
+
+
+def test_provenance_is_at_the_top_level(screener_record):
+    # InputResolver reads data["field_provenance"], not data["_metadata"].
+    assert isinstance(screener_record.get("field_provenance"), dict)
+    assert isinstance(screener_record.get("is_imputed"), dict)
+
+
+@pytest.mark.parametrize("line", sorted(set(LINE_TO_WITNESS) | {"shares_out"}))
+def test_screener_record_carries_the_line(screener_record, line):
+    assert line in screener_record, (
+        f"{line!r} survives reconstruct_financial_triangles() but is dropped "
+        f"again by normalize_stock_data()"
+    )
+    assert screener_record["field_provenance"].get(line) is not None
+
+
+def test_market_cap_units_are_not_overloaded(screener_record):
+    """The record publishes market cap twice, in two units, on purpose.
+
+    "market_cap" is billions and feeds the screener UI. The engine works in
+    raw VND. Reading the billions figure as VND understates every
+    enterprise-value model by 1e9 and raises nothing.
+    """
+    assert screener_record["market_cap_vnd"] == pytest.approx(
+        screener_record["market_cap"] * 1e9
+    )
+    assert screener_record["field_provenance"].get("market_cap_vnd") is not None
+    engine_mcap = screener_record["price"] * screener_record["shares_out"]
+    assert screener_record["market_cap_vnd"] == pytest.approx(engine_mcap, rel=0.02)
+
+
+def test_screener_record_unlocks_its_sector_full_house(screener_record):
+    record = dict(screener_record)
+    models = ValuationEngine().calculate_all_models("TEST", record)
+    active = [m for m in models if m.active]
+    assert len(active) >= 5, (
+        f"only {len(active)} models published from a fully reported screener "
+        f"record; blocked: "
+        f"{sorted({d for m in models for d in (m.diagnostics or {}).get('imputed_drivers', [])})}"
+    )
+
+
+def test_screener_record_with_only_a_price_is_refused():
+    engine = ValuationEngine()
+    for price in (10_000.0, 40_000.0, 80_000.0):
+        record = normalize_stock_data(
+            "TEST", "HOSE", "Test", "VNMAT", "Vat lieu",
+            tv_data={"close": price}, enable_source0_fallback=False,
+        )
+        models = engine.calculate_all_models("TEST", record)
+        assert sum(1 for m in models if m.active) == 0, (
+            "a record built from nothing but a price produced a valuation"
+        )

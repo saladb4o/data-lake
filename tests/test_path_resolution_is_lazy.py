@@ -16,6 +16,20 @@ import services.stock_service as ss
 import services.unified_data_service as uds
 
 
+@pytest.fixture(autouse=True)
+def no_drive_mount(tmp_path, monkeypatch):
+    """Isolate every test in this module from a real Google Drive mount.
+
+    resolve_data_file() falls back to a hardcoded "G:/My Drive/vnstock_data"
+    when GOOGLE_DRIVE_DATA_DIR is unset, and prefers it when it exists. On a
+    developer machine with the Drive actually mounted, these tests were
+    asserting against the real data lake instead of tmp_path and failing for
+    a reason that had nothing to do with what they test. Deleting the
+    variable is not enough - it has to point somewhere that does not exist.
+    """
+    monkeypatch.setenv("GOOGLE_DRIVE_DATA_DIR", str(tmp_path / "no-such-drive"))
+
+
 @pytest.mark.parametrize(
     "resolver",
     [

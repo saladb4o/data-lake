@@ -1590,6 +1590,41 @@ def normalize_stock_data(
     is_imputed = dict(tri["is_imputed"])
     is_imputed.setdefault("market_cap", is_imputed.get("mcap", True))
 
+    # ---------------------------------------------------------------
+    # Carry the evidence to the top level.
+    #
+    # reconstruct_financial_triangles() publishes the absolute statement
+    # lines and a tier for each. This function used to rebuild the record
+    # from a hand-written list of ratio keys and bury the provenance inside
+    # "_metadata", so both were dropped a second time, one layer further
+    # down: ValuationEngine reads data["field_provenance"] and looks up
+    # "debt"/"cash"/"ebit"/"equity" at the top level, and found neither.
+    #
+    # A hand-written key list is what caused this twice. Copy whatever the
+    # triangles published instead, so a line added upstream arrives here on
+    # its own rather than waiting to be noticed.
+    # ---------------------------------------------------------------
+    absolute_lines = {
+        key: tri[key]
+        for key in (
+            "total_assets", "total_liabilities", "equity", "debt", "cash",
+            "revenue", "net_income", "ebit", "ebitda", "cfo", "capex",
+            "shares_out",
+        )
+        if tri.get(key) is not None
+    }
+
+    # "market_cap" below is in BILLIONS - it is a display field, read by the
+    # screener UI, and changing its unit would silently rescale the whole
+    # front end. The engine works in raw VND (it derives market cap as
+    # price * shares), so publish the raw figure under its own unambiguous
+    # name rather than overloading one key with two units.
+    market_cap_vnd = float(mcap) * 1_000_000_000.0
+    # Same value, same evidence: it must carry market_cap's tier or it reads
+    # as untiered and fails closed.
+    tri["field_provenance"]["market_cap_vnd"] = tri["field_provenance"].get("market_cap", 0)
+    is_imputed["market_cap_vnd"] = is_imputed.get("market_cap", True)
+
     return {
         "symbol": symbol,
         "name": resolved_name,
@@ -1645,7 +1680,17 @@ def normalize_stock_data(
         "is_cyclical": sector_code in ["VNMAT", "VNREAL", "VNENE"],
         "size_category": size_category,
         "size_damper": size_damper,
-        
+
+        # Absolute statement lines, raw VND, each tiered in field_provenance.
+        **absolute_lines,
+        "market_cap_vnd": market_cap_vnd,
+
+        # Provenance at the top level, where every consumer reads it:
+        # ValuationEngine.InputResolver, the coverage audit, and the API.
+        # The copies under "_metadata" stay for backwards compatibility.
+        "field_provenance": tri["field_provenance"],
+        "is_imputed": is_imputed,
+
         "_metadata": {
             "sources_used": sources_used,
             "has_source0_lake": bool(s0),
