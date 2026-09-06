@@ -17,6 +17,10 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Any, Optional, Tuple
 
+from services.market_calendar import (
+    default_backtest_end_year,
+    default_backtest_start_year,
+)
 from services.stock_service import get_stock_history, ALL_SYMBOLS_MAP
 from services.backtest_service import (
     STRATEGY_DEFINITIONS,
@@ -723,8 +727,10 @@ def run_bar_by_bar_backtest(
         elif symbol not in INDEX_UNIVERSES:
             custom_syms = [symbol]
 
-        start_yr = 2026 - time_horizon_years
-        end_yr = 2026
+        # These were literal 2026s: correct only during 2026, and silently a
+        # year short from 1 January 2027 onward.
+        end_yr = default_backtest_end_year()
+        start_yr = default_backtest_start_year(time_horizon_years)
 
         fv_service = FairValueBacktestService()
         fv_res = fv_service.run_backtest(
@@ -1414,17 +1420,37 @@ def run_bar_by_bar_backtest(
         
     max_dd_pct = round(abs(min(drawdowns)) * 100.0, 2) if drawdowns else 0.0
     
-    daily_vol = float(np.std(daily_returns)) if len(daily_returns) > 1 else 0.01
-    ann_vol_pct = round(daily_vol * math.sqrt(250) * 100.0, 2)
-    
+    # Clamped denominators (max(0.01, vol), max(1.0, drawdown)) inflate the
+    # ratio for any low-volatility run rather than reporting that there is no
+    # meaningful denominator; a substituted 0.01 volatility invents one. Both
+    # are withheld - the same fix applied in the other two backtest services.
+    MIN_MEANINGFUL_FRACTION = 0.0001   # one basis point, as a fraction
+    MIN_MEANINGFUL_PCT = 0.01          # one basis point, as a percentage
+
+    def _ratio(numerator: float, denominator: Optional[float],
+               floor: float) -> Optional[float]:
+        if denominator is None or denominator < floor:
+            return None
+        return round(numerator / denominator, 2)
+
+    daily_vol = float(np.std(daily_returns, ddof=1)) if len(daily_returns) > 1 else None
+    ann_vol_pct = round(daily_vol * math.sqrt(250) * 100.0, 2) if daily_vol is not None else None
+
     excess_cagr = (cagr_pct / 100.0) - DEFAULT_ANNUAL_RF
-    sharpe_ratio = round(excess_cagr / max(0.01, (ann_vol_pct / 100.0)), 2) if ann_vol_pct > 0 else 0.0
-    
+    sharpe_ratio = _ratio(
+        excess_cagr,
+        None if ann_vol_pct is None else ann_vol_pct / 100.0,
+        MIN_MEANINGFUL_FRACTION,
+    )
+
     downside_returns = [r for r in daily_returns if r < 0]
-    downside_vol = float(np.std(downside_returns)) * math.sqrt(250) if len(downside_returns) > 1 else 0.01
-    sortino_ratio = round(excess_cagr / max(0.01, downside_vol), 2)
-    
-    calmar_ratio = round(cagr_pct / max(1.0, max_dd_pct), 2)
+    downside_vol = (
+        float(np.std(downside_returns, ddof=1)) * math.sqrt(250)
+        if len(downside_returns) > 1 else None
+    )
+    sortino_ratio = _ratio(excess_cagr, downside_vol, MIN_MEANINGFUL_FRACTION)
+
+    calmar_ratio = _ratio(cagr_pct, max_dd_pct, MIN_MEANINGFUL_PCT)
     
     squared_dds = [dd**2 for dd in drawdowns]
     ulcer_index = round(math.sqrt(np.mean(squared_dds)) * 100.0, 2) if squared_dds else 0.0

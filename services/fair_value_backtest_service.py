@@ -39,6 +39,7 @@ from services.stock_service import (
     passes_tsmom_filter,
     passes_forensic_filter,
 )
+from services.market_calendar import default_backtest_end_year
 from services.point_in_time_fundamentals import (
     FUNDAMENTALS_LAKE_FILE,
     PointInTimeFundamentals,
@@ -624,7 +625,7 @@ class FairValueBacktestService:
         initial_capital: float = 100_000_000.0,
         holding_period_months: int = 12,
         start_year: int = 2021,
-        end_year: int = 2026,
+        end_year: Optional[int] = None,
         composite_mode: str = "blended",
         omnibus_metric: str = "smape",
         custom_symbols: Optional[List[str]] = None,
@@ -648,6 +649,7 @@ class FairValueBacktestService:
             simulation cannot detect mispricing. Results in this mode carry a
             methodology warning and are not evidence of predictive skill.
         """
+        end_year = end_year if end_year is not None else default_backtest_end_year()
         cache_key = (
             f"fv_bt_v12_{mode}_{screening_strategy}_{valuation_model_id}_"
             f"{margin_of_safety_pct}_{exit_premium_pct}_{use_dynamic_beta_mos}_"
@@ -708,7 +710,10 @@ class FairValueBacktestService:
         eff_end_year = max(start_year, end_year)
         timeline_quarters = [q for q in QUARTERS_TIMELINE if eff_start_year <= q["year"] <= eff_end_year]
         if not timeline_quarters:
-            timeline_quarters = [q for q in QUARTERS_TIMELINE if 2021 <= q["year"] <= 2026]
+            timeline_quarters = [
+                q for q in QUARTERS_TIMELINE
+                if 2021 <= q["year"] <= default_backtest_end_year()
+            ]
             eff_start_year = timeline_quarters[0]["year"]
             eff_end_year = timeline_quarters[-1]["year"]
         else:

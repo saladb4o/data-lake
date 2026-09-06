@@ -1388,7 +1388,7 @@ def api_get_valuation_matrix_query(
 @app.get("/api/valuation/3-way-forecast/{symbol}")
 def api_get_three_statement_forecast(
     symbol: str,
-    start_year: int = Query(2026, description="Initial forecast year (default 2026)"),
+    start_year: Optional[int] = Query(None, description="Initial forecast year; defaults to the current year"),
     tax_rate: float = Query(0.20, description="Corporate income tax rate (default 20%)"),
 ):
     """
@@ -1411,7 +1411,7 @@ def api_get_three_statement_forecast(
 def api_export_financial_model_excel(
     symbol: str,
     scale_unit: str = Query("billion", description="Scale unit: 'billion' (default, in Billion VND) or 'raw'"),
-    start_year: int = Query(2026, description="Initial forecast year"),
+    start_year: Optional[int] = Query(None, description="Initial forecast year; defaults to the current year"),
     tax_rate: float = Query(0.20, description="Corporate income tax rate"),
 ):
     """
@@ -1477,7 +1477,7 @@ def api_run_fair_value_backtest(
     initial_capital: float = Query(100_000_000.0, description="Starting capital in VND"),
     holding_period_months: int = Query(12, description="Target holding horizon in months"),
     start_year: int = Query(2021, description="Start year"),
-    end_year: int = Query(2026, description="End year"),
+    end_year: Optional[int] = Query(None, description="End year; defaults to the current year"),
     composite_mode: str = Query("blended", description="blended or omnibus"),
     omnibus_metric: str = Query("smape", description="smape, male, wmape, rmsle, ivw"),
     fundamentals_mode: str = Query(

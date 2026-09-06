@@ -2328,18 +2328,34 @@ def run_screener_backtest(
     else:
         vni_cagr = 0.0
 
+    # A risk-adjusted ratio whose denominator was clamped (max(0.1, vol)) is
+    # not conservative, it is inflated: a strategy with near-zero measured
+    # volatility got its excess return divided by 0.1 instead of by the real
+    # figure. And substituting 1.0 for an unmeasurable volatility invents the
+    # denominator outright. Both are withheld instead - see the same fix in
+    # fair_value_backtest_service.
+    MIN_MEANINGFUL_PCT = 0.01
+
+    def _ratio(numerator: float, denominator: Optional[float]) -> Optional[float]:
+        if denominator is None or denominator < MIN_MEANINGFUL_PCT:
+            return None
+        return round(numerator / denominator, 2)
+
     q_returns = [p["quarter_return_pct"] for p in quarterly_history]
-    std_dev = float(np.std(q_returns)) if len(q_returns) > 1 else 1.0
-    annualized_volatility = round(std_dev * math.sqrt(4), 2)
+    std_dev = float(np.std(q_returns, ddof=1)) if len(q_returns) > 1 else None
+    annualized_volatility = round(std_dev * math.sqrt(4), 2) if std_dev is not None else None
 
     # rf_annual: annual risk-free assumption (see RF_ANNUAL module constant).
     rf_annual_pct = RF_ANNUAL * 100.0
     excess_return = cagr - rf_annual_pct
-    sharpe_ratio = round(excess_return / max(0.1, annualized_volatility), 2) if annualized_volatility > 0 else 0.0
+    sharpe_ratio = _ratio(excess_return, annualized_volatility)
 
     downside_rets = [r for r in q_returns if r < 0]
-    downside_std = float(np.std(downside_rets)) * math.sqrt(4) if len(downside_rets) > 1 else 1.0
-    sortino_ratio = round(excess_return / max(0.1, downside_std), 2)
+    downside_std = (
+        float(np.std(downside_rets, ddof=1)) * math.sqrt(4)
+        if len(downside_rets) > 1 else None
+    )
+    sortino_ratio = _ratio(excess_return, downside_std)
 
     win_rate_pct = round((win_quarters / total_quarters) * 100.0, 1) if total_quarters > 0 else 0.0
 

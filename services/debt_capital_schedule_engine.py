@@ -40,6 +40,8 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
+from services.market_calendar import default_forecast_start_year
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -269,7 +271,8 @@ class DebtSchedulePeriod(BaseModel):
     """
     Complete Debt, Capital Allocation, and Solvency Metrics for a single forecast period.
     """
-    year: int = Field(default=2026, description="Forecast Year (e.g. 2026)")
+    year: int = Field(default_factory=default_forecast_start_year,
+                      description="Forecast Year; defaults to the current year")
     year_index: int = Field(default=1, description="1-based period index (1 to 5)")
 
     # Debt Balances & Roll-Forward
@@ -490,11 +493,12 @@ class DebtCapitalScheduleEngine:
         policy: Optional[CapitalAllocationPolicy] = None,
         rf: float = DEFAULT_RF,
         tax_rate: float = DEFAULT_TAX_RATE,
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
     ) -> List[DebtSchedulePeriod]:
         """
         Projects 5-year debt roll-forward schedule and solvency-guarded capital allocation.
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         pol = policy if policy is not None else CapitalAllocationPolicy()
         clean_base_debt = max(0.0, sanitize_float(base_debt, 0.0))
         clean_mcap = sanitize_float(market_cap, 10_000e9)
@@ -674,11 +678,12 @@ class DebtCapitalScheduleEngine:
         npat_forecast: List[float],
         capex_forecast: List[float],
         policy: Optional[CapitalAllocationPolicy] = None,
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
     ) -> DebtCapitalScheduleResult:
         """
         Builds complete 5-year debt & capital allocation forecast result from base fundamentals.
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         clean_symbol = str(symbol).strip().upper()
         sector = str(base_data.get("sector") or base_data.get("sector_code") or "DEFAULT").strip().upper()
 
@@ -821,7 +826,7 @@ def build_debt_schedule(
     ebit_series: List[float],
     capex_series: List[float],
     npat_series: List[float],
-    start_year: int = 2026,
+    start_year: Optional[int] = None,
     market_cap: float = 10_000e9,
     rf: float = DEFAULT_RF,
     tax_rate: float = DEFAULT_TAX_RATE,
@@ -830,6 +835,7 @@ def build_debt_schedule(
     """
     Interface Contract 2: Builds 5-Year Debt Schedule & Capital Allocation Roll-Forward.
     """
+    start_year = start_year if start_year is not None else default_forecast_start_year()
     policy = CapitalAllocationPolicy(
         target_dividend_payout_ratio=payout_ratio,
         risk_free_rate=rf,

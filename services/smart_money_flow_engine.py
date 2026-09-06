@@ -70,8 +70,12 @@ def compute_smart_money_analytics(symbol: str, lookback_days: int = 30, current_
     is_put_through_dominated = False
 
     # 2. Tự Doanh CTCK (Proprietary Trading Flow Matrix)
-    # Estimate prop trading flow based on market capitalization and sector trading activity
-    # In VN market, prop trading accounts for ~3-8% of daily turnover
+    #
+    # Proprietary desk flow is not in this payload, so every branch below
+    # derives it from total turnover with a fixed coefficient (3%, 6%, 7%...)
+    # or from the foreign net value. These are stated ranges for the market as
+    # a whole, applied to one ticker on one day; they are estimates, not
+    # observations, and the payload now says so via is_estimated below.
     total_market_turnover = (total_vol * current_price) / 1e9
     prop_trading_share = min(0.12, max(0.02, total_market_turnover * 0.04 / 10.0))
     
@@ -103,16 +107,20 @@ def compute_smart_money_analytics(symbol: str, lookback_days: int = 30, current_
     prop_net_val = prop_buy_val - prop_sell_val
 
     # 3. Institutional VWAP Cost Basis (30D & 90D Anchors)
-    # Volume-weighted average price for foreign investors
-    # In realistic markets, foreign VWAP sits within +/- 3-8% of current price
-    if matched_net_val > 0:
-        foreign_vwap_30d = round(current_price * 0.97, 0)
-        foreign_vwap_90d = round(current_price * 0.94, 0)
-    else:
-        foreign_vwap_30d = round(current_price * 1.03, 0)
-        foreign_vwap_90d = round(current_price * 1.06, 0)
-
-    dist_to_vwap_pct = round(((current_price - foreign_vwap_30d) / foreign_vwap_30d) * 100.0, 1)
+    #
+    # This was not a cost basis. foreign_vwap_30d was current_price * 0.97 and
+    # the 90-day figure current_price * 0.94, so "distance to foreign cost
+    # basis" was always exactly -3.09% (or +2.91% on the other branch),
+    # regardless of what foreign investors actually paid. The support /
+    # resistance verdict derived from it therefore never varied either, while
+    # reading as a measured institutional level.
+    #
+    # A real VWAP needs per-session foreign volume and price history, which
+    # this endpoint does not have. Until that feed exists the figures are
+    # reported as unavailable rather than as a fixed offset from today's price.
+    foreign_vwap_30d = None
+    foreign_vwap_90d = None
+    dist_to_vwap_pct = None
 
     # 4. Foreign Room Depletion & Ceiling Pressure
     # Max allowed room is typically 49% or 100% depending on sector
@@ -179,6 +187,11 @@ def compute_smart_money_analytics(symbol: str, lookback_days: int = 30, current_
     prop_trading_dict = {
         "buy_val_billion": round(prop_buy_val, 2),
         "sell_val_billion": round(prop_sell_val, 2),
+        "is_estimated": True,
+        "estimation_basis": (
+            "Suy ra từ tổng giá trị giao dịch và dòng tiền khối ngoại theo hệ "
+            "số cố định (3-7% turnover), không phải số liệu tự doanh công bố."
+        ),
         "net_val_billion": round(prop_net_val, 2),
         "prop_net_val_5d": round(prop_net_val * 1e9, 0),
         "prop_net_val_20d": round(prop_net_val * 2.8 * 1e9, 0),
@@ -187,15 +200,20 @@ def compute_smart_money_analytics(symbol: str, lookback_days: int = 30, current_
         "sentiment_badge": prop_sentiment
     }
     vwap_dict = {
+        "available": False,
         "vwap_30d": foreign_vwap_30d,
         "vwap_90d": foreign_vwap_90d,
         "cost_basis_vwap_30d": foreign_vwap_30d,
         "cost_basis_vwap_90d": foreign_vwap_90d,
         "distance_to_vwap_pct": dist_to_vwap_pct,
         "distance_to_30d_pct": dist_to_vwap_pct,
-        "distance_to_90d_pct": round(((current_price - foreign_vwap_90d) / max(1.0, foreign_vwap_90d)) * 100, 1),
-        "support_resistance_status": "VÙNG HỖ TRỢ VỐN NGOẠI (BUY SUPPORT)" if dist_to_vwap_pct >= -3.0 and dist_to_vwap_pct <= 5.0 else ("TRÊN GIÁ VỐN (PROFIT ZONE)" if dist_to_vwap_pct > 5.0 else "DƯỚI GIÁ VỐN (PRESSURE ZONE)"),
-        "interpretation": f"Giá hiện tại {'cao hơn' if dist_to_vwap_pct >= 0 else 'thấp hơn'} {abs(dist_to_vwap_pct)}% so với giá vốn gom bình quân 30 phiên của Khối Ngoại."
+        "distance_to_90d_pct": None,
+        "support_resistance_status": None,
+        "interpretation": (
+            "Chưa có dữ liệu khối lượng khớp lệnh khối ngoại theo từng phiên "
+            "để tính giá vốn bình quân. Trước đây mục này hiển thị "
+            "giá hiện tại × 0.97, tức luôn báo -3.1% bất kể thực tế."
+        )
     }
     room_dict = {
         "remaining_shares": foreign_room,

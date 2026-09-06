@@ -44,6 +44,8 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
+from services.market_calendar import default_forecast_start_year
+
 from services.working_capital_engine import (
     WorkingCapitalEngine,
     WorkingCapitalMetrics,
@@ -341,7 +343,8 @@ class ThreeStatementForecastResult(BaseModel):
     company_name: str = Field(default="", description="Company / Organ Name")
     sector: str = Field(default="DEFAULT", description="ICB Sector Classification")
     is_financial_sector: bool = Field(default=False, description="True if Bank / Insurance / Securities")
-    start_year: int = Field(default=2026, description="First forecast year")
+    start_year: int = Field(default_factory=default_forecast_start_year,
+                            description="First forecast year; defaults to the current year")
     forecast_years: List[int] = Field(default_factory=list, description="5 Forecast Years")
     
     # 3 Statements
@@ -393,7 +396,7 @@ class ThreeStatementEngine:
         tax_rate: float = DEFAULT_TAX_RATE,
         capital_policy: Optional[CapitalAllocationPolicy] = None,
         wc_convergence_speed: float = 0.0,
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
         num_years: int = 5,
     ) -> ThreeStatementForecastResult:
         """
@@ -404,6 +407,7 @@ class ThreeStatementEngine:
         - Direct Method Operating Cash Flow reconciliation
         - Liquidity Distress Firewall evaluation
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         clean_symbol = str(symbol or "").strip().upper()
         raw_data = base_data or {}
         
@@ -1083,12 +1087,13 @@ class ThreeStatementEngine:
         tax_rate: float = DEFAULT_TAX_RATE,
         capital_policy: Optional[CapitalAllocationPolicy] = None,
         wc_convergence_speed: float = 0.0,
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
         num_years: int = 5,
     ) -> ThreeStatementForecastResult:
         """
         Loads fundamentals for `symbol` from data lake `screener_snapshot.json` and runs 3-way forecast.
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         clean_sym = str(symbol).strip().upper()
         base_data: Dict[str, Any] = {}
 
@@ -1140,10 +1145,11 @@ def forecast_3way(
     capex_ratio: Optional[List[float]] = None,
     capex_series: Optional[List[float]] = None,
     tax_rate: float = DEFAULT_TAX_RATE,
-    start_year: int = 2026,
+    start_year: Optional[int] = None,
     num_years: int = 5,
 ) -> ThreeStatementForecastResult:
     """Convenience functional wrapper for ThreeStatementEngine.forecast_three_statements."""
+    start_year = start_year if start_year is not None else default_forecast_start_year()
     return ThreeStatementEngine.forecast_three_statements(
         symbol=symbol,
         base_data=base_data,
@@ -1159,7 +1165,7 @@ def forecast_3way(
 
 def run_three_statement_forecast(
     symbol: str,
-    start_year: int = 2026,
+    start_year: Optional[int] = None,
     tax_rate: float = DEFAULT_TAX_RATE,
     revenue_growth_override: Optional[List[float]] = None,
     screener_path: Optional[str] = None,
@@ -1170,6 +1176,7 @@ def run_three_statement_forecast(
     Standard interface contract function to execute the 5-Year 3-Way statement forecast.
     Can be invoked with pre-loaded base_data or pulls dynamically from screener_snapshot.json.
     """
+    start_year = start_year if start_year is not None else default_forecast_start_year()
     if base_data is not None and len(base_data) > 0:
         return ThreeStatementEngine.forecast_three_statements(
             symbol=symbol,
