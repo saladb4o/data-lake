@@ -60,7 +60,10 @@ class TestPayload:
         rich = engine.get_comprehensive_valuation("VCB", fundamental_data=dict(RICH))
         thin = engine.get_comprehensive_valuation("XYZ", fundamental_data={"price": 20000.0})
 
-        assert rich.composite_fair_value > 0 and thin.composite_fair_value > 0
+        # A rich payload still values; a thin one now refuses outright rather
+        # than emitting a confident-looking multiple of its own price.
+        assert rich.composite_fair_value > 0
+        assert thin.composite_fair_value == 0.0
         assert rich.data_quality["grade"] == "HIGH"
         assert thin.data_quality["grade"] == "LOW"
         assert thin.data_quality["warnings"], "a thin valuation must carry a warning"
