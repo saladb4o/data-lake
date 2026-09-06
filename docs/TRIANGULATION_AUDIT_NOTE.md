@@ -371,3 +371,70 @@ If that report says most of your universe is tier 1, the honest reading is
 that the fundamentals really were reconstructed from price. Loosening the gate
 would not create the missing information, only hide its absence - the fix is
 `scripts/build_historical_fundamentals.py` and the BCTC lake (open items 1-3).
+
+## 8. The reconstructed statement lines were never published
+
+Found by running the coverage audit against a real 1,645-symbol universe: every
+single symbol was refused, all of them blocked by the same five drivers —
+`debt`, `cash`, `ebit`, `shares`, `bvps`. A universe-wide, perfectly uniform
+failure is never a data problem; data is never that tidy. It was plumbing.
+
+`reconstruct_financial_triangles()` does exactly what its name says: it
+reconstructs total assets, equity, debt, cash, revenue, net income, EBITDA, CFO
+and CapEx from whatever witnesses the vendors returned, and assigns each one a
+provenance tier. It then built its result dict out of the **ratios** derived
+from those lines — `pe`, `pb`, `roe`, `de_ratio`, `net_margin` — and dropped the
+lines themselves on the floor.
+
+The valuation engine looks up `debt`, `cash`, `ebit`, `equity`, `revenue`. None
+were present. `InputResolver` correctly resolved all of them as imputed, and the
+provenance gate correctly refused every model that depends on them. Both layers
+behaved exactly as designed; the numbers simply never made the trip between
+them.
+
+EBIT was worse than unpublished — it was never computed at all. There was an
+`ebit_raw` witness read from TradingView, used only to derive `op_margin`, and
+no EBIT triangle. Six models take EBIT as a driver.
+
+### The fix
+
+Section 8.5 of `reconstruct_financial_triangles()` now publishes each absolute
+line in raw VND, and copies the tier of the witness it came from onto the
+published key, so the gate judges the evidence rather than its absence. A line
+with no tier is not published at all — fail-closed, because an untiered number
+reads as an observation.
+
+`mcap` stays in billions. It is a display field and the engine does not read it;
+the engine derives market cap internally as `price * shares`, in raw VND, which
+is why the published lines must be raw VND too. `tests/
+test_absolute_lines_reach_the_engine.py::test_lines_are_raw_vnd_not_billions`
+pins that, because a 1e9 unit error would not raise — it would quietly return
+fair values a billion times wrong.
+
+Measured on a fully reported payload: **1 active model → 14 of 22**, every
+driver at tier 2 or 3. The gate was not touched. `MIN_TRUSTED_UPSTREAM_TIER` is
+still 2, and a payload with no reported lines still produces zero models and a
+composite of 0.0 at every price — the tautology check still passes.
+
+### A second bug it exposed
+
+With the lines published, `tests/test_imputation.py::
+test_min_propagation_fabricated_witness_caps_market_cap` started failing: `cfo`
+reached tier 2 in a payload where every input was fabricated. Four triangles —
+D&A from CFO, EBITDA from EBIT+D&A, CFO from net income + D&A, and CapEx from
+D&A — hardcoded their tier instead of calling `_prop()` to inherit the worst
+tier among their inputs. The bug was real the whole time; it was invisible only
+because those fields were never published, so no test could see them. They now
+propagate.
+
+That is the argument for publishing internal state rather than hiding it: a
+value nobody can observe is a value nobody can test.
+
+### What this does not fix
+
+`scripts/build_historical_fundamentals.py` fills
+`data/historical_fundamentals.json`, which is read by the point-in-time backtest
+and `scripts/calibrate_sector_weight_priors.py`. Nothing in the live screener
+path reads it. Running it will not change live valuation coverage, and the
+closing advice in `scripts/audit_valuation_coverage.py` has been corrected to
+say so.

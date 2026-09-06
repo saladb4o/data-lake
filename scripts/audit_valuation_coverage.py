@@ -170,8 +170,23 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
     if total and len(valued) / total < 0.25:
         print(
             "Most of the universe is refused. That is the data saying it was\n"
-            "reconstructed from price, not the gate being wrong: populate the\n"
-            "fundamentals lake (scripts/build_historical_fundamentals.py).\n"
+            "reconstructed from price, not the gate being wrong.\n"
+            "\n"
+            "Check in this order:\n"
+            "  1. Is the snapshot stale? The absolute statement lines (debt,\n"
+            "     cash, ebit, equity, revenue) are only published by recent\n"
+            "     builds. A snapshot written before that carries ratios alone\n"
+            "     and every per-share model will refuse. Re-run the universe\n"
+            "     sync and audit again before concluding anything.\n"
+            "  2. Do the vendor feeds actually return the balance sheet? If\n"
+            "     the weakest tier is 1 across the board, TradingView and\n"
+            "     VNDIRECT returned nothing for those lines and the fix is\n"
+            "     the feed, not the engine.\n"
+            "\n"
+            "Note: scripts/build_historical_fundamentals.py fills the\n"
+            "point-in-time lake used by the backtest and the sector-weight\n"
+            "calibration. It is NOT read by the live screener path, so it\n"
+            "will not move the numbers in this report.\n"
         )
 
 
