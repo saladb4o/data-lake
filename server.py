@@ -111,14 +111,24 @@ class AlertRuleCreate(BaseModel):
 
 _alert_rules_store = {}
 _alert_id_seq = itertools.count(1)
-ALERT_RULES_PATH = os.path.join("data", "alert_rules.json")
+def alert_rules_path() -> str:
+    """Path of the persisted alert rules, resolved per call.
+
+    As an import-time constant this froze a relative "data/..." before
+    anything could set DATA_LOCAL_DIR, so a test run wrote rules into the
+    checkout. Same defect, and same fix, as the five lake paths in
+    services/ - see tests/test_path_resolution_is_lazy.py.
+    """
+    from services.stock_service import resolve_data_file
+
+    return resolve_data_file("alert_rules.json")
 
 
 def _load_alert_rules() -> None:
     """Loads persisted alert rules from disk on startup (best-effort)."""
     global _alert_id_seq
     try:
-        with open(ALERT_RULES_PATH, "r", encoding="utf-8") as f:
+        with open(alert_rules_path(), "r", encoding="utf-8") as f:
             rules = json.load(f)
         if isinstance(rules, list):
             max_id = 0
@@ -130,10 +140,10 @@ def _load_alert_rules() -> None:
                 except (KeyError, TypeError, ValueError):
                     continue
             _alert_id_seq = itertools.count(max_id + 1)
-        print(f"[ALERTS] Loaded {len(_alert_rules_store)} alert rule(s) from {ALERT_RULES_PATH}")
+        print(f"[ALERTS] Loaded {len(_alert_rules_store)} alert rule(s) from {alert_rules_path()}")
     except FileNotFoundError:
         # Expected on a fresh install: no rules have been saved yet.
-        print(f"[ALERTS] No rules file at {ALERT_RULES_PATH}; starting empty")
+        print(f"[ALERTS] No rules file at {alert_rules_path()}; starting empty")
     except Exception as e:
         print(f"[ALERTS] Failed to load alert rules: {e}")
 
@@ -141,12 +151,12 @@ def _load_alert_rules() -> None:
 def _save_alert_rules() -> None:
     """Persists all alert rules to disk atomically (temp file + os.replace)."""
     try:
-        os.makedirs(os.path.dirname(ALERT_RULES_PATH), exist_ok=True)
-        tmp_path = ALERT_RULES_PATH + ".tmp"
+        os.makedirs(os.path.dirname(alert_rules_path()), exist_ok=True)
+        tmp_path = alert_rules_path() + ".tmp"
         rules = sorted(_alert_rules_store.values(), key=lambda r: r["id"])
         with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(rules, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, ALERT_RULES_PATH)
+        os.replace(tmp_path, alert_rules_path())
     except Exception as e:
         print(f"[ALERTS] Failed to save alert rules: {e}")
 
@@ -214,8 +224,16 @@ async def _alerts_poll_loop(poll_interval: int = 15):
 
 
 def _rrg_disk_path() -> str:
-    """Path of the RRG stale-while-revalidate disk cache file."""
-    return os.path.join("data", "rrg_disk_cache.json")
+    """Path of the RRG stale-while-revalidate disk cache file.
+
+    Resolved per call through the shared resolver. As a hardcoded relative
+    "data/..." this ignored DATA_LOCAL_DIR, so a test run wrote the cache
+    into the checkout instead of its isolated directory - which the
+    leak guard in tests/conftest.py correctly failed on.
+    """
+    from services.stock_service import resolve_data_file
+
+    return resolve_data_file("rrg_disk_cache.json")
 
 
 def _warm_rrg_cache_async():
@@ -1440,7 +1458,10 @@ def api_export_financial_model_excel(
             tax_rate=tax_rate,
             start_year=start_year,
         )
-        export_dir = os.path.join("data", "exports")
+        # Under the shared resolver, so an export lands in the configured
+        # data directory rather than always in the checkout.
+        from services.stock_service import local_data_dir
+        export_dir = os.path.join(local_data_dir(), "exports")
         os.makedirs(export_dir, exist_ok=True)
         filename = f"{sym}_3Way_Financial_Model.xlsx"
         filepath = os.path.join(export_dir, filename)

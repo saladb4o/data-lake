@@ -72,14 +72,36 @@ def load_snapshot(path: Optional[str]) -> Tuple[str, List[Dict[str, Any]]]:
     return resolved, stocks
 
 
+#: The inputs that decide whether a symbol can be valued at all. Every one of
+#: them feeds models that most sectors use.
+#:
+#: The peripheral drivers are deliberately excluded: `affo` (REITs), `rwa`
+#: (banks), `landbank` (developers), `regulated_asset_base` (utilities),
+#: `tbvps`, `roic`, `invested_capital`. Each is required by one or two
+#: sector-specific models and is absent for almost every company, by design,
+#: because SECTOR_MODEL_MAP only offers each sector 5-6 of the 22 models.
+#:
+#: Taking the minimum across *all* provenance keys - which this function used
+#: to do - therefore reported tier 0 for every symbol in the universe,
+#: including the ones being valued by six models from fully reported filings.
+#: A histogram that says "100% fabricated" next to "50% valued, median 4
+#: models" is not a measurement, it is a contradiction, and it hid the real
+#: distribution behind a driver no sector was ever going to have.
+CORE_DRIVERS = (
+    "shares", "shares_out", "market_cap", "market_cap_vnd",
+    "equity", "debt", "cash", "revenue", "net_income", "ebit",
+)
+
+
 def worst_tier(record: Dict[str, Any]) -> Optional[int]:
-    """The lowest provenance tier among the record's valuation drivers."""
+    """The lowest provenance tier among the drivers that gate a valuation."""
     tiers = record.get("field_provenance")
     if not isinstance(tiers, dict) or not tiers:
         return None
     numeric = [
-        int(v) for v in tiers.values()
-        if isinstance(v, (int, float)) and not isinstance(v, bool)
+        int(tiers[key]) for key in CORE_DRIVERS
+        if isinstance(tiers.get(key), (int, float))
+        and not isinstance(tiers.get(key), bool)
     ]
     return min(numeric) if numeric else None
 
@@ -129,7 +151,10 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
     print(f"  errored       {len(errored):>6}  {pct(len(errored))}   could not be evaluated at all")
 
     tiers = collections.Counter(r["worst_tier"] for r in rows)
-    print("\nWeakest driver tier per symbol:")
+    print("\nWeakest CORE driver tier per symbol:")
+    print("(core = shares, market cap, equity, debt, cash, revenue, net income,")
+    print(" ebit. Sector-specific drivers such as affo/rwa/landbank are excluded:")
+    print(" they are absent for almost every company by design.)")
     for tier in (4, 3, 2, 1, 0):
         count = tiers.get(tier, 0)
         if not count:
