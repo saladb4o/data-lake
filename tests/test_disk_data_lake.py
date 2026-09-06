@@ -104,7 +104,7 @@ def local_data_file():
     location, so exercising the real path beats monkeypatching os.path.
     """
     import services.stock_service as ss
-    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ss.__file__))), "data")
+    base = ss.local_data_dir()
     os.makedirs(base, exist_ok=True)
     created = []
 

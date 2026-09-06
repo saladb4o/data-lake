@@ -65,6 +65,11 @@ CREATE TABLE IF NOT EXISTS lake_meta (
 
 
 def _local_data_dir() -> str:
+    """Local data directory, honouring the same DATA_LOCAL_DIR override."""
+    override = os.environ.get("DATA_LOCAL_DIR", "").strip()
+    if override:
+        os.makedirs(override, exist_ok=True)
+        return override
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(base, "data")
     os.makedirs(path, exist_ok=True)

@@ -44,3 +44,32 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.module.__name__.rpartition(".")[2] in NETWORK_TEST_MODULES:
             item.add_marker(marker)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path_factory, monkeypatch, request):
+    """Keeps tests out of the repository's real data/ directory.
+
+    resolve_data_file() falls back to the checkout's data/ dir, so a test that
+    wrote a lake left a file there - which later runs then resolved to,
+    making the suite order-dependent and overwriting real data on a
+    developer's machine.
+    """
+    if "no_data_isolation" in request.keywords:
+        yield
+        return
+    isolated = tmp_path_factory.mktemp("data_local")
+    monkeypatch.setenv("DATA_LOCAL_DIR", str(isolated))
+    yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _fail_on_repo_data_leak():
+    """Fails the run if tests wrote lake files into the checkout."""
+    import pathlib
+    data_dir = pathlib.Path(__file__).resolve().parent.parent / "data"
+    before = {p.name for p in data_dir.glob("*.json")} if data_dir.is_dir() else set()
+    yield
+    after = {p.name for p in data_dir.glob("*.json")} if data_dir.is_dir() else set()
+    leaked = sorted(after - before)
+    assert not leaked, f"tests leaked lake files into the repo's data/: {leaked}"
