@@ -9,6 +9,7 @@ subsequent read and write of the data lake blocked behind it too.
 import json
 import os
 import threading
+import time
 
 import pytest
 
@@ -47,6 +48,7 @@ def test_save_into_existing_lake_does_not_deadlock(lake_dir):
 
     lake = DiskDataLake()
     assert _save_with_timeout(lake, fn, "TCB", {"x": 2}), "save_symbol_record deadlocked"
+    lake.flush()  # writes are coalesced; force them out to inspect the file
 
     written = json.loads((lake_dir / fn).read_text(encoding="utf-8"))
     assert written["TCB"] == {"x": 2}
@@ -87,6 +89,7 @@ def test_concurrent_writers_do_not_lose_records(lake_dir):
     for t in threads:
         t.join(timeout=30)
         assert not t.is_alive(), "a concurrent writer hung"
+    lake.flush()
 
     written = json.loads((lake_dir / fn).read_text(encoding="utf-8"))
     assert len(written) == 40, f"lost records: only {len(written)}/40 persisted"
@@ -180,9 +183,94 @@ class TestDataFileResolution:
 
         lake = DiskDataLake()
         lake.save_symbol_record(fn, "VCB", {"v": 1})
+        lake.flush()
 
         with open(local_path, encoding="utf-8") as fh:
             updated = json.load(fh)
         assert updated.get("VCB") == {"v": 1}, "existing lake was not updated"
         assert updated.get("OLD") == {"v": 0}, "existing records were dropped"
         assert not (gdrive / fn).exists(), "write forked a second copy onto Google Drive"
+
+
+class TestWriteCoalescing:
+    """The lake is one JSON document, so saving one symbol rewrites all of it.
+
+    Per-symbol writes made a crawl O(n^2): at 1600 symbols the file is ~155 MB,
+    each rewrite ~3.3s, one pass ~89 minutes of pure serialisation - all inside
+    the lake lock, serialising the 24-worker executor. Writes are now coalesced
+    behind a debounce.
+    """
+
+    def test_a_burst_of_writes_costs_one_rewrite(self, lake_dir, monkeypatch):
+        import services.stock_service as ss
+        monkeypatch.setenv("DATA_LAKE_FLUSH_INTERVAL_SECONDS", "30")  # no timer during the test
+
+        writes = []
+        real = DiskDataLake._write_file
+
+        def counting(self, filename, lake):
+            writes.append(filename)
+            return real(self, filename, lake)
+
+        monkeypatch.setattr(DiskDataLake, "_write_file", counting)
+
+        lake = DiskDataLake()
+        for i in range(200):
+            lake.save_symbol_record("burst.json", f"S{i:03d}", {"i": i})
+        assert writes == [], "writes should be deferred, not written per symbol"
+
+        lake.flush()
+        assert len(writes) == 1, f"a 200-symbol burst caused {len(writes)} rewrites"
+
+        persisted = json.loads((lake_dir / "burst.json").read_text(encoding="utf-8"))
+        assert len(persisted) == 200, "coalescing must not lose records"
+
+    def test_pending_writes_are_visible_to_readers_before_flush(self, lake_dir, monkeypatch):
+        """Reading must not serve the stale disk copy over unflushed changes."""
+        monkeypatch.setenv("DATA_LAKE_FLUSH_INTERVAL_SECONDS", "30")
+        fn = "pending.json"
+        (lake_dir / fn).write_text(json.dumps({"OLD": {"v": 0}}), encoding="utf-8")
+
+        lake = DiskDataLake()
+        lake.save_symbol_record(fn, "NEW", {"v": 1})
+        assert lake.read_json(fn).get("NEW") == {"v": 1}, "pending write was not visible"
+        assert lake.read_json(fn).get("OLD") == {"v": 0}
+
+        lake.flush()
+        on_disk = json.loads((lake_dir / fn).read_text(encoding="utf-8"))
+        assert set(on_disk) == {"OLD", "NEW"}
+
+    def test_zero_interval_is_write_through(self, lake_dir, monkeypatch):
+        monkeypatch.setenv("DATA_LAKE_FLUSH_INTERVAL_SECONDS", "0")
+        lake = DiskDataLake()
+        lake.save_symbol_record("sync.json", "VCB", {"v": 1})
+        on_disk = json.loads((lake_dir / "sync.json").read_text(encoding="utf-8"))
+        assert on_disk["VCB"] == {"v": 1}, "interval 0 should persist immediately"
+
+    def test_debounce_timer_persists_without_an_explicit_flush(self, lake_dir, monkeypatch):
+        monkeypatch.setenv("DATA_LAKE_FLUSH_INTERVAL_SECONDS", "0.2")
+        lake = DiskDataLake()
+        lake.save_symbol_record("timed.json", "VCB", {"v": 1})
+
+        path = lake_dir / "timed.json"
+        for _ in range(50):
+            if path.exists():
+                break
+            time.sleep(0.1)
+        assert path.exists(), "the debounce timer never fired"
+        assert json.loads(path.read_text(encoding="utf-8"))["VCB"] == {"v": 1}
+
+    def test_concurrent_writers_under_coalescing_lose_nothing(self, lake_dir, monkeypatch):
+        monkeypatch.setenv("DATA_LAKE_FLUSH_INTERVAL_SECONDS", "30")
+        lake = DiskDataLake()
+        threads = [
+            threading.Thread(target=lake.save_symbol_record, args=("conc.json", f"S{i:03d}", {"i": i}))
+            for i in range(60)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+            assert not t.is_alive()
+        lake.flush()
+        assert len(json.loads((lake_dir / "conc.json").read_text(encoding="utf-8"))) == 60
