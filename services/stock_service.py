@@ -2498,7 +2498,14 @@ def enrich_article_metadata(art: Dict[str, Any]) -> Dict[str, Any]:
     return enriched
 
 CENTRAL_NEWS_LAKE: Dict[str, Dict[str, Any]] = {}
+
+# News-lake indexes: ticker/sector -> set of article links.
+# NEWS_SECTOR_INVERTED_INDEX is deliberately separate from the module-level
+# SECTOR_INVERTED_INDEX, which maps sector -> set of *ticker symbols* and is
+# consumed by sector_index_service as index constituents. Sharing one dict for
+# both let article URLs leak into sector constituent lists.
 TICKER_INVERTED_INDEX: Dict[str, Set[str]] = {}
+NEWS_SECTOR_INVERTED_INDEX: Dict[str, Set[str]] = {}
 _lake_lock = threading.Lock()
 MAX_LAKE_SIZE = 3000
 
@@ -2538,16 +2545,26 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
 
             sec_k = enriched.get("sector_key")
             if sec_k:
-                if sec_k not in SECTOR_INVERTED_INDEX:
-                    SECTOR_INVERTED_INDEX[sec_k] = set()
-                SECTOR_INVERTED_INDEX[sec_k].add(link)
+                if sec_k not in NEWS_SECTOR_INVERTED_INDEX:
+                    NEWS_SECTOR_INVERTED_INDEX[sec_k] = set()
+                NEWS_SECTOR_INVERTED_INDEX[sec_k].add(link)
 
-        # Bounded memory: Prune oldest articles if lake exceeds MAX_LAKE_SIZE
+        # Bounded memory: Prune oldest articles if lake exceeds MAX_LAKE_SIZE.
+        # The inverted indexes must be pruned with it, otherwise they grow
+        # without bound and keep pointing at evicted articles.
         if len(CENTRAL_NEWS_LAKE) > MAX_LAKE_SIZE + 500:
             sorted_links = sorted(CENTRAL_NEWS_LAKE.keys(), key=lambda l: CENTRAL_NEWS_LAKE[l].get('timestamp', 0))
             excess = len(sorted_links) - MAX_LAKE_SIZE
-            for old_link in sorted_links[:excess]:
+            evicted = set(sorted_links[:excess])
+            for old_link in evicted:
                 del CENTRAL_NEWS_LAKE[old_link]
+            for index in (TICKER_INVERTED_INDEX, NEWS_SECTOR_INVERTED_INDEX):
+                for key in list(index.keys()):
+                    remaining = index[key] - evicted
+                    if remaining:
+                        index[key] = remaining
+                    else:
+                        del index[key]
 
 import threading
 _news_poller_thread = None
