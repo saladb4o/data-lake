@@ -21,6 +21,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 APP_JS = ROOT / "static" / "js" / "app.js"
 INDEX_HTML = ROOT / "static" / "index.html"
+JS_DIR = ROOT / "static" / "js"
+
+# Every script the page loads, not only app.js - a dead element read in
+# chart.js is exactly as invisible as one in app.js.
+SCRIPTS = sorted(p for p in JS_DIR.glob("*.js"))
 
 # Ids read by app.js that index.html does not define, each with the reason it
 # is acceptable. Anything not listed here must exist in the page.
@@ -59,18 +64,20 @@ def _ids_defined(html: str) -> set[str]:
     return set(_ID_ATTR.findall(html))
 
 
-def test_every_id_read_by_app_js_exists_somewhere(app_js, index_html):
-    """No new silently-dead element reads."""
-    read = _ids_read(app_js)
-    # Ids app.js injects itself, via template literals or createElement.
-    created = set(_ID_ATTR.findall(app_js)) | set(
-        re.findall(r"\.id\s*=\s*['\"]([A-Za-z0-9_-]+)['\"]", app_js)
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda p: p.name)
+def test_every_id_read_by_a_script_exists_somewhere(script, index_html):
+    """No new silently-dead element reads, in any bundled script."""
+    js = script.read_text(encoding="utf-8")
+    read = _ids_read(js)
+    # Ids the script injects itself, via template literals or createElement.
+    created = set(_ID_ATTR.findall(js)) | set(
+        re.findall(r"\.id\s*=\s*['\"]([A-Za-z0-9_-]+)['\"]", js)
     )
     missing = sorted(read - _ids_defined(index_html) - created - set(KNOWN_ABSENT))
     assert not missing, (
-        "app.js reads element ids that index.html never defines, so those "
-        f"render paths write into nothing: {missing}. Add the markup, or add "
-        "the id to KNOWN_ABSENT with the reason it is acceptable."
+        f"{script.name} reads element ids that index.html never defines, so "
+        f"those render paths write into nothing: {missing}. Add the markup, "
+        "or add the id to KNOWN_ABSENT with the reason it is acceptable."
     )
 
 

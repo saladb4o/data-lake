@@ -24,7 +24,11 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICES = ROOT / "services"
+
+# Production code: everything that runs in the app or its tooling. The test
+# suite itself is exempt - a mock URL built from hash() harms nobody, and a
+# deliberately-empty handler in a test is not a hidden production failure.
+_SKIP_DIRS = {".git", "node_modules", "__pycache__", "tests", ".venv", "venv"}
 
 # A handler may stay silent only if the source says so explicitly, with a
 # `silent-ok:` marker and a reason, on or beside the `pass`. Today that is only
@@ -32,8 +36,11 @@ SERVICES = ROOT / "services"
 SILENT_MARKER = "silent-ok:"
 
 
-def _service_files() -> list[Path]:
-    return sorted(SERVICES.rglob("*.py"))
+def _production_files() -> list[Path]:
+    return sorted(
+        p for p in ROOT.rglob("*.py")
+        if not _SKIP_DIRS & set(p.relative_to(ROOT).parts)
+    )
 
 
 def _silent_handlers(tree: ast.AST):
@@ -52,7 +59,7 @@ def _silent_handlers(tree: ast.AST):
 
 
 @pytest.mark.parametrize(
-    "path", _service_files(), ids=lambda p: p.name
+    "path", _production_files(), ids=lambda p: str(p)
 )
 def test_exception_handlers_are_not_silent(path: Path):
     source = path.read_text(encoding="utf-8")
@@ -73,7 +80,7 @@ def test_exception_handlers_are_not_silent(path: Path):
     )
 
 
-@pytest.mark.parametrize("path", _service_files(), ids=lambda p: p.name)
+@pytest.mark.parametrize("path", _production_files(), ids=lambda p: str(p))
 def test_no_builtin_hash_in_record_identifiers(path: Path):
     """`hash()` of a str is process-salted and must not become an id."""
     tree = ast.parse(path.read_text(encoding="utf-8"))

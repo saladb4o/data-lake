@@ -8,6 +8,9 @@ Run this script to start the Vietnam Stock Monitor app locally:
 
 import os
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Load .env file
 _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
@@ -23,7 +26,9 @@ if os.path.exists(_env_path):
                     if k not in os.environ:
                         os.environ[k] = v
     except Exception:
-        pass
+        # A malformed .env means every setting silently falls back to its
+        # default, which looks identical to having configured nothing.
+        print("[ENV] Could not read .env; continuing with defaults")
 
 import webbrowser
 import threading
@@ -37,14 +42,14 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 def open_browser(url: str):
     time.sleep(1.2)
     try:
         webbrowser.open(url)
     except Exception:
-        pass
+        print(f"[APP] Could not open a browser automatically; visit {url}")
 
 import socket
 

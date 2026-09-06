@@ -776,8 +776,11 @@ def run_bar_by_bar_backtest(
             exit_p = float(t.get("exit_price", 0.0))
             ret_pct = float(t.get("return_pct", 0.0))
             allocated_capital = initial_capital / max(1, top_k)
-            shares = int(allocated_capital / max(1.0, entry_p))
-            shares = max(DEFAULT_LOT_SIZE, (shares // DEFAULT_LOT_SIZE) * DEFAULT_LOT_SIZE)
+            # A zero entry price floored to 1 VND buys an absurd share count
+            # and prices the whole position off it. No price, no share count.
+            shares = int(allocated_capital / entry_p) if entry_p > 0 else 0
+            if shares > 0:
+                shares = max(DEFAULT_LOT_SIZE, (shares // DEFAULT_LOT_SIZE) * DEFAULT_LOT_SIZE)
             pnl_vnd = round(shares * (exit_p - entry_p), 0) if (entry_p > 0 and exit_p > 0) else round(allocated_capital * ret_pct / 100.0, 0)
 
             trades.append({
@@ -826,16 +829,20 @@ def run_bar_by_bar_backtest(
         cagr = m_raw.get("cagr_pct", 0.0)
         vni_cagr = m_raw.get("benchmark_cagr_pct", m_raw.get("vni_cagr_pct", 0.0))
         max_dd = m_raw.get("max_drawdown_pct", 0.0)
-        calmar = round(cagr / max(1.0, abs(max_dd)), 2)
+        calmar = safe_ratio(cagr, abs(max_dd), MIN_MEANINGFUL_PCT)
 
         winning_trades = [t for t in trades if t["is_win"]]
         losing_trades = [t for t in trades if not t["is_win"]]
         gross_gains = sum(t["pnl_vnd"] for t in winning_trades)
         gross_losses = abs(sum(t["pnl_vnd"] for t in losing_trades))
-        profit_factor = round(gross_gains / max(1.0, gross_losses), 2) if gross_losses > 0 else 99.0
+        # No losing trade leaves the profit factor undefined, not 99.0 - a
+        # sentinel that sorts and averages like a real, spectacular result.
+        profit_factor = safe_ratio(gross_gains, gross_losses)
         avg_win = (gross_gains / len(winning_trades)) if winning_trades else 0.0
         avg_loss = (gross_losses / len(losing_trades)) if losing_trades else 0.0
-        payoff_ratio = round(avg_win / max(1.0, avg_loss), 2)
+        # avg_loss is in VND; clamping it to 1.0 turned a near-flat loss
+        # into a payoff ratio in the millions.
+        payoff_ratio = safe_ratio(avg_win, avg_loss)
         expectancy_vnd = round((sum(t["pnl_vnd"] for t in trades) / max(1, len(trades))), 0) if trades else 0.0
 
         dds = [e.get("drawdown_pct", 0.0) / 100.0 for e in equity_curve]
@@ -977,7 +984,8 @@ def run_bar_by_bar_backtest(
                 
                 allocated_capital = (initial_capital * (weight_pct / 100.0))
                 pnl_vnd = allocated_capital * (pnl_pct / 100.0)
-                shares = int(allocated_capital / max(1.0, (start_p * 1000.0)))
+                entry_vnd = start_p * 1000.0
+                shares = int(allocated_capital / entry_vnd) if entry_vnd > 0 else 0
                 shares = (shares // DEFAULT_LOT_SIZE) * DEFAULT_LOT_SIZE
                 
                 comm = allocated_capital * (commission_pct / 100.0) * 2.0
@@ -1020,11 +1028,15 @@ def run_bar_by_bar_backtest(
         losing_trades = [t for t in trades if not t["is_win"]]
         gross_gains = sum(t["pnl_vnd"] for t in winning_trades)
         gross_losses = abs(sum(t["pnl_vnd"] for t in losing_trades))
-        profit_factor = round(gross_gains / max(1.0, gross_losses), 2) if gross_losses > 0 else 99.0
+        # No losing trade leaves the profit factor undefined, not 99.0 - a
+        # sentinel that sorts and averages like a real, spectacular result.
+        profit_factor = safe_ratio(gross_gains, gross_losses)
         
         avg_win = (gross_gains / len(winning_trades)) if winning_trades else 0.0
         avg_loss = (gross_losses / len(losing_trades)) if losing_trades else 0.0
-        payoff_ratio = round(avg_win / max(1.0, avg_loss), 2)
+        # avg_loss is in VND; clamping it to 1.0 turned a near-flat loss
+        # into a payoff ratio in the millions.
+        payoff_ratio = safe_ratio(avg_win, avg_loss)
         
         expectancy_vnd = round((sum(t["pnl_vnd"] for t in trades) / max(1, len(trades))), 0) if trades else 0.0
         
@@ -1036,7 +1048,7 @@ def run_bar_by_bar_backtest(
         cagr = m_raw.get("cagr", 0.0)
         vni_cagr = m_raw.get("vni_cagr", 0.0)
         max_dd = m_raw.get("max_drawdown_pct", 0.0)
-        calmar = round(cagr / max(1.0, abs(max_dd)), 2)
+        calmar = safe_ratio(cagr, abs(max_dd), MIN_MEANINGFUL_PCT)
 
         strat_title = STRATEGY_DEFINITIONS.get(actual_strategy, {}).get("name", actual_strategy)
         
@@ -1434,14 +1446,7 @@ def run_bar_by_bar_backtest(
     # ratio for any low-volatility run rather than reporting that there is no
     # meaningful denominator; a substituted 0.01 volatility invents one. Both
     # are withheld - the same fix applied in the other two backtest services.
-    MIN_MEANINGFUL_FRACTION = 0.0001   # one basis point, as a fraction
-    MIN_MEANINGFUL_PCT = 0.01          # one basis point, as a percentage
-
-    def _ratio(numerator: float, denominator: Optional[float],
-               floor: float) -> Optional[float]:
-        if denominator is None or denominator < floor:
-            return None
-        return round(numerator / denominator, 2)
+    _ratio = safe_ratio
 
     daily_vol = float(np.std(daily_returns, ddof=1)) if len(daily_returns) > 1 else None
     ann_vol_pct = round(daily_vol * math.sqrt(250) * 100.0, 2) if daily_vol is not None else None
@@ -1473,11 +1478,11 @@ def run_bar_by_bar_backtest(
     
     gross_gains = sum(t['pnl_vnd'] for t in winning_trades)
     gross_losses = abs(sum(t['pnl_vnd'] for t in losing_trades))
-    profit_factor = round(gross_gains / max(1.0, gross_losses), 2) if gross_losses > 0 else 99.0
+    profit_factor = safe_ratio(gross_gains, gross_losses)
     
     avg_win = (gross_gains / len(winning_trades)) if winning_trades else 0.0
     avg_loss = (gross_losses / len(losing_trades)) if losing_trades else 0.0
-    payoff_ratio = round(avg_win / max(1.0, avg_loss), 2)
+    payoff_ratio = safe_ratio(avg_win, avg_loss)
     
     expectancy_vnd = round((sum(t['pnl_vnd'] for t in trades) / max(1, total_trades)), 0)
     avg_holding_days = round(sum(t['holding_days'] for t in trades) / max(1, total_trades), 1)
@@ -1772,8 +1777,12 @@ def run_walk_forward_analysis(
                     kwargs_is["margin_of_safety_pct"] = cand["margin_of_safety_pct"]
                     
                 sim_is = run_bar_by_bar_backtest(**kwargs_is)
-                sh = sim_is.get("metrics", {}).get("sharpe_ratio", -99.0)
-                if sh > best_is_sharpe:
+                # sharpe_ratio is now withheld (None) when there is no
+                # meaningful volatility to divide by, and dict.get returns that
+                # None rather than the default. A parameter set we could not
+                # score does not win the selection.
+                sh = sim_is.get("metrics", {}).get("sharpe_ratio")
+                if sh is not None and sh > best_is_sharpe:
                     best_is_sharpe = sh
                     best_param = cand
                     
@@ -1855,8 +1864,10 @@ def run_walk_forward_analysis(
                     slow_period=cand["slow_period"],
                     atr_stop_multiplier=cand["atr_stop_multiplier"]
                 )
-                sh = sim_is.get("metrics", {}).get("sharpe_ratio", -99.0)
-                if sh > best_is_sharpe:
+                # A parameter set whose Sharpe could not be measured (None)
+                # does not win the selection.
+                sh = sim_is.get("metrics", {}).get("sharpe_ratio")
+                if sh is not None and sh > best_is_sharpe:
                     best_is_sharpe = sh
                     best_param = cand
                     
@@ -1897,9 +1908,14 @@ def run_walk_forward_analysis(
     wfa_final_nav = current_capital
     wfa_total_return = round(((wfa_final_nav - initial_capital) / initial_capital) * 100.0, 2)
     
-    avg_is_sharpe = float(np.mean([s["in_sample_sharpe"] for s in splits])) if splits else 1.0
-    avg_oos_sharpe = float(np.mean([s["out_of_sample_sharpe"] for s in splits])) if splits else 1.0
-    wfe_ratio = round(max(0.0, avg_oos_sharpe / max(0.1, avg_is_sharpe)), 2)
+    # No splits means nothing was measured; 1.0 for both would report a
+    # perfect walk-forward efficiency for a run that never happened.
+    avg_is_sharpe = float(np.mean([s["in_sample_sharpe"] for s in splits])) if splits else None
+    avg_oos_sharpe = float(np.mean([s["out_of_sample_sharpe"] for s in splits])) if splits else None
+    wfe_ratio = (
+        None if avg_oos_sharpe is None
+        else safe_ratio(avg_oos_sharpe, avg_is_sharpe, MIN_MEANINGFUL_FRACTION)
+    )
 
     return {
         "status": "success",
@@ -1925,6 +1941,65 @@ def run_walk_forward_analysis(
 # STEP 7: STATISTICAL STRESS TESTING (MONTE CARLO BOOTSTRAP & PERMUTATION)
 # ------------------------------------------------------------------------------
 
+# One basis point, the smallest denominator worth dividing by. Below it a
+# ratio says more about floating-point noise than about the strategy.
+MIN_MEANINGFUL_FRACTION = 0.0001   # as a fraction
+MIN_MEANINGFUL_PCT = 0.01          # as a percentage
+
+
+def safe_ratio(
+    numerator: float,
+    denominator: Optional[float],
+    floor: float = MIN_MEANINGFUL_PCT,
+    digits: int = 2,
+) -> Optional[float]:
+    """``numerator / denominator``, or None when the denominator is unusable.
+
+    Clamping a denominator up to a floor (``max(1.0, drawdown)``) does not
+    avoid the problem, it hides it: the ratio still gets reported, now
+    understated for small denominators and fabricated for zero ones. None is
+    the honest answer, and it does not average or sort like a real result.
+    """
+    if denominator is None:
+        return None
+    try:
+        denominator = float(denominator)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(denominator) or abs(denominator) < floor:
+        return None
+    value = numerator / denominator
+    return round(value, digits) if math.isfinite(value) else None
+
+
+def _measure_trades_per_year(trades: List[Dict[str, Any]]) -> Optional[float]:
+    """Trades per year, measured from the span the trades actually cover.
+
+    Returns None when the trade dates cannot support the measurement (missing,
+    unparseable, or all inside the same day), so the caller can skip
+    annualising instead of substituting a cadence nobody observed.
+    """
+    stamps: List[datetime.date] = []
+    for trade in trades:
+        for key in ("entry_date", "exit_date"):
+            raw = str(trade.get(key) or "").strip()
+            if not raw:
+                continue
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+                try:
+                    stamps.append(datetime.datetime.strptime(raw[:10], fmt).date())
+                    break
+                except ValueError:
+                    continue
+    if len(stamps) < 2:
+        return None
+    span_days = (max(stamps) - min(stamps)).days
+    if span_days <= 0:
+        return None
+    per_year = len(trades) * 365.25 / span_days
+    return per_year if math.isfinite(per_year) and per_year > 0 else None
+
+
 def run_monte_carlo_stress_test(
     trades: List[Dict[str, Any]],
     initial_capital: float = 100_000_000.0,
@@ -1941,6 +2016,14 @@ def run_monte_carlo_stress_test(
         
     pnl_pcts = [t["pnl_pct"] for t in trades]
     n_trades = len(pnl_pcts)
+
+    # Annualisation factor for a per-trade Sharpe: how many of these trades
+    # occur in a year. It used to be written `n_trades / max(1, n_trades / 12)`,
+    # which is exactly 12.0 for any n_trades >= 12 - a hardcoded "monthly"
+    # assumption wearing the shape of a calculation. Measure it from the span
+    # the trades actually cover, and when the dates do not support that,
+    # decline to annualise rather than invent a cadence.
+    trades_per_year = _measure_trades_per_year(trades)
     
     bootstrap_sharpes = []
     bootstrap_returns = []
@@ -1970,9 +2053,9 @@ def run_monte_carlo_stress_test(
         # no measurable dispersion contributes no Sharpe rather than a large one.
         std_pnl = float(np.std(resampled_pnls, ddof=1)) if len(resampled_pnls) > 1 else None
         if std_pnl is not None and std_pnl >= 0.01:
-            sh = (np.mean(resampled_pnls) / std_pnl) * math.sqrt(
-                n_trades / max(1, (n_trades / 12.0))
-            )
+            sh = np.mean(resampled_pnls) / std_pnl
+            if trades_per_year is not None:
+                sh *= math.sqrt(trades_per_year)
             bootstrap_sharpes.append(sh)
         bootstrap_returns.append(tot_ret)
         bootstrap_max_dds.append(mdd * 100.0)

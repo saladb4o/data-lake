@@ -232,3 +232,86 @@ not meant to be - it just has to be identical in every process). The old
 across `services/`, and verifies the property directly by running `stable_hash`
 under three different `PYTHONHASHSEED` values in subprocesses - and, so the rule
 does not quietly become moot, checks that builtin `hash()` really does still vary.
+
+
+## 6. Fourth pass: what the third pass missed
+
+Asked whether everything was fixed, I checked instead of answering from memory,
+and the check found four things.
+
+### 6.1 The price tautology came back through the payload
+
+Sections 1.1 and 3.2 removed the circularity from `valuation_engine` and from
+the single-symbol engine. They did not look at
+`services/unified_data_service.py`, which back-solves a missing EPS, revenue,
+net income or equity from market capitalisation and a sector multiple:
+
+```python
+net_income = (mcap * 1_000_000_000.0) / max(1.0, sec_med["pe"])
+revenue    = (mcap * 1_000_000_000.0) / max(0.1, sec_med["ps"])
+tot_eq     =  mcap * 1_000_000_000.0  / max(0.5, sec_med["pb"])
+eps        = round(price / max(1.0, pe), 0)
+```
+
+That module is honest about it - it ships an `is_imputed` map and per-field
+`field_provenance` tiers next to the values. `InputResolver` was not reading
+them, so a tier-1 EPS arrived as a plain float and was recorded REAL. Measured
+on a payload whose statements were all back-solved from market cap:
+
+| entry price | composite FV | FV / price |
+|---|---|---|
+| 10,000 | 8,850 | 0.8850 |
+| 20,000 | 17,701 | 0.8851 |
+| 40,000 | 35,401 | 0.8850 |
+| 80,000 | 70,802 | 0.8850 |
+
+`InputResolver` now honours the payload's own verdict: a field the upstream
+layer flags as imputed, or ranks below tier 2, is IMPUTED here however concrete
+it looks. The same payload now produces no valuation at all, at every price,
+which is the right answer for accounts derived from the price. A payload with
+no provenance metadata still resolves as REAL, so nothing else changed.
+
+### 6.2 A fabricated 15% volatility, directly under the fix for it
+
+`fair_value_backtest_service` guarded the Sharpe denominator against being
+clamped - and then handed it `ann_std = ... if len(rets) > 1 else 15.0`, with
+`ann_downside_std = ann_std * 0.65`. Guarding the ratio is pointless when the
+denominator itself was invented. Both are withheld now, and period returns are
+computed by `_period_returns`, which skips a step with no positive base instead
+of dividing by `max(prev, 1.0)`.
+
+### 6.3 More clamped denominators, and a test that was too narrow to see them
+
+The section-5 sweep matched only denominators *named* vol/std/dd/drawdown, so
+it walked past `cagr / max(1.0, abs(max_dd))` (Calmar, in two more code paths),
+`avg_win / max(1.0, avg_loss)`, `gross_gains / max(1.0, gross_losses)` with a
+`99.0` sentinel for "no losses", `avg_oos_sharpe / max(0.1, avg_is_sharpe)`,
+and `allocated_capital / max(1.0, entry_p)`. All now route through one
+module-level `safe_ratio`, which returns None rather than a floor.
+
+One of them was not a clamp but a tautology: the Monte Carlo Sharpe annualised
+by `sqrt(n_trades / max(1, n_trades / 12.0))`, which is exactly `sqrt(12)` for
+any n >= 12 - a hardcoded monthly cadence in the shape of a calculation. It now
+measures trades per year from the span the trades actually cover, and declines
+to annualise when the dates cannot support it.
+
+The test now matches the *shape* (any division by `max()` with a literal),
+exempting count guards like `x / max(1, len(trades))` - where the numerator is
+zero whenever the denominator would be - and listing the two ranking sort keys
+that legitimately floor a P/E, so a new one has to be justified in the file.
+
+### 6.4 The section-5 scope stopped at services/
+
+23 silent handlers remained in `server.py`, `run_app.py` and `scripts/`,
+including one that dropped `factor_weights` from a screener response with no
+trace, and one that lost the RRG disk cache silently. All de-silenced; the
+tests now sweep every production file in the repository rather than
+`services/` alone, and the element-contract test sweeps every bundled script
+rather than `app.js` alone.
+
+One consequence worth stating: `win_rate_pct` no longer reports 50.0 for a run
+with no trades, but it does still report 0.0 rather than None - read together
+with `total_trades`, which sits beside it. `profit_factor`, Calmar, Sharpe,
+Sortino, the payoff ratio and walk-forward efficiency are all withheld (None)
+when undefined, and `static/js/app.js` renders that as "n/a" rather than the
+string "null".

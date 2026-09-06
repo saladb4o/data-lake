@@ -8,6 +8,13 @@
 // services/market_calendar.EARLIEST_DATA_YEAR; keep the two in step.
 const EARLIEST_MARKET_DATA_YEAR = 2016;
 
+// A metric the backend withheld (null) because there was no meaningful
+// denominator must read as "n/a", not as the string "null".
+function fmtMetric(value, suffix = '') {
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a';
+  return `${value}${suffix}`;
+}
+
 function escapeHTML(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -10107,11 +10114,11 @@ class VnstockApp {
       setTxt('instKpiMaxDd', `-${m.max_drawdown_pct}%`, 'mono txt-down');
       setTxt('instKpiUlcer', `Ulcer Index: ${m.ulcer_index}`);
 
-      setTxt('instKpiSharpe', `${m.sharpe_ratio} / ${m.sortino_ratio}`, 'mono font-bold');
-      setTxt('instKpiCalmar', `Calmar: ${m.calmar_ratio} (Vol: ${m.annualized_volatility_pct}%)`);
+      setTxt('instKpiSharpe', `${fmtMetric(m.sharpe_ratio)} / ${fmtMetric(m.sortino_ratio)}`, 'mono font-bold');
+      setTxt('instKpiCalmar', `Calmar: ${fmtMetric(m.calmar_ratio)} (Vol: ${fmtMetric(m.annualized_volatility_pct, '%')})`);
 
-      setTxt('instKpiWinRate', `${m.win_rate_pct}% (PF: ${m.profit_factor})`, 'mono font-bold');
-      setTxt('instKpiTradesCount', `${m.total_trades} Lệnh (${m.winning_trades_count}W/${m.losing_trades_count}L, Payoff: ${m.payoff_ratio})`);
+      setTxt('instKpiWinRate', `${fmtMetric(m.win_rate_pct, '%')} (PF: ${fmtMetric(m.profit_factor)})`, 'mono font-bold');
+      setTxt('instKpiTradesCount', `${m.total_trades} Lệnh (${m.winning_trades_count}W/${m.losing_trades_count}L, Payoff: ${fmtMetric(m.payoff_ratio)})`);
 
       setTxt('instKpiExpectancy', `${Number(m.expectancy_per_trade_vnd || 0).toLocaleString()} đ/lệnh`, `mono ${m.expectancy_per_trade_vnd >= 0 ? 'txt-up' : 'txt-down'}`);
       setTxt('instKpiFriction', `Tổng ma sát: ${Number(m.total_friction_vnd || 0).toLocaleString()} đ`);
@@ -10485,12 +10492,12 @@ class VnstockApp {
 
       const d = json.data;
       if (badge) {
-        badge.textContent = `WFE: ${d.walk_forward_efficiency} (${d.wfe_rating})`;
-        badge.className = `badge-tag ${d.walk_forward_efficiency >= 0.7 ? 'badge-success' : (d.walk_forward_efficiency >= 0.5 ? 'badge-info' : 'badge-danger')}`;
+        badge.textContent = `WFE: ${fmtMetric(d.walk_forward_efficiency)} (${d.wfe_rating})`;
+        badge.className = `badge-tag ${d.walk_forward_efficiency == null ? 'badge-info' : (d.walk_forward_efficiency >= 0.7 ? 'badge-success' : (d.walk_forward_efficiency >= 0.5 ? 'badge-info' : 'badge-danger'))}`;
       }
 
       if (desc) {
-        desc.textContent = `Walk-Forward Efficiency: ${d.walk_forward_efficiency} • Tổng lợi nhuận OOS ghép nối: ${d.wfa_metrics?.total_return_pct}% (${d.splits_count} chu kỳ trượt)`;
+        desc.textContent = `Walk-Forward Efficiency: ${fmtMetric(d.walk_forward_efficiency)} • Tổng lợi nhuận OOS ghép nối: ${d.wfa_metrics?.total_return_pct}% (${d.splits_count} chu kỳ trượt)`;
       }
 
       if (container) {
@@ -10987,8 +10994,7 @@ class VnstockApp {
       setTxt('fvBtMetricMaxDd', `-${m.max_drawdown_pct}%`);
       // Sharpe/Sortino are withheld (null) when the volatility denominator is
       // too small to divide by; render that rather than printing "null".
-      const ratio = (v) => (v === null || v === undefined ? 'n/a' : v);
-      setTxt('fvBtMetricSharpe', `${ratio(m.sharpe_ratio)} (Sortino: ${ratio(m.sortino_ratio)})`);
+      setTxt('fvBtMetricSharpe', `${fmtMetric(m.sharpe_ratio)} (Sortino: ${fmtMetric(m.sortino_ratio)})`);
       setTxt('fvBtMetricWinRate', `${m.win_rate_pct}% (${m.total_trades} lệnh)`);
 
       // 1b. Methodology banner. A run built on price-derived fundamentals

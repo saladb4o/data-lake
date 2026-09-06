@@ -257,8 +257,10 @@ class BacktestMetrics:
     sharpe_ratio: Optional[float]
     sortino_ratio: Optional[float]
     calmar_ratio: Optional[float]
+    # profit_factor is withheld (None) when there is no losing trade to divide
+    # by; win_rate_pct stays numeric and is read together with total_trades.
     win_rate_pct: float
-    profit_factor: float
+    profit_factor: Optional[float]
     total_trades: int
     winning_trades: int
     losing_trades: int
@@ -370,6 +372,27 @@ VALUATION_MODELS_CATALOG = [
 # =============================================================================
 # INTERNAL QUANT HELPERS
 # =============================================================================
+
+def _period_returns(equity_values: Sequence[float]) -> List[float]:
+    """Period-over-period returns, skipping any step with no base to grow from.
+
+    Dividing by ``max(prev, 1.0)`` turned a step off a zero or negative equity
+    base into a return in the millions of percent, which then set the
+    volatility for the whole run. A step with no usable base is not a return
+    and is left out.
+    """
+    out: List[float] = []
+    for i in range(1, len(equity_values)):
+        prev = equity_values[i - 1]
+        try:
+            prev = float(prev)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(prev) or prev <= 0:
+            continue
+        out.append((float(equity_values[i]) - prev) / prev)
+    return out
+
 
 def _compute_beta_and_alpha(
     strategy_q_rets: List[float],
@@ -1154,10 +1177,14 @@ class FairValueBacktestService:
         win_trades = [r for r in all_rets if r > 0]
         loss_trades = [r for r in all_rets if r <= 0]
 
-        win_rate = (len(win_trades) / len(all_rets) * 100.0) if all_rets else 50.0
-        sum_gain = sum(win_trades) if win_trades else 1.0
-        sum_loss = abs(sum(loss_trades)) if loss_trades else 1.0
-        profit_factor = round(sum_gain / max(sum_loss, 0.01), 2)
+        # 50.0 for a run with no trades was a coin flip presented as a measured
+        # result. 0.0 is not: it reads as "0 wins", and `total_trades` sits
+        # beside it in the payload to say out of how many.
+        win_rate = (len(win_trades) / len(all_rets) * 100.0) if all_rets else 0.0
+        sum_gain = sum(win_trades) if win_trades else 0.0
+        sum_loss = abs(sum(loss_trades)) if loss_trades else 0.0
+        # Undefined without losses, rather than gains divided by a 0.01 floor.
+        profit_factor = round(sum_gain / sum_loss, 2) if sum_loss > 0 else None
 
         # Max Drawdown — computed from equity curve (FIX BUG-5 for strategy)
         peak = base_nav
@@ -1180,23 +1207,21 @@ class FairValueBacktestService:
         rf_annual_pct = DEFAULT_RF * 100.0
 
         # Annualised volatility for Sharpe / Sortino — use quarterly equity curve returns
+        # Guarding the ratio is pointless if the denominator handed to it was
+        # invented. A period-over-period return on a zero equity base is not
+        # a return, and 15.0 is not a volatility - both are withheld.
         eq_strat_vals = [pt["strategy_equity"] for pt in equity_curve_data]
-        if len(eq_strat_vals) >= 2:
-            q_strat_rets = [
-                (eq_strat_vals[i] - eq_strat_vals[i - 1]) / max(eq_strat_vals[i - 1], 1.0)
-                for i in range(1, len(eq_strat_vals))
-            ]
-            ann_std = float(np.std(q_strat_rets, ddof=1)) * math.sqrt(4.0) * 100.0 if len(q_strat_rets) > 1 else 15.0
+        q_strat_rets = _period_returns(eq_strat_vals)
+        ann_std: Optional[float] = None
+        ann_downside_std: Optional[float] = None
+        if len(q_strat_rets) > 1:
+            ann_std = float(np.std(q_strat_rets, ddof=1)) * math.sqrt(4.0) * 100.0
             rf_q = rf_annual_pct / 4.0
             downside_q_rets = [r * 100.0 for r in q_strat_rets if r * 100.0 < rf_q]
-            ann_downside_std = (
-                float(np.std(downside_q_rets, ddof=1)) * math.sqrt(4.0)
-                if len(downside_q_rets) > 1
-                else ann_std * 0.65
-            )
-        else:
-            ann_std = float(np.std(all_rets)) if len(all_rets) > 1 else 15.0
-            ann_downside_std = ann_std * 0.65
+            if len(downside_q_rets) > 1:
+                ann_downside_std = float(np.std(downside_q_rets, ddof=1)) * math.sqrt(4.0)
+        elif len(all_rets) > 1:
+            ann_std = float(np.std(all_rets))
 
         # These denominators are percentages. Clamping them at 1.0 meant any
         # strategy with volatility under 1% a year, or a drawdown under 1%,
@@ -1206,7 +1231,7 @@ class FairValueBacktestService:
         # is reported as unavailable rather than as a large number.
         MIN_MEANINGFUL_PCT = 0.01  # one basis point of annualised percentage
 
-        def _ratio(numerator: float, denominator: float) -> Optional[float]:
+        def _ratio(numerator: float, denominator: Optional[float]) -> Optional[float]:
             if denominator is None or denominator < MIN_MEANINGFUL_PCT:
                 return None
             return round(numerator / denominator, 2)
@@ -1217,13 +1242,10 @@ class FairValueBacktestService:
 
         # FIX BUG-4: Beta via regression, Alpha via Jensen's formula
         eq_bm_vals = [pt["benchmark_equity"] for pt in equity_curve_data]
-        if len(eq_strat_vals) >= 2 and len(eq_bm_vals) >= 2:
-            q_bm_rets = [
-                (eq_bm_vals[i] - eq_bm_vals[i - 1]) / max(eq_bm_vals[i - 1], 1.0)
-                for i in range(1, len(eq_bm_vals))
-            ]
+        q_bm_rets = _period_returns(eq_bm_vals)
+        if q_strat_rets and q_bm_rets:
             beta, alpha_pct = _compute_beta_and_alpha(
-                strategy_q_rets=q_strat_rets if len(eq_strat_vals) >= 2 else [],
+                strategy_q_rets=q_strat_rets,
                 benchmark_q_rets=q_bm_rets,
                 rf_annual_pct=rf_annual_pct,
             )

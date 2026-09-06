@@ -17,6 +17,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -24,7 +27,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -113,7 +116,7 @@ def fetch_from_yfinance(symbol: str) -> Optional[pd.DataFrame]:
             if 'close' in df.columns and 'time' in df.columns:
                 return df[['time', 'open', 'high', 'low', 'close', 'volume']]
     except Exception:
-        pass
+        logger.debug("fetch_from_yfinance: swallowed Exception", exc_info=True)
     return None
 
 def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
@@ -247,7 +250,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                             if success_count % 15 == 0 or success_count <= 5:
                                 print(f"  ✓ [{success_count}] {sym}: {res['total_quarters']} Quarters ({res['earliest_quarter']} -> {res['latest_quarter']})")
                 except Exception:
-                    pass
+                    logger.debug("sync_all_symbols: swallowed Exception", exc_info=True)
         except Exception as e:
             print(f"  ⚠️ Batch download error: {e}")
 
@@ -262,7 +265,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                             existing_store[sym] = res
                             success_count += 1
                 except Exception:
-                    pass
+                    logger.debug("sync_all_symbols: swallowed Exception", exc_info=True)
 
         # Save checkpoint
         if (i + BATCH_SIZE) % 100 == 0 or (i + BATCH_SIZE) >= len(symbols_to_fetch):

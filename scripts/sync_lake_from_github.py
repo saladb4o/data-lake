@@ -11,13 +11,16 @@ import sys
 import json
 import shutil
 import urllib.request
+import logging
+
+logger = logging.getLogger(__name__)
 
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 LOCAL_PDF_LAKE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "pdf_lake")
 os.makedirs(LOCAL_PDF_LAKE, exist_ok=True)

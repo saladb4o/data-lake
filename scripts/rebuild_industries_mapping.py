@@ -33,6 +33,9 @@ import os
 import sys
 import tempfile
 import unicodedata
+import logging
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(BASE_DIR, "data", "industries.json")
@@ -100,12 +103,12 @@ def fix_mojibake(text: str) -> tuple[str, bool]:
     try:
         candidates.append(text.encode("latin-1").decode("utf-8"))
     except (UnicodeEncodeError, UnicodeDecodeError):
-        pass
+        logger.debug("fix_mojibake: swallowed (UnicodeEncodeError, UnicodeDecodeError)", exc_info=True)
     # utf-8 bytes mis-decoded as cp1252 (Windows) variant
     try:
         candidates.append(text.encode("cp1252").decode("utf-8"))
     except (UnicodeEncodeError, UnicodeDecodeError):
-        pass
+        logger.debug("fix_mojibake: swallowed (UnicodeEncodeError, UnicodeDecodeError)", exc_info=True)
     # NFKC normalization helps when combining marks were mangled separately
     candidates.append(unicodedata.normalize("NFC", text))
 

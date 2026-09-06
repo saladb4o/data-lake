@@ -12,6 +12,9 @@ import json
 import time
 import argparse
 from typing import Dict, List, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure root dir is in sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,7 +51,7 @@ def main():
                         elif isinstance(item, str):
                             all_symbols.append(item)
         except Exception:
-            pass
+            logger.debug("main: swallowed Exception", exc_info=True)
 
     if not all_symbols:
         try:
@@ -59,7 +62,7 @@ def main():
                 col = 'symbol' if 'symbol' in df.columns else 'ticker'
                 all_symbols = df[col].dropna().unique().tolist()
         except Exception:
-            pass
+            logger.debug("main: swallowed Exception", exc_info=True)
 
     if not all_symbols and ALL_SYMBOLS_MAP:
         all_symbols = list(ALL_SYMBOLS_MAP.keys())

@@ -17,6 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -24,7 +27,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 from services.stock_service import (
     get_trading_board,
@@ -129,7 +132,8 @@ def _load_alert_rules() -> None:
             _alert_id_seq = itertools.count(max_id + 1)
         print(f"[ALERTS] Loaded {len(_alert_rules_store)} alert rule(s) from {ALERT_RULES_PATH}")
     except FileNotFoundError:
-        pass
+        # Expected on a fresh install: no rules have been saved yet.
+        print(f"[ALERTS] No rules file at {ALERT_RULES_PATH}; starting empty")
     except Exception as e:
         print(f"[ALERTS] Failed to load alert rules: {e}")
 
@@ -226,7 +230,9 @@ def _warm_rrg_cache_async():
             api_sectors_rrg(benchmark="VNINDEX", interval="1W", tail=8, method="jdk")
             api_sectors_rrg(benchmark="VNINDEX", interval="1W", tail=8, method="enhanced")
         except Exception:
-            pass
+            # Warming the cache is best-effort, but a warm-up that fails on
+            # every boot means the first real request pays for it every time.
+            logger.warning("RRG cache warm-up failed", exc_info=True)
 
     threading.Thread(target=_warm, daemon=True, name="rrg-cache-warmer").start()
 
@@ -814,7 +820,12 @@ def api_sectors_rrg(
             with open(_disk_path, "w", encoding="utf-8") as _f:
                 _json.dump(_disk, _f)
         except Exception:
-            pass
+            # The in-memory cache still holds the payload; only the on-disk
+            # copy that would survive a restart is lost.
+            logger.warning(
+                "Could not persist the RRG disk cache to %s", _disk_path,
+                exc_info=True,
+            )
         return JSONResponse(content={"status": "success", "data": payload})
     except Exception as e:
         return _error_response(e)
@@ -960,7 +971,12 @@ def api_quant_screener(
                 "composite": {"growth": 0.35, "quality": 0.25, "health": 0.20, "valuation": 0.20}
             }
         except Exception:
-            pass
+            # factor_weights is simply omitted from the response when this
+            # fails, which a client cannot tell apart from "not applicable".
+            logger.warning(
+                "Could not attach factor_weights to the screener response",
+                exc_info=True,
+            )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
         return _error_response(e)

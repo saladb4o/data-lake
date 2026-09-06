@@ -422,11 +422,47 @@ class InputResolver:
     and finally a structural assumption (IMPUTED). Provenance propagates: a
     derivation that reads an imputed field is itself imputed, so a single
     missing statement line marks everything downstream of it.
+
+    A present number is not automatically a real one. Upstream reconstruction
+    (``services.unified_data_service.reconstruct_financial_triangles``) will
+    back-solve a missing EPS, revenue or equity from market capitalisation and
+    a sector multiple - which is the price tautology again, one layer up - but
+    it says so, in the ``is_imputed`` map and the ``field_provenance`` tiers it
+    ships alongside the values. Treating those numbers as observations would
+    let the circularity back in through the payload, so the payload's own
+    verdict wins: a field the upstream layer calls imputed is IMPUTED here,
+    however concrete it looks.
     """
+
+    #: Upstream tiers: 4 = audited filing, 3 = vendor-reported, 2 = triangulated
+    #: from other reported lines, 1 = sector-median stand-in, 0 = fabricated.
+    #: Tier 2 is a definitional derivation from real inputs, so it counts as
+    #: evidence; tiers 0 and 1 carry no company-specific information.
+    MIN_TRUSTED_UPSTREAM_TIER = 2
 
     def __init__(self, data: Dict[str, Any]):
         self._data = data
         self.provenance: Dict[str, str] = {}
+        raw_flags = data.get("is_imputed")
+        self._upstream_imputed = raw_flags if isinstance(raw_flags, dict) else {}
+        raw_tiers = data.get("field_provenance")
+        self._upstream_tiers = raw_tiers if isinstance(raw_tiers, dict) else {}
+
+    # -- upstream verdict -------------------------------------------------
+    def upstream_says_imputed(self, keys: Sequence[str]) -> bool:
+        """True when the payload itself flags one of ``keys`` as not observed.
+
+        Silent when the payload carries no provenance at all: absence of a
+        flag is not evidence that a value is invented, so a plain dict of
+        numbers still resolves to REAL exactly as before.
+        """
+        for key in keys:
+            if self._upstream_imputed.get(key) is True:
+                return True
+            tier = self._upstream_tiers.get(key)
+            if isinstance(tier, (int, float)) and tier < self.MIN_TRUSTED_UPSTREAM_TIER:
+                return True
+        return False
 
     # -- lookup ----------------------------------------------------------
     def _lookup(self, keys: Sequence[str]) -> Optional[float]:
@@ -478,7 +514,11 @@ class InputResolver:
         """
         found = self._lookup(keys)
         if found is not None and not (require_positive and found <= 0):
-            self.provenance[field] = REAL
+            # A number the upstream layer back-solved from market cap is an
+            # assumption, not a reading, no matter that it is present here.
+            self.provenance[field] = (
+                IMPUTED if self.upstream_says_imputed(keys) else REAL
+            )
             return found
 
         if derive is not None:

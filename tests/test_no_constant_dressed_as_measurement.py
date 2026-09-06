@@ -10,6 +10,8 @@ Two of these shipped as confident-looking diagnostics:
   * the foreign-investor VWAP was current_price * 0.97, so "distance to cost
     basis" was always -3.09%.
 """
+import re
+
 import pytest
 
 import services.stock_service as ss
@@ -84,6 +86,29 @@ class TestForeignVwapIsNotAPriceMultiple:
         )
 
 
+# Ranking sort keys, not reported metrics. `-rev_3y_cagr / max(0.1, ps)` orders
+# a basket; the floor stops a near-zero P/S from rocketing one candidate to the
+# top on a data error, and no number from it is ever shown or averaged. These
+# are listed rather than pattern-matched so a new one has to be justified here.
+ALLOWED_RANK_KEY_CLAMPS = {
+    '/ max(0.1, x.get("ps", 1.0)',
+    '/ max(1.0, x.get("pe", 10.0)',
+}
+
+# `x / max(1, len(items))` is not the same defect: the numerator is a sum or
+# count over the same collection, so an empty collection gives 0/1 = 0, which
+# is the right answer. Only an integer floor of exactly 1 over a count-shaped
+# denominator qualifies - a float floor (max(1.0, avg_loss)) is a magnitude
+# being propped up, not a division guarded against emptiness.
+_COUNT_DENOMINATOR = re.compile(
+    r"max\(\s*1\s*,\s*(?:len\(|[a-z_]*(?:count|total_trades|top_k|n_trades|n_splits)\b)"
+)
+
+
+def _is_count_guard(expression: str) -> bool:
+    return bool(_COUNT_DENOMINATOR.search(expression))
+
+
 class TestRiskRatiosAreWithheldNotInflated:
     """Every clamped denominator across the three backtest services."""
 
@@ -98,10 +123,21 @@ class TestRiskRatiosAreWithheldNotInflated:
         import re
 
         source = _code_only(inspect.getsource(importlib.import_module(module_name)))
-        # e.g. "/ max(0.1, ann_std)" - clamping a volatility or drawdown up
-        # turns a near-zero denominator into an inflated ratio.
-        offenders = re.findall(
-            r"/\s*max\(\s*[0-9.]+\s*,\s*[a-z_]*(?:vol|std|dd|drawdown)[a-z_]*",
-            source,
+        # An earlier version of this test only matched denominators *named*
+        # vol/std/dd/drawdown, and so walked straight past
+        # `cagr / max(1.0, abs(max_dd))`, `avg_win / max(1.0, avg_loss)` and
+        # `avg_oos_sharpe / max(0.1, avg_is_sharpe)`. Match the shape instead
+        # of the name: any division whose denominator is max() with a literal.
+        offenders = re.findall(r"/\s*max\(\s*[^)]{0,120}?\)", source)
+        offenders = [
+            o for o in offenders
+            if (re.search(r"max\(\s*[-0-9.]+\s*,", o)         # max(LITERAL, x)
+                or re.search(r",\s*[-0-9.]+\s*\)\s*$", o))    # max(x, LITERAL)
+            and not _is_count_guard(o)
+            and o not in ALLOWED_RANK_KEY_CLAMPS
+        ]
+        assert not offenders, (
+            f"{module_name} divides by a clamped denominator: {offenders}. "
+            "Return None when the denominator is unusable - a floor does not "
+            "avoid the problem, it reports an understated or invented ratio."
         )
-        assert not offenders, f"{module_name} still clamps a ratio denominator"
