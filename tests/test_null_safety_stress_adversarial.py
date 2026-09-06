@@ -220,10 +220,12 @@ class TestValuationEngineComprehensiveNullSafety:
         return ValuationEngine()
 
     def test_valuation_with_none_fundamental_data(self, engine):
-        val = engine.get_comprehensive_valuation("TEST_NONE", fundamental_data=None)
-        assert isinstance(val, ValuationMatrixResult)
-        assert val.composite_fair_value > 0
-        assert len(val.models) == 22
+        # Mock-data fallback is deliberately disabled (see the no-silent-fills
+        # policy in test_gate3_no_silent_fills.py): with no fundamental data and
+        # no screener snapshot on disk, valuation must fail loudly rather than
+        # invent inputs.
+        with pytest.raises(ValueError, match="Fundamental data is required"):
+            engine.get_comprehensive_valuation("TEST_NONE", fundamental_data=None)
 
     def test_valuation_with_empty_dict(self, engine):
         val = engine.get_comprehensive_valuation("TEST_EMPTY", fundamental_data={})

@@ -54,3 +54,29 @@
 - Tier 3: Pairwise cross-feature interaction testing
 - Tier 4: $\ge 5$ real-world end-to-end workload scenarios (including all 30 VN30 tickers)
 - Tier 5: Adversarial coverage hardening with stress generators
+
+---
+
+## Running the Suite
+
+Install runtime + dev dependencies, then run pytest:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                      # everything (needs live network access)
+pytest -m "not network"     # deterministic tier only - this is what CI gates on
+pytest -m network           # live-upstream integration tier only
+```
+
+### Two tiers
+
+The suite is split by whether a test reaches a live upstream:
+
+| Tier | Selector | Count | Notes |
+|---|---|---:|---|
+| Deterministic | `-m "not network"` | 535 | Pure logic over fixtures/synthetic inputs. Offline, reproducible, gated in CI (`.github/workflows/ci.yml`). |
+| Network | `-m network` | 322 | Hits vnstock, VNDirect, TradingView and RSS feeds. Expect failures offline, and rate-limit failures on the community vnstock tier (60 requests/minute). |
+
+Network tests are marked centrally by module in `tests/conftest.py` (`NETWORK_TEST_MODULES`)
+rather than with per-test decorators. When adding a test module that reaches a live
+API, add it to that set so it does not destabilise CI.

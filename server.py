@@ -255,11 +255,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS
+# Enable CORS.
+# Origins are configurable via the CORS_ALLOW_ORIGINS env var (comma-separated).
+# Defaults to localhost only: the app is normally served from the same origin as
+# its static frontend, so no cross-origin access is required.
+# Note: credentialed requests cannot use a wildcard origin, so allow_credentials
+# is only enabled when an explicit origin list is in effect.
+_cors_origins_env = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+if _cors_origins_env:
+    CORS_ALLOW_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    CORS_ALLOW_ORIGINS = [
+        f"http://{_h}:{_p}"
+        for _h in ("127.0.0.1", "localhost")
+        for _p in (8000, 8080, 8008, 8888, 5000, 5001, 8050)
+    ]
+
+_cors_wildcard = "*" in CORS_ALLOW_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=not _cors_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
