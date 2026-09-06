@@ -16,6 +16,8 @@ import time
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
+from services.market_calendar import current_market_year
+
 ETF_PROFILES = [
     {
         "id": "fubon_ftse",
@@ -89,8 +91,11 @@ ETF_PROFILES = [
     }
 ]
 
-def calculate_review_dates(year: int = 2026) -> List[Dict[str, Any]]:
+def calculate_review_dates(year: Optional[int] = None) -> List[Dict[str, Any]]:
     """Calculates exact announcement and rebalance dates for all quarters in a year."""
+    # Was a literal 2026, so from 2027 the calendar would have shown last
+    # year's review dates as upcoming.
+    year = year if year is not None else current_market_year()
     # Quarterly schedule template for Q1..Q4
     # Q1: March, Q2: June, Q3: September, Q4: December
     quarters = [

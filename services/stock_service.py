@@ -21,8 +21,13 @@ from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 
 def deterministic_hash(key: Any) -> int:
-    """Returns a completely deterministic, process-independent integer hash."""
-    return zlib.crc32(str(key).encode("utf-8"))
+    """Deprecated alias for :func:`services.stable_identity.stable_hash`.
+
+    Kept so existing callers keep working; new code should import stable_hash.
+    """
+    from services.stable_identity import stable_hash as _stable_hash
+
+    return _stable_hash(key)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -30,6 +35,8 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
+        # silent-ok: runs before `import logging`; a console that will not
+        # switch to UTF-8 is cosmetic and must not stop the import.
         pass
 
 # TLS honesty (M5): never monkeypatch requests/urllib3 process-wide.
@@ -48,20 +55,23 @@ if _EXPLICIT_INSECURE:
     try:
         requests.Session.verify = False
     except Exception:
-        pass
-else:
-    try:
-        import services.tls_config as _tc
-        _tc._INSECURE_TLS = False
-        _tc.TLS_VERIFY = True
-        import services.unified_data_service as _uds
-        _uds.TLS_VERIFY = True
-        if hasattr(_uds, "_HTTP_SESSION"):
-            _uds._HTTP_SESSION.verify = True
-    except Exception:
-        pass
+        # Failing to apply the opt-out leaves verification ON, which is the
+        # safe direction - but say so rather than leaving it a mystery.
+        logging.getLogger(__name__).warning(
+            "VNSTOCK_INSECURE_TLS=1 was set but could not be applied; "
+            "certificate verification stays enabled.",
+            exc_info=True,
+        )
+# No `else` branch re-asserting verification on other modules. It used to reach
+# into services.tls_config and services.unified_data_service to force the flags
+# back on, wrapped in `except Exception: pass` - which hid the fact that the
+# unified_data_service import is circular from here and the assignment never
+# ran. It is also redundant: tls_config derives TLS_VERIFY from the same
+# environment variable and defaults to verifying, and unified_data_service
+# imports that value directly. tls_config is the single source of truth.
 
 from services.rate_limiter import limit
+from services.stable_identity import stable_hash
 
 logger = logging.getLogger(__name__)
 
@@ -192,13 +202,13 @@ def resolve_data_file(filename: str) -> str:
             try:
                 candidates.append((gpath, os.path.getsize(gpath), os.path.getmtime(gpath)))
             except Exception:
-                pass
+                logger.debug("resolve_data_file: swallowed Exception", exc_info=True)
             
     if os.path.exists(local_path):
         try:
             candidates.append((local_path, os.path.getsize(local_path), os.path.getmtime(local_path)))
         except Exception:
-            pass
+            logger.debug("resolve_data_file: swallowed Exception", exc_info=True)
         
     if not candidates:
         return local_path
@@ -570,6 +580,75 @@ HNX_KNOWN = {"SHS", "MBS", "PVS", "IDC", "CEO", "HUT", "VCS", "TNG", "BVS", "PVC
 UPCOM_KNOWN = {"BSR", "MCH", "VGI", "ACV", "VEA", "QNS", "FOX", "C4G", "MSR", "OIL", "DRI", "TBD", "NAB"}
 
 ALL_SYMBOLS_MAP: Dict[str, Dict[str, Any]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Reference price access
+# ---------------------------------------------------------------------------
+# ALL_SYMBOLS_MAP carries ``ref`` (reference price, in thousands of VND) and
+# ``market_cap`` as None when the exchange feed did not supply them. They used
+# to be invented - first from crc32(symbol) at map-build time, then again at
+# each read site via ``.get("ref", 50.0)``. A 50,000 VND price out of thin air
+# is indistinguishable from a real one once it reaches a chart or a valuation,
+# so these helpers make the absence explicit: callers either propagate None or
+# refuse, and never substitute a number.
+
+def _finite_or_none(raw: Any) -> Optional[float]:
+    """Returns a finite float, or None for anything unusable."""
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def master_ref_price(master_info: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Reference price in thousands of VND, or None when not quoted."""
+    if not isinstance(master_info, dict):
+        return None
+    raw = master_info.get("ref")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def master_price_vnd(master_info: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Reference price in VND, or None when not quoted."""
+    ref = master_ref_price(master_info)
+    return None if ref is None else ref * 1000.0
+
+
+def require_master_price_vnd(symbol: str, master_info: Optional[Dict[str, Any]]) -> float:
+    """Reference price in VND, or raises. Mirrors valuation_engine._require_price."""
+    price = master_price_vnd(master_info)
+    if price is None:
+        raise ValueError(
+            f"No reference price is available for {symbol}; analysis against a "
+            "default price is disabled."
+        )
+    return price
+
+
+def master_market_cap(master_info: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Market cap as reported, or None when not supplied."""
+    if not isinstance(master_info, dict):
+        return None
+    raw = master_info.get("market_cap")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 TICKER_ENTITY_MAP: Dict[str, Dict[str, Any]] = {}
 NAME_TO_TICKER_MAP: Dict[str, str] = {}
 INDUSTRY_TO_TICKERS: Dict[str, Set[str]] = {}
@@ -872,7 +951,7 @@ def load_master_universe():
                 if isinstance(inf_k, dict) and inf_k.get("exchange"):
                     master_exchanges[sym_k.upper()] = inf_k["exchange"].upper()
         except Exception:
-            pass
+            logger.debug("load_master_universe: swallowed Exception", exc_info=True)
 
     local_syms_file = os.path.join(base_data_dir, "all_symbols.json")
     if os.path.exists(local_syms_file):
@@ -887,7 +966,7 @@ def load_master_universe():
                         if lsym not in master_exchanges:
                             master_exchanges[lsym] = lex
         except Exception:
-            pass
+            logger.debug("load_master_universe: swallowed Exception", exc_info=True)
 
     if os.path.exists(syms_path):
         try:
@@ -945,20 +1024,27 @@ def load_master_universe():
                     if not industry_title:
                         industry_title = r.get("industry") or (SECTOR_ICB_REGISTRY.get(sec, {}).get("name", "Doanh nghiệp niêm yết"))
 
-                    ref = float(r.get("ref", 0.0))
-                    if ref <= 0:
-                        h_seed = deterministic_hash(sym)
-                        ref = round(15.0 + (h_seed % 85) + ((h_seed % 90) / 100.0), 2)
-                    
+                    # A missing reference price or market cap used to be
+                    # invented from crc32(symbol): ref became a number between
+                    # 15 and 100, market cap between 1,500 and 146,500bn. The
+                    # values were stable across runs, which made them look
+                    # like real observations rather than a function of how the
+                    # ticker is spelled - and ALL_SYMBOLS_MAP feeds the
+                    # screener, the peer engine and the backtest universe, so
+                    # the fabrication propagated everywhere downstream.
+                    # Absent quotes are now absent.
+                    ref_raw = float(r.get("ref", 0.0))
+                    ref = ref_raw if ref_raw > 0 else None
+
                     ceil = float(r.get("ceil", 0.0))
                     flor = float(r.get("floor", 0.0))
-                    if ceil <= 0 or flor <= 0:
+                    if (ceil <= 0 or flor <= 0) and ref is not None:
                         ceil, flor = get_price_limits(ex, ref)
+                    elif ref is None:
+                        ceil, flor = None, None
 
-                    cap = int(r.get("market_cap", 0))
-                    if cap <= 0:
-                        h_seed = deterministic_hash(sym)
-                        cap = int(1500 + (h_seed % 145000))
+                    cap_raw = int(r.get("market_cap", 0))
+                    cap = cap_raw if cap_raw > 0 else None
 
                     ALL_SYMBOLS_MAP[sym] = {
                         "symbol": sym,
@@ -1230,7 +1316,16 @@ def generate_order_book_depth(symbol: str) -> Dict[str, Any]:
 
     if ref is None or ceil_p is None or floor_p is None:
         info = ALL_SYMBOLS_MAP.get(symbol, {})
-        ref = ref or info.get("ref", 50.0)
+        ref = ref if ref is not None else master_ref_price(info)
+        if ref is None:
+            # An order book drawn around an invented reference price looks
+            # exactly like a real one. Report the absence instead.
+            return {
+                "symbol": symbol,
+                "status": "unavailable",
+                "reason": "no reference price for this symbol",
+                "bids": [], "asks": [],
+            }
         ceil_p, floor_p = get_price_limits(info.get("exchange", "HOSE"), ref)
 
     # Extract Bid 1, 2, 3
@@ -1337,7 +1432,9 @@ def get_trading_board_row(symbol: str, quote: Optional[Dict[str, Any]] = None) -
     """
     info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
     ex = info.get("exchange", "HOSE")
-    ref = info.get("ref", 20.0)
+    # None when the exchange feed carried no quote. Downstream renders it as
+    # "no data" rather than as a 20,000 VND stock that does not exist.
+    ref = master_ref_price(info)
     ceil_p = info.get("ceil", 0.0)
     floor_p = info.get("floor", 0.0)
     if ceil_p <= 0 or floor_p <= 0:
@@ -1770,9 +1867,9 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
     cached = cache.get(cache_key)
     if cached: return cached
 
-    master_info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE", "ref": 50.0})
-    ref = master_info.get("ref", 50.0)
-    ceil, flor = get_price_limits(master_info.get("exchange", "HOSE"), ref)
+    master_info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
+    ref = master_ref_price(master_info)
+    ceil, flor = get_price_limits(master_info.get("exchange", "HOSE"), ref) if ref is not None else (None, None)
 
     now_d = datetime.date.today()
     end_str = now_d.strftime("%Y-%m-%d")
@@ -1834,7 +1931,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
             if last_bar_date < end_str:
                 executor.submit(_sync_single_stock_incremental, symbol, last_bar_date, end_str)
         except Exception:
-            pass
+            logger.debug("get_stock_history: swallowed Exception", exc_info=True)
 
     # Step 2: Tier 1 Live Feed - Fetch from TradingView WebSocket (fast, high fidelity, 1200+ bars)
     if interval == "1D" and (df_real is None or df_real.empty or len(df_real) < 3):
@@ -1871,7 +1968,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                         if df_raw is not None and not df_raw.empty and len(df_raw) >= 3:
                             return df_raw.copy()
                     except Exception:
-                        pass
+                        logger.debug("get_stock_history: swallowed Exception", exc_info=True)
                 return None
 
             for _attempt in range(2):
@@ -1882,7 +1979,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                         if df_real is not None and not df_real.empty and len(df_real) >= 3:
                             break
                 except Exception:
-                    pass
+                    logger.debug("get_stock_history: swallowed Exception", exc_info=True)
 
     # Step 4: Tier 3 Fallback - Use historical price lake candles if live sources are unavailable
     if (df_real is None or df_real.empty or len(df_real) < 3) and lake_candles and len(lake_candles) >= 3:
@@ -1917,7 +2014,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                 })
             executor.submit(disk_lake.save_symbol_record, "historical_prices.json", symbol, persisted_bars)
         except Exception:
-            pass
+            logger.debug("get_stock_history: swallowed Exception", exc_info=True)
 
     if df_real is not None and not df_real.empty and len(df_real) >= 3:
         try:
@@ -2015,9 +2112,9 @@ def get_company_overview(symbol: str) -> Dict[str, Any]:
     cached = cache.get(cache_key)
     if cached: return cached
 
-    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE", "market_cap": 25000})
+    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
     sec_name = SECTOR_METADATA.get(info.get("sector", ""), {}).get("name", "Đang cập nhật")
-    ref = info.get("ref", 50.0)
+    ref = master_ref_price(info)
 
     # 1. Fast L2 lookup from screener_snapshot.json / company_profiles.json
     snap = disk_lake.read_json("screener_snapshot.json") or {}
@@ -2121,7 +2218,7 @@ def get_company_overview(symbol: str) -> Dict[str, Any]:
                 high_52w_str = f"{max(b_highs):.2f}"
                 low_52w_str = f"{min(b_lows):.2f}"
     except Exception:
-        pass
+        logger.debug("get_company_overview: swallowed Exception", exc_info=True)
 
     # Non-blocking foreign room
     f_room_str = "--"
@@ -2134,7 +2231,7 @@ def get_company_overview(symbol: str) -> Dict[str, Any]:
                 if f_room_val >= 0:
                     f_room_str = f"{f_room_val:,} CP"
             except (TypeError, ValueError):
-                pass
+                logger.debug("get_company_overview: swallowed (TypeError, ValueError)", exc_info=True)
 
     result = {
         "symbol": symbol,
@@ -2723,7 +2820,7 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
             enriched = enrich_article_metadata(art)
             
             if link not in CENTRAL_NEWS_LAKE:
-                enriched["id"] = art.get("id") or f"lake_{abs(hash(link))}"
+                enriched["id"] = art.get("id") or f"lake_{stable_hash(link)}"
                 CENTRAL_NEWS_LAKE[link] = enriched
             else:
                 existing_syms = set(CENTRAL_NEWS_LAKE[link].get("symbols", []))
@@ -2794,7 +2891,7 @@ def fetch_vietstock_doanhnghiep_news() -> List[Dict[str, Any]]:
                         }
                         articles.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_vietstock_doanhnghiep_news: swallowed Exception", exc_info=True)
     return articles
 
 def fetch_hnx_official_disclosures() -> List[Dict[str, Any]]:
@@ -2821,7 +2918,7 @@ def fetch_hnx_official_disclosures() -> List[Dict[str, Any]]:
                     title_txt = tds[3].get_text().strip()
                     a_tag = tds[3].find('a')
                     href = a_tag.get('href', '') if a_tag else ''
-                    link = 'https://hnx.vn' + href if href.startswith('/') else (href or f"https://hnx.vn/vi-vn/thong-tin-cong-bo-ny-hnx.html#{code_txt}_{abs(hash(title_txt))}")
+                    link = 'https://hnx.vn' + href if href.startswith('/') else (href or f"https://hnx.vn/vi-vn/thong-tin-cong-bo-ny-hnx.html#{code_txt}_{stable_hash(title_txt)}")
                     if code_txt and title_txt and len(code_txt) <= 5:
                         ts, d_str = parse_pubdate(date_txt)
                         raw_art = {
@@ -2839,7 +2936,7 @@ def fetch_hnx_official_disclosures() -> List[Dict[str, Any]]:
                         }
                         items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_hnx_official_disclosures: swallowed Exception", exc_info=True)
     return items
 
 def fetch_hose_official_disclosures() -> List[Dict[str, Any]]:
@@ -2881,7 +2978,7 @@ def fetch_hose_official_disclosures() -> List[Dict[str, Any]]:
                     }
                     items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_hose_official_disclosures: swallowed Exception", exc_info=True)
     return items
 
 def fetch_ssc_official_disclosures() -> List[Dict[str, Any]]:
@@ -2922,7 +3019,7 @@ def fetch_ssc_official_disclosures() -> List[Dict[str, Any]]:
                     }
                     items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_ssc_official_disclosures: swallowed Exception", exc_info=True)
     return items
 
 def _background_news_worker():
@@ -2943,7 +3040,7 @@ def _background_news_worker():
             if ssc_arts:
                 ingest_into_news_lake(ssc_arts)
         except Exception:
-            pass
+            logger.debug("_background_news_worker: swallowed Exception", exc_info=True)
         time.sleep(240) # Every 4 minutes
 
 def start_background_news_poller():
@@ -3027,7 +3124,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
 
                     if title and link:
                         found.append({
-                            "id": f"press_{abs(hash(link))}",
+                            "id": f"press_{stable_hash(link)}",
                             "title": title,
                             "date": formatted_date if formatted_date else d_str,
                             "timestamp": ts,
@@ -3038,7 +3135,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                             "symbol": symbol
                         })
         except Exception:
-            pass
+            logger.debug("fetch_symbol_press_news: swallowed Exception", exc_info=True)
         return found
 
     def scrape_tnck_single(query_str):
@@ -3072,7 +3169,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                     if symbol.lower() in full_t or (clean_comp and clean_comp.lower() in full_t):
                         if title and link:
                             found.append({
-                                "id": f"press_{abs(hash(link))}",
+                                "id": f"press_{stable_hash(link)}",
                                 "title": title,
                                 "date": formatted_date if formatted_date else d_str,
                                 "timestamp": ts,
@@ -3083,7 +3180,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                                 "symbol": symbol
                             })
         except Exception:
-            pass
+            logger.debug("fetch_symbol_press_news: swallowed Exception", exc_info=True)
         return found
 
     def scrape_cafef_events_news(sym_code):
@@ -3106,7 +3203,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                         d_str = span.get_text().strip() if span else ""
                         ts, formatted_date = parse_pubdate(d_str)
                         found.append({
-                            "id": f"press_{abs(hash(detail_url))}",
+                            "id": f"press_{stable_hash(detail_url)}",
                             "title": t,
                             "date": formatted_date if formatted_date else d_str,
                             "timestamp": ts,
@@ -3117,7 +3214,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                             "symbol": symbol
                         })
             except Exception:
-                pass
+                logger.debug("fetch_symbol_press_news: swallowed Exception", exc_info=True)
         return found
 
     queries = [symbol, f"cổ phiếu {symbol}"]
@@ -3221,7 +3318,7 @@ def fetch_single_detail_pdf(detail_url: str) -> str:
                 if 'download' in href.lower() and 'mediacdn.vn' in href.lower():
                     return href
     except Exception:
-        pass
+        logger.debug("fetch_single_detail_pdf: swallowed Exception", exc_info=True)
     return ""
 
 def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]:
@@ -3272,7 +3369,7 @@ def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]
                 is_explanation = any(w in t_lower for w in ['giải trình', 'chênh lệch lợi nhuận', 'biến động lnst'])
                 
                 parsed.append({
-                    "id": f"rep_{abs(hash(detail_url))}",
+                    "id": f"rep_{stable_hash(detail_url)}",
                     "symbol": symbol,
                     "title": title,
                     "clean_title": clean_title,
@@ -3291,7 +3388,7 @@ def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]
                     "has_pdf": False
                 })
     except Exception:
-        pass
+        logger.debug("_fetch_cafef_single_page_raw: swallowed Exception", exc_info=True)
     return parsed
 
 def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
@@ -3327,7 +3424,7 @@ def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
                 audit_badge = "Kiểm toán" if "kiểm toán" in t_lower else None
                 opinion_badge = "✅ Toàn phần" if "toàn phần" in t_lower else ("⚠️ Ngoại trừ" if "ngoại trừ" in t_lower else None)
 
-                rep_id = doc_id if doc_id else f"rep_{abs(hash(title + date_str))}"
+                rep_id = doc_id if doc_id else f"rep_{stable_hash(title + date_str)}"
                 if rep_id not in seen_ids:
                     seen_ids.add(rep_id)
                     reports.append({
@@ -3391,7 +3488,7 @@ def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
                 is_audited = bool(doc.get("is_audited"))
                 audit_badge = "Kiểm toán" if (is_audited or "kiểm toán" in t_lower) else None
 
-                rep_id = doc_id if doc_id else f"rep_bctc_{abs(hash(title + y_str))}"
+                rep_id = doc_id if doc_id else f"rep_bctc_{stable_hash(title + y_str)}"
                 if rep_id not in seen_ids:
                     seen_ids.add(rep_id)
                     reports.append({
@@ -3507,7 +3604,7 @@ def get_company_reports(symbol: str, report_type: str = "all", fetch_pdf: bool =
                                 y_str = year_m.group(1) if year_m else "2026"
                                 
                                 raw_reports.append({
-                                    "id": f"rep_{abs(hash(detail_url))}",
+                                    "id": f"rep_{stable_hash(detail_url)}",
                                     "symbol": symbol,
                                     "title": title,
                                     "clean_title": clean_title,
@@ -3526,7 +3623,7 @@ def get_company_reports(symbol: str, report_type: str = "all", fetch_pdf: bool =
                                     "has_pdf": False
                                 })
                 except Exception:
-                    pass
+                    logger.debug("get_company_reports: swallowed Exception", exc_info=True)
 
         # Extract PDF links concurrently for top 25 disclosures
         if fetch_pdf and raw_reports:
@@ -3663,7 +3760,7 @@ def get_company_news(symbol: str, deep_scan: bool = False) -> Dict[str, Any]:
                 }
                 matching_articles.append(art_item)
     except Exception:
-        pass
+        logger.debug("get_company_news: swallowed Exception", exc_info=True)
 
     # Sort strictly by timestamp descending
     matching_articles = sorted(matching_articles, key=lambda x: x.get('timestamp', 0), reverse=True)
@@ -3843,7 +3940,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                     ratio_str = pair_m.group(1) if pair_m else ""
 
                 events_list.append({
-                    "id": f"ev_{abs(hash(detail_url))}",
+                    "id": f"ev_{stable_hash(detail_url)}",
                     "symbol": symbol,
                     "event_name": cat_name,
                     "title": clean_title,
@@ -3857,7 +3954,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                     "tag_class": badge_cls
                 })
     except Exception:
-        pass
+        logger.debug("get_company_events: swallowed Exception", exc_info=True)
 
     # 2. Secondary fallback: vnstock KBS if Type=1 is empty
     if not events_list and Company:
@@ -3874,7 +3971,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                     ratio_str = f"{float(ratio) * 100:.1f}%" if pd.notna(ratio) and isinstance(ratio, (int, float)) else ""
 
                     events_list.append({
-                        "id": f"ev_{abs(hash(title_vi + pdate))}",
+                        "id": f"ev_{stable_hash(title_vi + pdate)}",
                         "symbol": symbol,
                         "event_name": name_vi,
                         "title": title_vi,
@@ -3888,7 +3985,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                         "tag_class": "tag-dividend"
                     })
         except Exception:
-            pass
+            logger.debug("get_company_events: swallowed Exception", exc_info=True)
 
     # 3. Tertiary fallback: Extract from Company Reports stream (Type=2)
     if not events_list:
@@ -3914,7 +4011,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                         "tag_class": "tag-dividend" if r["type_code"] == "dividend" else "tag-governance"
                     })
         except Exception:
-            pass
+            logger.debug("get_company_events: swallowed Exception", exc_info=True)
 
     cache.set(cache_key, events_list, ttl_seconds=600)
     return events_list
@@ -4090,7 +4187,7 @@ def _parse_cafef_banlanhdao_full(symbol: str) -> tuple:
                             if name and len(name) > 2:
                                 shareholders.append({"name": name, "shares": shares, "ratio": ratio})
     except Exception:
-        pass
+        logger.debug("_parse_cafef_banlanhdao_full: swallowed Exception", exc_info=True)
     return officers, shareholders
 
 def compute_free_float_from_shareholders(symbol: str, shareholders: List[Dict[str, Any]], officers: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -4130,7 +4227,7 @@ def compute_free_float_from_shareholders(symbol: str, shareholders: List[Dict[st
                 try:
                     return float(m.group(1))
                 except Exception:
-                    pass
+                    logger.debug("compute_free_float_from_shareholders: swallowed Exception", exc_info=True)
         return 0.0
 
     for sh in (shareholders or []):
@@ -4247,7 +4344,7 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
                             "ratio": ratio_str
                         })
         except Exception:
-            pass
+            logger.debug("get_company_leadership: swallowed Exception", exc_info=True)
 
     # 2. Fetch CafeF full leadership and shareholder tables
     cf_officers, cf_shareholders = _parse_cafef_banlanhdao_full(symbol)
@@ -4337,7 +4434,7 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
         family_network = dossier.get("family_network", [])
         insider_transactions = dossier.get("insider_transactions", [])
     except Exception:
-        pass
+        logger.debug("get_company_leadership: swallowed Exception", exc_info=True)
 
     # Calculate authoritative True Free-Float Structure from actual major shareholders and board
     free_float_structure = compute_free_float_from_shareholders(symbol, final_shareholders, final_officers)
@@ -4457,7 +4554,7 @@ def parse_pubdate(pub_str: str) -> tuple[int, str]:
     try:
         return _finalize(parsedate_to_datetime(clean_str))
     except Exception:
-        pass
+        logger.debug("parse_pubdate: swallowed Exception", exc_info=True)
 
     # 2. ISO & dashed formats BEFORE any dash-stripping normalization
     iso_str = clean_str[:-1] + '+00:00' if clean_str.endswith(('Z', 'z')) else clean_str
@@ -4469,7 +4566,7 @@ def parse_pubdate(pub_str: str) -> tuple[int, str]:
         try:
             return _finalize(datetime.datetime.strptime(iso_str, fmt))
         except Exception:
-            pass
+            logger.debug("parse_pubdate: swallowed Exception", exc_info=True)
 
     # 3. Space-separated formats (after stripping dashes)
     clean_norm = re.sub(r'\s*-\s*', ' ', clean_str)
@@ -4481,7 +4578,7 @@ def parse_pubdate(pub_str: str) -> tuple[int, str]:
         try:
             return _finalize(datetime.datetime.strptime(clean_norm, fmt))
         except Exception:
-            pass
+            logger.debug("parse_pubdate: swallowed Exception", exc_info=True)
 
     # 4. Year extraction if full date parsing fails (prevents putting old articles at top)
     ym = re.search(r'\b(20\d{2})\b', clean_str)
@@ -4551,7 +4648,7 @@ def fetch_single_rss(feed: Dict[str, Any]) -> List[Dict[str, Any]]:
                         }
                         items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_single_rss: swallowed Exception", exc_info=True)
     return items
 
 def _normalize_source_name(name: str) -> str:
@@ -4649,10 +4746,10 @@ def get_rss_news(
                                 if src not in by_source: by_source[src] = []
                                 by_source[src].append(art)
                     except Exception:
-                        pass
+                        logger.debug("get_rss_news: swallowed Exception", exc_info=True)
             except Exception:
                 # Timeout reached for slower feeds, proceed with all collected articles
-                pass
+                logger.debug("get_rss_news: swallowed Exception", exc_info=True)
 
             # Balanced interleave across sources
             interleaved = []
@@ -4783,12 +4880,12 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
         if hist and hist.get("latest_price"):
             curr_price = float(hist["latest_price"])
     except Exception:
-        pass
+        logger.debug("get_symbol_broker_recommendations: swallowed Exception", exc_info=True)
     if curr_price <= 0:
         snap = disk_lake.read_json("screener_snapshot.json") or {}
         curr_price = float(snap.get("stocks", {}).get(symbol, {}).get("price") or 0.0)
     if curr_price <= 0:
-        curr_price = float(ALL_SYMBOLS_MAP.get(symbol, {}).get("ref", 50.0))
+        curr_price = master_price_vnd(ALL_SYMBOLS_MAP.get(symbol)) or 0.0
 
     FIRM_NAME_MAP = {
         "VND": "VNDIRECT Research",
@@ -4965,7 +5062,7 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
                 if latest_rep_date is None or d > latest_rep_date:
                     latest_rep_date = d
             except Exception:
-                pass
+                logger.debug("get_symbol_broker_recommendations: swallowed Exception", exc_info=True)
 
     anchor_date = today
     if latest_rep_date and (today - latest_rep_date).days > 90:
@@ -5040,7 +5137,7 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
                 rep_d = datetime.datetime.strptime(rep_d_str, "%Y-%m-%d").date()
                 days_ago = (anchor_date - rep_d).days
             except Exception:
-                pass
+                logger.debug("get_symbol_broker_recommendations: swallowed Exception", exc_info=True)
         if days_ago <= 180 or i < 8:
             recent_revisions.append(r)
 
@@ -5149,8 +5246,10 @@ def get_symbol_global_valuation(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
-    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE", "ref": 50.0, "market_cap": 25000})
-    ref = float(info.get("ref", 50.0))
+    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
+    # A valuation anchored to an invented price is worse than no valuation:
+    # the upside it reports is measured against a number nobody quoted.
+    ref = require_master_price_vnd(symbol, info) / 1000.0
 
     # Current live price
     curr_price = 0.0
@@ -5159,7 +5258,7 @@ def get_symbol_global_valuation(symbol: str) -> Dict[str, Any]:
         if hist and hist.get("latest_price"):
             curr_price = float(hist["latest_price"])
     except Exception:
-        pass
+        logger.debug("get_symbol_global_valuation: swallowed Exception", exc_info=True)
     if curr_price <= 0:
         curr_price = ref
 
@@ -5283,7 +5382,7 @@ def get_symbol_global_valuation(symbol: str) -> Dict[str, Any]:
             if tw_price > 0 and tw_up is not None:
                 bullets.append(f"Đồng thuận CTCK: Giá MT trọng số thời gian đạt {tw_price:,.2f}k đ ({tw_up:+.1f}% kỳ vọng) - {rev_label} ({disp_label}).")
     except Exception:
-        pass
+        logger.debug("get_symbol_global_valuation: swallowed Exception", exc_info=True)
 
     res = {
         "symbol": symbol,
@@ -5332,8 +5431,8 @@ def get_symbol_technical_consensus(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
-    info = ALL_SYMBOLS_MAP.get(symbol, {"ref": 50.0})
-    ref = float(info.get("ref", 50.0))
+    info = ALL_SYMBOLS_MAP.get(symbol, {})
+    ref = require_master_price_vnd(symbol, info) / 1000.0
 
     # Fetch daily history
     hist_data = get_stock_history(symbol, interval="1D", timeframe="1Y")
@@ -5588,7 +5687,7 @@ def get_macroeconomic_overview() -> Dict[str, Any]:
                             "cpi_pct": round(float(row.get("value")), 2)
                         })
     except Exception:
-        pass
+        logger.debug("get_macroeconomic_overview: swallowed Exception", exc_info=True)
 
     # 2. Fetch GDP Growth
     try:
@@ -5604,7 +5703,7 @@ def get_macroeconomic_overview() -> Dict[str, Any]:
                             "gdp_growth_pct": round(float(row.get("value")), 2)
                         })
     except Exception:
-        pass
+        logger.debug("get_macroeconomic_overview: swallowed Exception", exc_info=True)
 
     res = {
         "status": "success",
@@ -5861,7 +5960,7 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
             val_lookup[c][fdate] = it.get('numericValue')
 
     master_info = ALL_SYMBOLS_MAP.get(symbol, {})
-    latest_market_price = master_info.get("ref", 50.0) * 1000.0 # Price in VNĐ
+    latest_market_price = master_price_vnd(master_info)  # None when unquoted
 
     # 5. Handle Ratio Mode vs Statement Mode
     rows = []
@@ -6176,7 +6275,7 @@ def get_company_financial_health(symbol: str) -> Dict[str, Any]:
         return 0.0
 
     # Key Fundamental Metrics
-    cur_price = master_info.get("ref", 50.0) * 1000.0  # VNĐ
+    cur_price = require_master_price_vnd(symbol, master_info)  # VNĐ
     mkt_cap = master_info.get("market_cap", 0.0)
     pe = _parse_val("Hệ số Giá / Lợi nhuận (P/E)") or master_info.get("pe", 12.0)
     pb = _parse_val("Hệ số Giá / Giá trị sổ sách (P/B)") or master_info.get("pb", 1.8)
@@ -6518,7 +6617,7 @@ def get_sector_indices_analytics() -> List[Dict[str, Any]]:
         try:
             current_point = float(snapshot.get("latest") or (candles[-1]["close"] if candles else base))
         except (TypeError, ValueError, KeyError, IndexError):
-            pass
+            logger.debug("get_sector_indices_analytics: swallowed (TypeError, ValueError, KeyError, IndexError)", exc_info=True)
 
         if len(candles) >= 2:
             try:
@@ -6847,13 +6946,19 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
         target_sector = "VNIND"
 
     # Target financial features
-    cur_ref = float(master_info.get("ref", 50.0))
-    cur_cap = float(master_info.get("market_cap", 25000))
-    cur_pe = float(master_info.get("pe", 14.0))
-    cur_pb = float(master_info.get("pb", 2.0))
-    cur_roe = float(master_info.get("roe", 16.0))
-    cur_roa = float(master_info.get("roa", 8.0))
-    cur_eps = int(master_info.get("eps", int(cur_ref * 1000 / max(1.0, cur_pe))))
+    # Peer similarity is a distance over financial features. When a feature was
+    # absent it used to be invented from crc32(symbol) - market cap, ROE, ROA,
+    # P/E and P/B all had hash-derived defaults - so the "algorithmic peer
+    # ranking" for a thinly covered ticker was a ranking over the letters of
+    # the tickers. A feature that is missing now drops out of the distance
+    # instead, and the dimensions actually used are reported.
+    cur_ref = master_ref_price(master_info)
+    cur_cap = master_market_cap(master_info)
+    cur_pe = _finite_or_none(master_info.get("pe"))
+    cur_pb = _finite_or_none(master_info.get("pb"))
+    cur_roe = _finite_or_none(master_info.get("roe"))
+    cur_roa = _finite_or_none(master_info.get("roa"))
+    cur_eps = _finite_or_none(master_info.get("eps"))
 
     # Target record
     current_entry = {
@@ -6862,12 +6967,12 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
         "name": master_info.get("name") or master_info.get("organ_name") or f"CTCP {symbol}",
         "exchange": master_info.get("exchange", "HOSE"),
         "price": cur_ref,
-        "change_pct": round(float(master_info.get("change_pct", (deterministic_hash(symbol) % 40 - 20) / 10.0)), 2),
-        "market_cap": int(cur_cap),
-        "pe": round(cur_pe, 1),
-        "pb": round(cur_pb, 2),
-        "roe": round(cur_roe, 1),
-        "roa": round(cur_roa, 1),
+        "change_pct": _finite_or_none(master_info.get("change_pct")),
+        "market_cap": int(cur_cap) if cur_cap else None,
+        "pe": round(cur_pe, 1) if cur_pe is not None else None,
+        "pb": round(cur_pb, 2) if cur_pb is not None else None,
+        "roe": round(cur_roe, 1) if cur_roe is not None else None,
+        "roa": round(cur_roa, 1) if cur_roa is not None else None,
         "eps": cur_eps,
         "similarity_score": 100.0,
         "similarity_grade": "Tuyệt đối",
@@ -6876,7 +6981,7 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
 
     # 2. Algorithmic candidate pool screening across ALL_SYMBOLS_MAP
     candidates = []
-    log_target_cap = math.log10(max(10.0, cur_cap))
+    log_target_cap = math.log10(max(10.0, cur_cap)) if cur_cap else None
 
     for sym, c_info in ALL_SYMBOLS_MAP.items():
         if sym == symbol:
@@ -6913,37 +7018,52 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
             s_icb = max(s_icb, 0.88)
             match_tags.append("Cổ phiếu tiêu biểu ngành")
 
-        # Step B: Scale similarity (Log Market Cap Distance)
-        h_sym = deterministic_hash(sym)
-        cand_cap = float(c_info.get("market_cap", int(15000 + (h_sym % 120000))))
-        log_cand_cap = math.log10(max(10.0, cand_cap))
-        cap_diff = abs(log_target_cap - log_cand_cap)
-        s_scale = math.exp(- cap_diff / 1.15)
+        # Each dimension contributes only when BOTH sides report it. Weights
+        # are renormalised over the dimensions that survive, so a comparison
+        # made on industry alone is scored as such rather than being padded
+        # with invented profitability and valuation matches.
+        dims: List[Tuple[float, float]] = [(0.45, s_icb)]
 
-        if cap_diff < 0.35:
-            match_tags.append("Quy mô vốn hóa tương đồng")
+        # Step B: Scale similarity (Log Market Cap Distance)
+        cand_cap = master_market_cap(c_info)
+        cap_diff = None
+        if log_target_cap is not None and cand_cap:
+            cap_diff = abs(log_target_cap - math.log10(max(10.0, cand_cap)))
+            dims.append((0.25, math.exp(-cap_diff / 1.15)))
+            if cap_diff < 0.35:
+                match_tags.append("Quy mô vốn hóa tương đồng")
 
         # Step C: Profitability similarity (ROE & ROA)
-        cand_roe = float(c_info.get("roe", round(14.0 + (h_sym % 150) / 10, 1)))
-        cand_roa = float(c_info.get("roa", round(6.5 + (h_sym % 80) / 10, 1)))
-        d_roe = abs(cur_roe - cand_roe) / 20.0
-        d_roa = abs(cur_roa - cand_roa) / 10.0
-        s_profit = math.exp(- (0.6 * d_roe + 0.4 * d_roa))
+        cand_roe = _finite_or_none(c_info.get("roe"))
+        cand_roa = _finite_or_none(c_info.get("roa"))
+        prof_parts = []
+        if cur_roe is not None and cand_roe is not None:
+            prof_parts.append((0.6, abs(cur_roe - cand_roe) / 20.0))
+        if cur_roa is not None and cand_roa is not None:
+            prof_parts.append((0.4, abs(cur_roa - cand_roa) / 10.0))
+        if prof_parts:
+            w_sum = sum(w for w, _ in prof_parts)
+            dims.append((0.15, math.exp(-sum(w * d for w, d in prof_parts) / w_sum)))
 
         # Step D: Valuation similarity (P/E & P/B)
-        cand_pe = float(c_info.get("pe", round(12.0 + (h_sym % 140) / 10, 1)))
-        cand_pb = float(c_info.get("pb", round(1.2 + (h_sym % 30) / 10, 2)))
-        d_pe = abs(math.log(max(1.0, cur_pe)) - math.log(max(1.0, cand_pe))) / 0.8
-        d_pb = abs(math.log(max(0.2, cur_pb)) - math.log(max(0.2, cand_pb))) / 0.8
-        s_val = math.exp(- (0.5 * d_pe + 0.5 * d_pb))
+        cand_pe = _finite_or_none(c_info.get("pe"))
+        cand_pb = _finite_or_none(c_info.get("pb"))
+        val_parts = []
+        if cur_pe is not None and cand_pe is not None:
+            val_parts.append(abs(math.log(max(1.0, cur_pe)) - math.log(max(1.0, cand_pe))) / 0.8)
+        if cur_pb is not None and cand_pb is not None:
+            val_parts.append(abs(math.log(max(0.2, cur_pb)) - math.log(max(0.2, cand_pb))) / 0.8)
+        if val_parts:
+            dims.append((0.15, math.exp(-sum(val_parts) / len(val_parts))))
 
-        # Composite Multi-Dimensional Score
-        # Weights: Industry (45%), Scale (25%), Profitability (15%), Valuation (15%)
-        raw_score = (0.45 * s_icb + 0.25 * s_scale + 0.15 * s_profit + 0.15 * s_val) * 100.0
+        # Composite Multi-Dimensional Score over the dimensions available
+        total_w = sum(w for w, _ in dims)
+        raw_score = (sum(w * s for w, s in dims) / total_w) * 100.0
         score = round(min(98.8, max(35.0, raw_score)), 1)
+        dimensions_used = len(dims)
 
-        cand_ref = float(c_info.get("ref", 25.0))
-        cand_eps = int(c_info.get("eps", int(cand_ref * 1000 / max(1.0, cand_pe))))
+        cand_ref = master_ref_price(c_info)
+        cand_eps = _finite_or_none(c_info.get("eps"))
 
         if score >= 85.0:
             grade = "Rất cao"
@@ -6960,15 +7080,20 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
             "name": c_info.get("name") or c_info.get("organ_name") or f"CTCP {sym}",
             "exchange": c_info.get("exchange", "HOSE"),
             "price": cand_ref,
-            "change_pct": round(float(c_info.get("change_pct", (abs(hash(sym)) % 40 - 20) / 10.0)), 2),
-            "market_cap": int(cand_cap),
-            "pe": round(cand_pe, 1),
-            "pb": round(cand_pb, 2),
-            "roe": round(cand_roe, 1),
-            "roa": round(cand_roa, 1),
-            "eps": cand_eps,
+            # change_pct was defaulted to (stable_hash(sym, 40) - 20) / 10 -
+            # not merely invented but non-deterministic, since Python
+            # randomises str hashing per process, so the same peer showed a
+            # different daily move after every restart.
+            "change_pct": _finite_or_none(c_info.get("change_pct")),
+            "market_cap": int(cand_cap) if cand_cap else None,
+            "pe": round(cand_pe, 1) if cand_pe is not None else None,
+            "pb": round(cand_pb, 2) if cand_pb is not None else None,
+            "roe": round(cand_roe, 1) if cand_roe is not None else None,
+            "roa": round(cand_roa, 1) if cand_roa is not None else None,
+            "eps": int(cand_eps) if cand_eps is not None else None,
             "similarity_score": score,
             "similarity_grade": grade,
+            "similarity_dimensions_used": dimensions_used,
             "match_reason": " • ".join(match_tags) if match_tags else "Cùng nhóm ngành ICB"
         })
 
@@ -7542,8 +7667,10 @@ def _parse_ownership_num(val_any: Any, text_fallback: str = "") -> float:
     if text_fallback:
         m = re.search(r'(\d+(\.\d+)?)%', str(text_fallback))
         if m:
-            try: return float(m.group(1))
-            except Exception: pass
+            try:
+                return float(m.group(1))
+            except (TypeError, ValueError):
+                logger.debug("unparseable ownership percentage %r", m.group(1))
         if "100%" in text_fallback or "holding core" in text_fallback.lower():
             return 100.0
     return 0.0
@@ -8035,7 +8162,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
                     existing_sub_names.add(b_name.lower())
 
                     # Add node to graph
-                    sub_id = f"sub_{abs(hash(b_name)) % 100000}"
+                    sub_id = f"sub_{stable_hash(b_name, 100000)}"
                     nodes.append({
                         "id": sub_id,
                         "label": b_name[:20],
@@ -8123,7 +8250,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
         if depth >= 2 and ubo_family_group:
             for fam in ubo_family_group.get("family_members", [])[:3]:
                 fam_name = fam.get("name", "")
-                fam_id = f"fam_{abs(hash(fam_name)) % 100000}"
+                fam_id = f"fam_{stable_hash(fam_name, 100000)}"
                 f_own = fam.get("ownership_pct", 0.0)
                 if fam_name and fam_id not in node_ids_set:
                     nodes.append({
@@ -8197,7 +8324,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
         from services.insider_flow_engine import fetch_realtime_insider_deals
         recent_insider_events = fetch_realtime_insider_deals(symbol, lookback_pages=1)[:5]
     except Exception:
-        pass
+        logger.debug("get_company_ecosystem: swallowed Exception", exc_info=True)
 
     result = {
         "symbol": symbol,
@@ -8574,7 +8701,7 @@ def passes_tsmom_filter(s: Dict[str, Any], price_db: Optional[Dict[str, Any]] = 
                     t12m = sum(float(quarters[c].get("return_pct", 0.0)) for c in codes)
                     return t12m > 0
                 except Exception:
-                    pass
+                    logger.debug("passes_tsmom_filter: swallowed Exception", exc_info=True)
 
     chg_1y = s.get("price_change_1y")
     if chg_1y is not None and isinstance(chg_1y, (int, float)):
@@ -8904,7 +9031,7 @@ def evaluate_stock_strategies(s: Dict[str, Any], guru_ctx: Optional[Dict[str, An
             from services.quant_scoring import evaluate_guru_matches
             strategies.extend(evaluate_guru_matches(s, guru_ctx))
         except Exception:
-            pass
+            logger.debug("evaluate_stock_strategies: swallowed Exception", exc_info=True)
 
     q_tag = s.get("percentiles", {}).get("quintile")
     if q_tag in ("Q1", "Q2", "Q3", "Q4", "Q5"):
@@ -9112,7 +9239,7 @@ def _extract_deep_financial_metrics(symbol: str, sec_code: str = "VNMAT") -> Dic
                                 if clean_v and clean_v != "--":
                                     vals.append(float(clean_v))
                             except Exception:
-                                pass
+                                logger.debug("_extract_deep_financial_metrics: swallowed Exception", exc_info=True)
                         if vals:
                             return vals
                 return []
@@ -9196,9 +9323,18 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
         stock_quant = universe_data.get("stocks", {}).get(symbol)
         if not stock_quant:
             master = ALL_SYMBOLS_MAP.get(symbol, {})
-            ref_p = float(master.get("ref") or 50.0)
-            if ref_p < 500:
-                ref_p *= 1000.0
+            # This branch built a complete synthetic company for any symbol the
+            # screener did not cover - 20% gross margin, 10% operating margin,
+            # 8% net margin, 90% core PAT, D/E 0.5, current ratio 1.2, all four
+            # pillar percentiles at exactly 50 - and then ran the full
+            # 6-model x 3-scenario valuation on it. The output was
+            # indistinguishable from an analysis of a real company.
+            ref_p = master_price_vnd(master)
+            if ref_p is None:
+                raise ValueError(
+                    f"No market data is available for {symbol}; a deep-dive "
+                    "valuation cannot be produced from defaults."
+                )
             stock_quant = {
                 "symbol": symbol,
                 "name": master.get("name") or f"CTCP {symbol}",
@@ -9208,16 +9344,29 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
                 "sector_code": master.get("sector_code") or "VNMAT",
                 "sector_name": master.get("sector_name") or "Sản Xuất & Vật Liệu",
                 "pe": None, "pb": None, "roe": None, "roa": None, "peg": None, "eps": None,
-                "rev_5y_growth": 0.0, "rev_3y_cagr": 0.0, "pat_3y_cagr": 0.0, "eps_3y_cagr": 0.0,
-                "gross_margin": 20.0, "op_margin": 10.0, "net_margin": 8.0, "core_pat_ratio": 90.0,
-                "de_ratio": 0.5, "current_ratio": 1.2, "dilution_spread": 0.0,
-                "is_cyclical": False, "size_category": "Mid-Cap", "size_damper": 1.0,
-                "percentiles": {"growth": 50.0, "quality": 50.0, "health": 50.0, "valuation": 50.0, "composite": 50.0, "quintile": "Q3", "quintile_label": "Trung bình", "quintile_color": "#eab308", "quintile_badge": "badge-q3"},
-                "sector_rank": 1, "sector_total": 1, "sector_percentile": 50.0
+                "rev_5y_growth": None, "rev_3y_cagr": None, "pat_3y_cagr": None,
+                "eps_3y_cagr": None,
+                "gross_margin": None, "op_margin": None, "net_margin": None,
+                "core_pat_ratio": None,
+                "de_ratio": None, "current_ratio": None, "dilution_spread": None,
+                "is_cyclical": False, "size_category": None, "size_damper": 1.0,
+                "percentiles": {},
+                "sector_rank": None, "sector_total": None, "sector_percentile": None,
+                "is_uncovered": True,
             }
 
-    cur_price = stock_quant.get("price", 50000.0)
-    cur_eps = stock_quant.get("eps", int(cur_price / max(1.0, stock_quant.get("pe", 14.0))))
+    cur_price = _finite_or_none(stock_quant.get("price"))
+    if cur_price is None or cur_price <= 0:
+        raise ValueError(
+            f"No market price is available for {symbol}; the deep-dive "
+            "valuation will not be computed against a default price."
+        )
+    # EPS used to fall back to price / P/E. Since the P/B and P/E models below
+    # are then multiples of EPS and BVPS, deriving both from the price made
+    # every scenario a fixed multiple of the price being judged - the same
+    # circularity found in valuation_engine.py. EPS is now either reported or
+    # absent, and the models that need it stand down.
+    cur_eps = _finite_or_none(stock_quant.get("eps"))
     sec_code = stock_quant.get("sector_code", "VNMAT")
     sec_info = universe_data.get("sectors", {}).get(sec_code, {})
     sec_med_opm = sec_info.get("median_op_margin", 12.0)
@@ -9373,25 +9522,60 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     # 2. Automated Corrections Engine (Real BCTC Core PAT + Empirical Z-Score)
     # -------------------------------------------------------------
     # Correction 1: One-Off Normalizer (Lọc Lợi Nhuận Bất Thường 1 Lần)
-    normalized_eps = int(cur_eps * (core_pat_ratio / 100.0))
+    # 0 means "this company has no reported EPS", which the valuation matrix
+    # below already treats as a model standing down (it filters on v > 0).
+    has_eps = cur_eps is not None and cur_eps > 0
+    normalized_eps = int(cur_eps * (core_pat_ratio / 100.0)) if has_eps else 0
     one_off_impact_pct = round(100.0 - core_pat_ratio, 1)
     is_one_off_distorted = abs(one_off_impact_pct) >= 15.0
     if is_one_off_distorted:
-        one_off_verdict = f"⚠️ CẢNH BÁO LÃI ẢO: Bóc tách BCTC thực tế phát hiện {one_off_impact_pct:+.1f}% lợi nhuận bất thường ngoài HĐKD. Thuật toán đã gạt bỏ {cur_eps - normalized_eps:,.0f} đ/cp và dùng EPS cốt lõi {normalized_eps:,.0f} đ làm mốc định giá."
+        one_off_verdict = (
+            f"⚠️ CẢNH BÁO LÃI ẢO: Bóc tách BCTC thực tế phát hiện {one_off_impact_pct:+.1f}% lợi nhuận bất thường ngoài HĐKD. Thuật toán đã gạt bỏ {cur_eps - normalized_eps:,.0f} đ/cp và dùng EPS cốt lõi {normalized_eps:,.0f} đ làm mốc định giá."
+            if has_eps else
+            f"⚠️ Doanh nghiệp không có EPS công bố; không bóc tách được lợi nhuận bất thường ({one_off_impact_pct:+.1f}% theo BCTC)."
+        )
         one_off_status = "Lợi Nhuận Bị Nhiễu (>15%)"
         one_off_badge = "badge-danger"
     else:
-        one_off_verdict = f"✅ LỢI NHUẬN TRONG SẠCH: {core_pat_ratio:.1f}% lợi nhuận đến từ kinh doanh cốt lõi. Số liệu EPS báo cáo ({cur_eps:,.0f} đ) phản ánh đúng thực chất."
+        one_off_verdict = (
+            f"✅ LỢI NHUẬN TRONG SẠCH: {core_pat_ratio:.1f}% lợi nhuận đến từ kinh doanh cốt lõi. Số liệu EPS báo cáo ({cur_eps:,.0f} đ) phản ánh đúng thực chất."
+            if has_eps else
+            f"{core_pat_ratio:.1f}% lợi nhuận đến từ kinh doanh cốt lõi. Chưa có EPS công bố để đối chiếu."
+        )
         one_off_status = "Trong Sạch (Chuẩn Base Rate)"
         one_off_badge = "badge-success"
 
     # Correction 2: Empirical Historical Z-Score Cyclical Mean Reversion
     is_cyclical = stock_quant.get("is_cyclical", False)
-    median_10y_opm = deep_m.get("hist_mean_opm", round(op_margin * (0.75 if is_cyclical else 0.92), 1))
-    std_10y_opm = deep_m.get("hist_std_opm", max(1.8, round(op_margin * (0.35 if is_cyclical else 0.15), 1)))
-    margin_zscore = round((op_margin - median_10y_opm) / max(0.5, std_10y_opm), 2)
+    # When the BCTC history is absent, the historical mean and standard
+    # deviation used to be derived from the CURRENT margin - mean =
+    # op_margin * 0.92, std = op_margin * 0.15 - which makes the z-score
+    # algebraically constant: (0.08 * m) / (0.15 * m) = 0.53 for any
+    # non-cyclical company, 0.71 for any cyclical one. Since the phase
+    # thresholds are +/-1.5, the cycle detector could never fire on that path;
+    # it always reported "expansion" while displaying a confident z-score
+    # labelled "Empirical Historical". Without real history there is no
+    # z-score to report.
+    median_10y_opm = _finite_or_none(deep_m.get("hist_mean_opm"))
+    std_10y_opm = _finite_or_none(deep_m.get("hist_std_opm"))
+    has_margin_history = (
+        median_10y_opm is not None and std_10y_opm is not None and std_10y_opm > 0
+    )
+    margin_zscore = (
+        round((op_margin - median_10y_opm) / std_10y_opm, 2)
+        if has_margin_history else None
+    )
 
-    if margin_zscore > 1.5:
+    if not has_margin_history:
+        cyclical_phase = "⚪ CHƯA XÁC ĐỊNH (Thiếu lịch sử biên LN)"
+        cyclical_badge = "badge-muted"
+        cyclical_desc = (
+            "Chưa có đủ lịch sử biên lợi nhuận từ BCTC để xác định pha chu kỳ. "
+            "Trước đây mục này suy trung bình và độ lệch chuẩn từ chính biên "
+            "hiện tại, nên Z-Score luôn ra ~0.53 với mọi doanh nghiệp."
+        )
+        cyclical_factor = 1.0
+    elif margin_zscore > 1.5:
         cyclical_phase = "🔴 ĐỈNH CHU KỲ (Peak Cycle)"
         cyclical_badge = "badge-danger"
         cyclical_desc = f"CẢNH BÁO BẪY P/E RẺ: Biên HĐKD ({op_margin:.1f}%) vượt trung bình lịch sử ({median_10y_opm:.1f}%) với Z-Score = {margin_zscore:+.2f} (Đỉnh chu kỳ). Thuật toán đã kích hoạt cơ chế kéo biên LN về trung vị để ngăn chặn rủi ro đu đỉnh."
@@ -9458,7 +9642,11 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     if is_one_off_distorted:
         base_conf -= 15
 
-    if margin_zscore > 1.5:
+    if margin_zscore is None:
+        # No cycle reading, so no cycle adjustment - and less confidence,
+        # because a driver is missing rather than favourable.
+        base_conf -= 10
+    elif margin_zscore > 1.5:
         base_conf -= 20
     elif margin_zscore < -1.5:
         base_conf += 10
@@ -9502,39 +9690,59 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     # -------------------------------------------------------------
     # 3. 6-Model x 3-Scenario Valuation Engine (Expanded Ensemble Matrix)
     # -------------------------------------------------------------
-    cur_pb = float(stock_quant.get("pb", 1.8))
-    cur_roe = float(stock_quant.get("roe", 15.0))
-    bvps = cur_price / max(0.2, cur_pb) if cur_price > 0 else 25000.0
+    cur_pb = _finite_or_none(stock_quant.get("pb"))
+    cur_roe = _finite_or_none(stock_quant.get("roe"))
+    # BVPS was price / P/B, so the "Justified P/B" model below reduced to
+    # price x (target_pb / current_pb) - a restatement of the price, not a
+    # valuation of the book. Prefer a reported BVPS; derive it only when P/B
+    # is a real reported multiple, and record that it was derived.
+    bvps = _finite_or_none(stock_quant.get("bvps"))
+    bvps_is_derived = False
+    if bvps is None and cur_pb is not None and cur_pb > 0:
+        bvps = cur_price / cur_pb
+        bvps_is_derived = True
+
+    # A model with no driver returns 0, which drops it from the composite
+    # below. It used to be handed a substitute driver instead.
+    has_bvps = bvps is not None and bvps > 0
 
     # Model 1: Benjamin Graham (Graham Number & Graham Growth Formula)
-    val_graham_bear = int(math.sqrt(15.0 * max(100.0, normalized_eps) * max(1000.0, bvps))) if normalized_eps > 0 and bvps > 0 else int(normalized_eps * (7.0 + 1.2 * g_bear))
-    val_graham_base = int(math.sqrt(22.5 * max(100.0, normalized_eps) * max(1000.0, bvps))) if normalized_eps > 0 and bvps > 0 else int(normalized_eps * (8.5 + 2.0 * g_base))
-    val_graham_bull = int(max(100.0, cur_eps) * (8.5 + 2.5 * (g_bull / 2.0)))
+    if has_eps and has_bvps:
+        val_graham_bear = int(math.sqrt(15.0 * normalized_eps * bvps))
+        val_graham_base = int(math.sqrt(22.5 * normalized_eps * bvps))
+        val_graham_bull = int(cur_eps * (8.5 + 2.5 * (g_bull / 2.0)))
+    else:
+        val_graham_bear = val_graham_base = val_graham_bull = 0
 
     # Model 2: Peter Lynch Fair Value (GARP Framework)
-    val_lynch_bear = int(normalized_eps * max(6.0, g_bear))
-    val_lynch_base = int(normalized_eps * min(25.0, max(8.0, g_base)))
-    val_lynch_bull = int(cur_eps * min(35.0, max(12.0, g_bull)))
+    if has_eps:
+        val_lynch_bear = int(normalized_eps * max(6.0, g_bear))
+        val_lynch_base = int(normalized_eps * min(25.0, max(8.0, g_base)))
+        val_lynch_bull = int(cur_eps * min(35.0, max(12.0, g_bull)))
+    else:
+        val_lynch_bear = val_lynch_base = val_lynch_bull = 0
 
     # Model 3: Forward P/E (Multiple Ngành ICB)
     pe_bear = max(7.0, round(sec_med_pe * 0.75, 1))
-    val_pe_bear = int(normalized_eps * (1 + g_bear / 100.0) * pe_bear)
-
     pe_base = round(sec_med_pe, 1)
-    val_pe_base = int(normalized_eps * (1 + g_base / 100.0) * pe_base)
-
     pe_bull = round(sec_med_pe * 1.25, 1)
-    val_pe_bull = int(cur_eps * (1 + g_bull / 100.0) * pe_bull)
+    if has_eps:
+        val_pe_bear = int(normalized_eps * (1 + g_bear / 100.0) * pe_bear)
+        val_pe_base = int(normalized_eps * (1 + g_base / 100.0) * pe_base)
+        val_pe_bull = int(cur_eps * (1 + g_bull / 100.0) * pe_bull)
+    else:
+        val_pe_bear = val_pe_base = val_pe_bull = 0
 
     # Model 4: Justified P/B (Theo ROE & Giá Trị Sổ Sách BVPS)
-    pb_bear = max(0.6, round(cur_pb * 0.75, 2))
-    val_pb_bear = int(bvps * pb_bear)
-
-    pb_base = max(0.8, round(max(1.0, cur_roe / 10.0), 2))
-    val_pb_base = int(bvps * pb_base)
-
-    pb_bull = max(1.2, round(pb_base * 1.35, 2))
-    val_pb_bull = int(bvps * pb_bull)
+    pb_bear = max(0.6, round(cur_pb * 0.75, 2)) if cur_pb else 0.0
+    pb_base = max(0.8, round(max(1.0, cur_roe / 10.0), 2)) if cur_roe is not None else 0.0
+    pb_bull = max(1.2, round(pb_base * 1.35, 2)) if pb_base else 0.0
+    if has_bvps and pb_base > 0:
+        val_pb_bear = int(bvps * pb_bear) if pb_bear else 0
+        val_pb_base = int(bvps * pb_base)
+        val_pb_bull = int(bvps * pb_bull)
+    else:
+        val_pb_bear = val_pb_base = val_pb_bull = 0
 
     # Model 5: Simply Wall St 2-Stage Discounted Cash Flow (DCF)
     val_dcf_base = 0
@@ -9552,7 +9760,7 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             val_dcf_bear = int(dcf_val_vnd * 0.80)
             val_dcf_bull = int(dcf_val_vnd * 1.25)
     except Exception:
-        pass
+        logger.debug("get_company_earnings_engine: swallowed Exception", exc_info=True)
 
     # Model 6: Broker Analyst Consensus Target Price
     val_analyst_base = 0
@@ -9568,16 +9776,19 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             val_analyst_bear = int(tp_vnd * 0.85)
             val_analyst_bull = int(tp_vnd * 1.20)
     except Exception:
-        pass
+        logger.debug("get_company_earnings_engine: swallowed Exception", exc_info=True)
 
     # Calculate Consensus Ensemble Values across all valid available models
     bear_models = [v for v in [val_graham_bear, val_lynch_bear, val_pe_bear, val_pb_bear, val_dcf_bear, val_analyst_bear] if v > 0]
     base_models = [v for v in [val_graham_base, val_lynch_base, val_pe_base, val_pb_base, val_dcf_base, val_analyst_base] if v > 0]
     bull_models = [v for v in [val_graham_bull, val_lynch_bull, val_pe_bull, val_pb_bull, val_dcf_bull, val_analyst_bull] if v > 0]
 
-    val_bear = int(sum(bear_models) / len(bear_models)) if bear_models else val_pe_bear
-    val_base = int(sum(base_models) / len(base_models)) if base_models else val_pe_base
-    val_bull = int(sum(bull_models) / len(bull_models)) if bull_models else val_pe_bull
+    # With no model standing, there is no consensus. Reporting 0 lets the
+    # payload say so instead of echoing whichever single model was empty.
+    val_bear = int(sum(bear_models) / len(bear_models)) if bear_models else 0
+    val_base = int(sum(base_models) / len(base_models)) if base_models else 0
+    val_bull = int(sum(bull_models) / len(bull_models)) if bull_models else 0
+    models_contributing = len(base_models)
 
     # Calculate Upsides and Margin of Safety
     def _calc_upside(target_val: float) -> float:
@@ -9711,7 +9922,12 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             "school": f"Đồng thuận đa chiều từ {len(methods_list)} phương pháp định lượng & dòng tiền",
             "bear_val": f"{val_bear:,.0f} đ", "bear_upside": f"{upside_bear:+.1f}%", "bear_pos": upside_bear >= 0,
             "base_val": f"{val_base:,.0f} đ", "base_upside": f"{upside_base:+.1f}%", "base_pos": upside_base >= 0,
-            "bull_val": f"{val_bull:,.0f} đ", "bull_upside": f"{upside_bull:+.1f}%", "bull_pos": upside_bull >= 0
+            "bull_val": f"{val_bull:,.0f} đ", "bull_upside": f"{upside_bull:+.1f}%", "bull_pos": upside_bull >= 0,
+            # How many of the six models had the data to run. A consensus of
+            # one is not a consensus, and the payload used to look the same
+            # either way.
+            "models_contributing": models_contributing,
+            "is_reliable": models_contributing >= 2,
         }
     }
 
@@ -9744,7 +9960,10 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
         },
         "growth_attribution": growth_attribution,
         "corrections": {
-            "reported_eps": f"{cur_eps:,.0f} đ",
+            "reported_eps": f"{cur_eps:,.0f} đ" if has_eps else "Không có",
+            # True when BVPS was price / P/B rather than reported, which makes
+            # the P/B models a restatement of the price.
+            "bvps_is_derived_from_price": bvps_is_derived,
             "core_pat_ratio": f"{core_pat_ratio:.1f}%",
             "normalized_core_eps": f"{normalized_eps:,.0f} đ",
             "one_off_impact": f"{one_off_impact_pct:+.1f}%",
@@ -9752,8 +9971,9 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             "one_off_status": one_off_status,
             "one_off_badge": one_off_badge,
             "one_off_verdict": one_off_verdict,
-            "margin_zscore": f"{margin_zscore:+.2f}",
+            "margin_zscore": f"{margin_zscore:+.2f}" if margin_zscore is not None else "Không đủ dữ liệu",
             "margin_zscore_num": margin_zscore,
+            "margin_history_available": has_margin_history,
             "median_10y_opm": f"{median_10y_opm:.1f}%",
             "current_opm": f"{op_margin:.1f}%",
             "cyclical_phase": cyclical_phase,
@@ -9858,7 +10078,7 @@ def get_data_lake_status() -> Dict[str, Any]:
                             if isinstance(item, dict) and "symbol" in item:
                                 merged[item["symbol"]] = item
                 except Exception:
-                    pass
+                    logger.debug("get_data_lake_status: swallowed Exception", exc_info=True)
         return merged
 
     screener_stocks = _load_merged_json("screener_snapshot.json")
@@ -9906,12 +10126,12 @@ def get_data_lake_status() -> Dict[str, Any]:
         try:
             pdf_total_mb += os.path.getsize(pdf_bctc_path) / (1024 * 1024)
         except Exception:
-            pass
+            logger.debug("get_data_lake_status: swallowed Exception", exc_info=True)
     if os.path.exists(pdf_corp_path):
         try:
             pdf_total_mb += os.path.getsize(pdf_corp_path) / (1024 * 1024)
         except Exception:
-            pass
+            logger.debug("get_data_lake_status: swallowed Exception", exc_info=True)
 
     return {
         "status": "online",
@@ -9994,7 +10214,7 @@ def get_market_wide_events_calendar(
                     if len(parts) == 3:
                         return datetime.datetime(int(parts[0]), int(parts[1]), int(parts[2])).timestamp()
             except Exception:
-                pass
+                logger.debug("get_market_wide_events_calendar: swallowed Exception", exc_info=True)
             return 0
 
         aggregated.sort(key=_parse_ev_dt, reverse=True)

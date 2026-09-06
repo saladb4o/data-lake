@@ -68,7 +68,7 @@ import math
 import json
 import logging
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, List, Any, Optional, Tuple, Union, Sequence, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,20 @@ SECTOR_MODEL_MAP: Dict[str, List[str]] = {
     "2000":  ["industrial_apv", "ev_ebitda", "dcf_2stage_mckinsey", "buffett_owners_earnings", "blended_pe", "p_fcf"],
 }
 
-# Pre-calibrated Sector IVW Model Weight Priors (Tier 1 Fallback)
+# Sector model weight priors.
+#
+# These were labelled "Pre-calibrated ... IVW" but nothing in this repository
+# derives them from data, and no calibration run produced them: they are
+# judgement about which model suits which sector, which is a legitimate prior
+# but not a measurement. Naming them after inverse-variance weighting implied
+# they came from measured model variances, which they did not.
+#
+# To replace them with real numbers, run
+# ``scripts/calibrate_sector_weight_priors.py`` once the point-in-time
+# fundamentals lake exists; it measures each model's forward error by sector
+# and prints a drop-in table. Until then, treat these as opinions and read
+# LAST_WEIGHTING_DIAGNOSTICS["unpriored_models"] to see which sector-applicable
+# models the table does not cover.
 SECTOR_WEIGHT_PRIORS: Dict[str, Dict[str, float]] = {
     "VNFIN": {"pb_rhodes_kropf": 0.35, "bank_equity_cash_flow": 0.30, "rim_edwards_bell_ohlson": 0.20, "blended_pe": 0.15},
     "VNBNK": {"pb_rhodes_kropf": 0.35, "bank_equity_cash_flow": 0.30, "rim_edwards_bell_ohlson": 0.20, "blended_pe": 0.15},
@@ -208,6 +221,27 @@ def safe_div(numerator: float, denominator: float, fallback: float = 0.0) -> flo
     res = numerator / denominator
     return fallback if (math.isnan(res) or math.isinf(res)) else res
 
+
+
+# Sentinel for the 22 model signatures. ``current_price`` caps and floors every
+# model output, so a default made the cap arbitrary and let a model run with no
+# price at all. It is now required, but kept in its original keyword position so
+# existing keyword call sites are unaffected.
+_PRICE_REQUIRED = -1.0
+
+
+def _model_price(current_price: float, model: str) -> float:
+    """Validates the price a model was handed."""
+    if not math.isfinite(current_price) or current_price <= 0:
+        raise ValueError(
+            f"{model} requires a positive current_price (got {current_price!r}); "
+            "valuation against a default price is disabled."
+        )
+    return current_price
+
+def _as_rate(value: float) -> float:
+    """Normalises a rate given either as a percentage (15.0) or a fraction (0.15)."""
+    return value / 100.0 if value > 1.0 else value
 
 # Keys whose values are naturally strings (not numeric) and should be kept as-is.
 _STRING_KEYS = frozenset({
@@ -355,6 +389,168 @@ def _sanitize_fundamental_data(data: Dict[str, Any]) -> Dict[str, Any]:
         else:
             out[k] = v
     return out
+
+
+
+# =============================================================================
+# INPUT PROVENANCE
+# =============================================================================
+#
+# Every model input used to be resolved with ``float(data.get(k) or <default>)``,
+# and most of those defaults were a fraction of market cap or price:
+# debt = 40% of mcap, revenue = 80% of mcap, equity = 60% of mcap, and so on.
+# Because market cap is itself price x shares, a payload missing its financial
+# statements produced a full set of "fundamentals" that were all linear in price
+# - and every model built on them returned a fixed multiple of the price it was
+# handed. The valuation could not disagree with the market because it was
+# derived from the market.
+#
+# The resolver keeps the same defaults available but records where each number
+# came from, so a model whose driver was invented can be switched off instead of
+# quietly emitting a price echo.
+
+REAL = "real"        # present in the payload
+DERIVED = "derived"  # computed from inputs that are themselves real/derived
+IMPUTED = "imputed"  # a structural stand-in; carries no company information
+
+
+class InputResolver:
+    """Resolves model inputs while tracking whether each one is real.
+
+    ``resolve`` tries three sources in order: a value in the payload (REAL), a
+    definitional derivation whose dependencies are all trustworthy (DERIVED),
+    and finally a structural assumption (IMPUTED). Provenance propagates: a
+    derivation that reads an imputed field is itself imputed, so a single
+    missing statement line marks everything downstream of it.
+
+    A present number is not automatically a real one. Upstream reconstruction
+    (``services.unified_data_service.reconstruct_financial_triangles``) will
+    back-solve a missing EPS, revenue or equity from market capitalisation and
+    a sector multiple - which is the price tautology again, one layer up - but
+    it says so, in the ``is_imputed`` map and the ``field_provenance`` tiers it
+    ships alongside the values. Treating those numbers as observations would
+    let the circularity back in through the payload, so the payload's own
+    verdict wins: a field the upstream layer calls imputed is IMPUTED here,
+    however concrete it looks.
+    """
+
+    #: Upstream tiers: 4 = audited filing, 3 = vendor-reported, 2 = triangulated
+    #: from other reported lines, 1 = sector-median stand-in, 0 = fabricated.
+    #: Tier 2 is a definitional derivation from real inputs, so it counts as
+    #: evidence; tiers 0 and 1 carry no company-specific information.
+    #:
+    #: The cut sits between 1 and 2 deliberately. Refusing tier 2 as well would
+    #: blank out every company whose equity came from assets minus liabilities
+    #: rather than from an explicit equity line - a bookkeeping identity, not a
+    #: guess - and that is a large share of a real universe.
+    MIN_TRUSTED_UPSTREAM_TIER = 2
+
+    def __init__(self, data: Dict[str, Any]):
+        self._data = data
+        self.provenance: Dict[str, str] = {}
+        raw_flags = data.get("is_imputed")
+        self._upstream_imputed = raw_flags if isinstance(raw_flags, dict) else {}
+        raw_tiers = data.get("field_provenance")
+        self._upstream_tiers = raw_tiers if isinstance(raw_tiers, dict) else {}
+
+    # -- upstream verdict -------------------------------------------------
+    def upstream_says_imputed(self, keys: Sequence[str]) -> bool:
+        """True when the payload itself flags one of ``keys`` as not observed.
+
+        Silent when the payload carries no provenance at all: absence of a
+        flag is not evidence that a value is invented, so a plain dict of
+        numbers still resolves to REAL exactly as before.
+        """
+        for key in keys:
+            # The tier is the finer signal and wins wherever it exists. The
+            # boolean is coarser by design - upstream builds it as `tier < 3`,
+            # which lumps tier 2 (an identity like assets - liabilities, from
+            # reported lines) in with tier 1 sector stand-ins. Reading the
+            # boolean first would refuse to value every triangulated balance
+            # sheet in the universe, which is most of them.
+            tier = self._upstream_tiers.get(key)
+            if isinstance(tier, (int, float)) and not isinstance(tier, bool):
+                if tier < self.MIN_TRUSTED_UPSTREAM_TIER:
+                    return True
+                continue
+            if self._upstream_imputed.get(key) is True:
+                return True
+        return False
+
+    # -- lookup ----------------------------------------------------------
+    def _lookup(self, keys: Sequence[str]) -> Optional[float]:
+        for key in keys:
+            raw = self._data.get(key)
+            if raw is None or raw == "":
+                continue
+            try:
+                val = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(val):
+                return val
+        return None
+
+    # -- provenance queries ----------------------------------------------
+    def is_imputed(self, *fields: str) -> bool:
+        """True if any named field was invented rather than observed."""
+        return any(self.provenance.get(f, IMPUTED) == IMPUTED for f in fields)
+
+    def trustworthy(self, *fields: str) -> bool:
+        return not self.is_imputed(*fields)
+
+    @property
+    def imputed_fields(self) -> List[str]:
+        return sorted(f for f, p in self.provenance.items() if p == IMPUTED)
+
+    @property
+    def real_fields(self) -> List[str]:
+        return sorted(f for f, p in self.provenance.items() if p == REAL)
+
+    # -- resolution ------------------------------------------------------
+    def resolve(
+        self,
+        field: str,
+        keys: Sequence[str],
+        derive: Optional[Tuple[Sequence[str], Callable[[], float]]] = None,
+        impute: Optional[Callable[[], float]] = None,
+        require_positive: bool = False,
+    ) -> float:
+        """Resolves one input and records its provenance under ``field``.
+
+        ``derive`` is ``(dependencies, fn)``. It is used only when every
+        dependency is already REAL or DERIVED - a derivation from invented
+        numbers is an assumption wearing a formula, and is recorded as IMPUTED.
+        ``require_positive`` rejects a non-positive payload value for fields
+        where zero or negative is not a meaningful reading (share counts,
+        prices) rather than a real observation (profit, cash flow).
+        """
+        found = self._lookup(keys)
+        if found is not None and not (require_positive and found <= 0):
+            # A number the upstream layer back-solved from market cap is an
+            # assumption, not a reading, no matter that it is present here.
+            self.provenance[field] = (
+                IMPUTED if self.upstream_says_imputed(keys) else REAL
+            )
+            return found
+
+        if derive is not None:
+            deps, fn = derive
+            value = fn()
+            if math.isfinite(value) and not (require_positive and value <= 0):
+                self.provenance[field] = DERIVED if self.trustworthy(*deps) else IMPUTED
+                return value
+
+        if impute is None:
+            self.provenance[field] = IMPUTED
+            return 0.0
+        value = impute()
+        self.provenance[field] = IMPUTED
+        return value
+
+    def mark(self, field: str, provenance: str) -> None:
+        """Records provenance for a value resolved outside this helper."""
+        self.provenance[field] = provenance
 
 
 @dataclass
@@ -843,22 +1039,54 @@ class RiskFirewallEngine:
     ) -> RiskFirewallResult:
         """Runs full risk firewall diagnostic pipeline."""
         price = _require_price(str(fundamental_data.get("symbol") or "?"), fundamental_data)
-        shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
-        mcap = float(fundamental_data.get("market_cap") or (price * shares))
+
+        # Altman Z'' is a bankruptcy score built from the balance sheet. Its
+        # inputs used to fall back to fractions of market cap (liabilities 50%,
+        # equity 50%, EBIT 12%), which made the distress verdict a function of
+        # the share price: a company the market had already marked down scored
+        # as more distressed regardless of its accounts. The stand-ins remain
+        # for continuity of the numeric output, but the score is now labelled
+        # unreliable when it rests on them, and the firewall will not
+        # disqualify a company on an invented Z''.
+        res = InputResolver(fundamental_data)
+        shares = max(res.resolve("shares", ("shares_out", "shares"),
+                                 impute=lambda: 1e8, require_positive=True), 1.0)
+        mcap = res.resolve("market_cap", ("market_cap",),
+                           derive=(("shares",), lambda: price * shares),
+                           impute=lambda: price * shares, require_positive=True)
 
         bvps_val = float(fundamental_data.get("bvps") or 0.0)
         equity_from_bvps = bvps_val * shares if bvps_val > 0 else 0.0
 
-        total_liabilities = float(fundamental_data.get("total_liabilities") or fundamental_data.get("debt") or (mcap * 0.5))
-        book_equity = float(fundamental_data.get("book_equity") or fundamental_data.get("equity") or (equity_from_bvps if equity_from_bvps > 0 else max(mcap * 0.5, 1.0)))
-        total_assets = float(fundamental_data.get("total_assets") or fundamental_data.get("assets") or (book_equity + total_liabilities))
+        total_liabilities = res.resolve(
+            "total_liabilities", ("total_liabilities", "debt"), impute=lambda: mcap * 0.5)
+        book_equity = res.resolve(
+            "book_equity", ("book_equity", "equity"),
+            derive=(("shares",), lambda: equity_from_bvps) if equity_from_bvps > 0 else None,
+            impute=lambda: max(mcap * 0.5, 1.0))
+        total_assets = res.resolve(
+            "total_assets", ("total_assets", "assets"),
+            derive=(("book_equity", "total_liabilities"),
+                    lambda: book_equity + total_liabilities),
+            impute=lambda: book_equity + total_liabilities)
 
-        working_capital = float(fundamental_data.get("working_capital") or ((total_assets - total_liabilities) * 0.25))
-        retained_earnings = float(fundamental_data.get("retained_earnings") or ((total_assets - total_liabilities) * 0.20))
-        ebit = float(fundamental_data.get("ebit") or fundamental_data.get("operating_profit") or (mcap * 0.12))
-        roe_raw = fundamental_data.get("roe") or 15.0
-        roe = float(roe_raw) / 100.0 if float(roe_raw) > 1.0 else float(roe_raw)
-        de_ratio = float(fundamental_data.get("de_ratio") or safe_div(total_liabilities, book_equity, 0.5))
+        working_capital = res.resolve(
+            "working_capital", ("working_capital",),
+            impute=lambda: (total_assets - total_liabilities) * 0.25)
+        retained_earnings = res.resolve(
+            "retained_earnings", ("retained_earnings",),
+            impute=lambda: (total_assets - total_liabilities) * 0.20)
+        ebit = res.resolve("ebit", ("ebit", "operating_profit"), impute=lambda: mcap * 0.12)
+        roe = _as_rate(res.resolve("roe", ("roe",), impute=lambda: 15.0))
+        de_ratio = res.resolve(
+            "de_ratio", ("de_ratio",),
+            derive=(("total_liabilities", "book_equity"),
+                    lambda: safe_div(total_liabilities, book_equity, 0.5)),
+            impute=lambda: safe_div(total_liabilities, book_equity, 0.5))
+
+        altman_inputs = ("working_capital", "retained_earnings", "ebit",
+                         "book_equity", "total_assets", "total_liabilities")
+        altman_is_reliable = res.trustworthy(*altman_inputs)
 
         # 1. Altman Z''
         z_score, altman_zone = cls.calculate_altman_z_double_prime(
@@ -869,6 +1097,8 @@ class RiskFirewallEngine:
             total_assets=total_assets,
             total_liabilities=total_liabilities,
         )
+        if not altman_is_reliable:
+            altman_zone = "unknown"
 
         # 2. Beneish M
         dsri = float(fundamental_data.get("beneish_dsri") or 1.0)
@@ -891,6 +1121,11 @@ class RiskFirewallEngine:
 
         # 3. 4-Quadrant Category
         quadrant = cls.evaluate_four_quadrants(z_score, m_score)
+        if not altman_is_reliable and quadrant in ("toxic_exclusion", "distressed_turnaround"):
+            # Both of those verdicts are driven by the Z'' threshold, which
+            # here came from market cap rather than the balance sheet. Fall
+            # back to the manipulation reading, which is independent of it.
+            quadrant = "forensic_trap" if beneish_status == "manipulator" else "unknown"
 
         # 4. Rhodes-Kropf
         rkv = cls.calculate_rhodes_kropf(
@@ -958,6 +1193,8 @@ class RiskFirewallEngine:
             disqualification_reason=disqualification_reason,
             details={
                 "de_ratio": round(de_ratio, 2),
+                "altman_inputs_reliable": altman_is_reliable,
+                "imputed_inputs": res.imputed_fields,
                 "is_sector_trap": rkv["is_sector_trap"],
                 "liquidity_distress": distress_details,
                 "liquidity_distress_penalty": distress_penalty,
@@ -986,13 +1223,14 @@ class ValuationModelsSuite:
         sector_pe: float = 12.0,
         hist_pe: float = 11.0,
         eps_growth_rate: float = 0.10,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 1: Blended P/E & Cyclically Adjusted CAPE Multiplier.
         Target P/E = 0.40 * sector_pe + 0.35 * hist_pe + 0.25 * peg_derived_pe
         FV = Target P/E * (0.60 * EPS_TTM + 0.40 * EPS_cyclical)
         """
+        current_price = _model_price(current_price, "model_1_blended_pe")
         peg_derived_pe = clamp(eps_growth_rate * 100.0 * 1.0, 8.0, 22.0)
         target_pe = (0.40 * max(sector_pe, 2.0)) + (0.35 * max(hist_pe, 2.0)) + (0.25 * peg_derived_pe)
         target_pe = clamp(target_pe, 4.0, 35.0)
@@ -1007,8 +1245,10 @@ class ValuationModelsSuite:
 
         blended_eps = 0.60 * eps_ttm + 0.40 * eps_cyclical
         if blended_eps <= 0:
-            # Non-negativity fallback using modest normalized earning power
-            blended_eps = max(0.05 * current_price / target_pe, 100.0)
+            # A company with no blended earnings cannot be valued on an
+            # earnings multiple. Previously earnings were synthesised from the
+            # price, so a loss-maker still received a positive P/E valuation.
+            return 0.0
 
         fv = target_pe * blended_eps
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1019,13 +1259,14 @@ class ValuationModelsSuite:
         net_margin: float,
         sector_ps: float = 1.2,
         sector_net_margin: float = 0.08,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 2: Margin-Adjusted Price-to-Sales (P/S) Multiplier.
         Target P/S = sector_ps * (net_margin / sector_net_margin)^0.65
         FV = Target P/S * SPS
         """
+        current_price = _model_price(current_price, "model_2_ps_margin_adjusted")
         if net_margin <= 0.0:
             # Heavily loss-making firms do not deserve high P/S valuation
             return 0.0
@@ -1036,8 +1277,9 @@ class ValuationModelsSuite:
         target_ps = max(sector_ps, 0.2) * margin_factor
         target_ps = clamp(target_ps, 0.10 * max(sector_ps, 0.2), 3.0 * max(sector_ps, 0.2))
 
-        sps = max(sales_per_share, 100.0)
-        fv = target_ps * sps
+        if sales_per_share <= 0:
+            return 0.0
+        fv = target_ps * sales_per_share
         return clamp(fv, 0.0, current_price * 10.0)
 
     @staticmethod
@@ -1046,18 +1288,21 @@ class ValuationModelsSuite:
         sales_per_share: float,
         sector_pfcf: float = 14.0,
         hist_pfcf: float = 12.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 3: Price-to-Free Cash Flow (P/FCF).
         Target P/FCF = median(sector_pfcf, hist_pfcf, 15.0)
         FV = Target P/FCF * max(FCF_per_share, 0.05 * SPS)
         """
+        current_price = _model_price(current_price, "model_3_p_fcf")
         target_pfcf = float(sorted([max(sector_pfcf, 3.0), max(hist_pfcf, 3.0), 15.0])[1])
         target_pfcf = clamp(target_pfcf, 5.0, 30.0)
 
-        norm_fcf = max(fcf_per_share, 0.05 * sales_per_share, 50.0)
-        fv = target_pfcf * norm_fcf
+        if fcf_per_share <= 0:
+            # Negative free cash flow has no P/FCF valuation.
+            return 0.0
+        fv = target_pfcf * fcf_per_share
         return clamp(fv, 0.0, current_price * 10.0)
 
     @staticmethod
@@ -1067,7 +1312,7 @@ class ValuationModelsSuite:
         ke: float,
         sector_pb: float = 1.5,
         rkv_is_overvalued: bool = False,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 4: Price-to-Book (P/B) with Rhodes-Kropf (RKV) Filter.
@@ -1075,7 +1320,11 @@ class ValuationModelsSuite:
         Target P/B = 0.50 * Justified P/B + 0.50 * sector_pb
         Haircut by 15% if firm-specific misvaluation exceeds 30%.
         """
-        clean_bvps = max(bvps, 100.0)
+        current_price = _model_price(current_price, "model_4_pb_rhodes_kropf")
+        if bvps <= 0:
+            # Negative book value has no P/B valuation.
+            return 0.0
+        clean_bvps = bvps
         g = min(max(roe * 0.4, 0.0), 0.06)
         justified_pb = (roe - g) / max(ke - g, 0.015)
         justified_pb = clamp(justified_pb, 0.3, 6.0)
@@ -1094,14 +1343,20 @@ class ValuationModelsSuite:
         roic: float,
         wacc: float,
         sector_ptbv: float = 1.4,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 5: Price-to-Tangible Book Value (P/TBV).
         Target P/TBV = sector_ptbv * clamp(ROIC / WACC, 0.6, 1.8)
         FV = Target P/TBV * TBVPS (fallback to 0.5 * BVPS if TBV <= 0).
         """
-        clean_tbv = tbv_per_share if tbv_per_share > 0 else 0.50 * max(bvps, 100.0)
+        current_price = _model_price(current_price, "model_5_p_tbv")
+        if tbv_per_share > 0:
+            clean_tbv = tbv_per_share
+        elif bvps > 0:
+            clean_tbv = 0.50 * bvps
+        else:
+            return 0.0
         roic_wacc_ratio = clamp(safe_div(roic, wacc, 1.0), 0.60, 1.80)
         target_ptbv = max(sector_ptbv, 0.3) * roic_wacc_ratio
         target_ptbv = clamp(target_ptbv, 0.3, 6.0)
@@ -1118,23 +1373,27 @@ class ValuationModelsSuite:
         minority_interest: float = 0.0,
         sector_ev_ebitda: float = 8.5,
         hist_ev_ebitda: float = 8.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 6: Blended EV/EBITDA Enterprise Multiple.
         Implied EV = Target EV/EBITDA * EBITDA
         Equity Value = EV - Total Debt + Cash - Minority
         """
+        current_price = _model_price(current_price, "model_6_ev_ebitda")
         shares = max(shares_out, 1.0)
         target_mult = (0.60 * max(sector_ev_ebitda, 3.0)) + (0.40 * max(hist_ev_ebitda, 3.0))
         target_mult = clamp(target_mult, 4.0, 25.0)
 
-        clean_ebitda = max(ebitda, (current_price * shares) * 0.05)
-        implied_ev = target_mult * clean_ebitda
+        if ebitda <= 0:
+            return 0.0
+        implied_ev = target_mult * ebitda
         equity_val = implied_ev - max(total_debt, 0.0) + max(cash_and_equiv, 0.0) - max(minority_interest, 0.0)
-
-        mcap = current_price * shares
-        equity_val = max(equity_val, 0.10 * mcap)
+        if equity_val <= 0:
+            # Debt exceeds enterprise value: the equity is worthless on this
+            # multiple, which is a real answer, not a reason to floor at 10%
+            # of market cap.
+            return 0.0
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
 
@@ -1143,20 +1402,22 @@ class ValuationModelsSuite:
         cfo_per_share: float,
         pat_per_share: float,
         sector_pcf: float = 9.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 7: Price-to-Operating Cash Flow (P/CF).
         Target P/CF = median(sector_pcf, 8.5) * (1 + 0.5 * min(CFO_to_PAT - 1.0, 0.5))
         FV = Target P/CF * max(CFO_per_share, 0.03 * Price)
         """
+        current_price = _model_price(current_price, "model_7_p_cf")
         cfo_to_pat = safe_div(cfo_per_share, max(pat_per_share, 1.0), 1.0)
         quality_adj = 1.0 + 0.5 * clamp(cfo_to_pat - 1.0, -0.5, 0.5)
         target_pcf = max(sector_pcf, 2.0) * quality_adj
         target_pcf = clamp(target_pcf, 3.5, 25.0)
 
-        clean_cfo = max(cfo_per_share, 0.03 * current_price)
-        fv = target_pcf * clean_cfo
+        if cfo_per_share <= 0:
+            return 0.0
+        fv = target_pcf * cfo_per_share
         return clamp(fv, 0.0, current_price * 10.0)
 
     @staticmethod
@@ -1165,13 +1426,14 @@ class ValuationModelsSuite:
         net_income: float,
         shares_out: float,
         sector_paffo: float = 12.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 8: Price-to-AFFO Multiple (P/AFFO).
         Target P/AFFO = median(sector_paffo, 12.0)
         FV = Target P/AFFO * max(AFFO, 0.5 * Net Income) / Shares
         """
+        current_price = _model_price(current_price, "model_8_p_affo")
         shares = max(shares_out, 1.0)
         target_paffo = clamp(max(sector_paffo, 4.0), 5.0, 25.0)
         clean_affo = max(affo, 0.50 * max(net_income, 1.0))
@@ -1194,7 +1456,7 @@ class ValuationModelsSuite:
         g_stage1: float = 0.10,
         g_terminal: float = DEFAULT_TERMINAL_G,
         tax_rate: float = DEFAULT_TAX_RATE,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
         explicit_fcff_series: Optional[List[float]] = None,
     ) -> float:
         """
@@ -1204,6 +1466,7 @@ class ValuationModelsSuite:
         Terminal FCFF = NOPAT_5 * (1 + g_n) * (1 - g_n / ROIC_term)
         TV = Terminal FCFF / (WACC - g_n)
         """
+        current_price = _model_price(current_price, "model_9_dcf_2stage_mckinsey")
         shares = max(shares_out, 1.0)
         gn = clamp(g_terminal, 0.02, 0.045)
         w = max(wacc, gn + 0.015) # Prevent denominator singularity
@@ -1215,7 +1478,9 @@ class ValuationModelsSuite:
             tv_5 = terminal_fcff / (w - gn)
             pv_tv = tv_5 / ((1.0 + w) ** 5)
         else:
-            nopat_0 = max(ebit * (1.0 - tax_rate), (current_price * shares) * 0.03)
+            nopat_0 = ebit * (1.0 - tax_rate)
+            if nopat_0 <= 0:
+                return 0.0
             g1 = clamp(g_stage1, 0.03, 0.22)
 
             clean_roic1 = clamp(roic, 0.08, 0.40)
@@ -1236,7 +1501,8 @@ class ValuationModelsSuite:
 
         enterprise_value = pv_fcff_sum + pv_tv
         equity_val = enterprise_value + max(cash_and_equiv, 0.0) - max(total_debt, 0.0) - max(minority_interest, 0.0)
-        equity_val = max(equity_val, 0.10 * (current_price * shares))
+        if equity_val <= 0:
+            return 0.0
 
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1250,7 +1516,7 @@ class ValuationModelsSuite:
         payout_ratio: float = 0.30,
         g_terminal: float = DEFAULT_TERMINAL_G,
         omega_fade: float = 0.85,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 10: Residual Income Model (RIM / Edwards-Bell-Ohlson).
@@ -1258,8 +1524,12 @@ class ValuationModelsSuite:
         Continuing RI = (RI_5 * (1 + g)) / (1 + Ke - omega)
         Equity Value = BV_0 + sum(PV(RI_t)) + PV(Continuing RI)
         """
+        current_price = _model_price(current_price, "model_10_rim_edwards_bell_ohlson")
         shares = max(shares_out, 1.0)
-        bv_0 = max(book_equity, (current_price * shares) * 0.20)
+        if book_equity <= 0:
+            # Negative book equity has no residual-income anchor.
+            return 0.0
+        bv_0 = book_equity
         clean_ke = max(ke, 0.085)
         clean_roe = clamp(roe_base, 0.05, 0.40)
         payout = clamp(payout_ratio, 0.0, 0.80)
@@ -1283,7 +1553,8 @@ class ValuationModelsSuite:
         pv_cont_ri = continuing_ri / ((1.0 + clean_ke) ** 5)
 
         equity_val = bv_0 + pv_ri_sum + pv_cont_ri
-        equity_val = max(equity_val, 0.10 * (current_price * shares))
+        if equity_val <= 0:
+            return 0.0
 
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1299,7 +1570,7 @@ class ValuationModelsSuite:
         depreciation: float = 0.0,
         maintenance_capex: float = 0.0,
         tax_rate: float = DEFAULT_TAX_RATE,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 11: Greenwald Earnings Power Value (EPV).
@@ -1307,20 +1578,24 @@ class ValuationModelsSuite:
         EPV_firm = NOPAT_norm / WACC
         EPV_equity = EPV_firm + Cash - Debt
         """
+        current_price = _model_price(current_price, "model_11_greenwald_epv")
         shares = max(shares_out, 1.0)
         margin = clamp(ebit_margin_avg, 0.03, 0.35)
-        clean_rev = max(revenue, (current_price * shares) * 0.30)
-        norm_ebit = margin * clean_rev
+        if revenue <= 0:
+            return 0.0
+        norm_ebit = margin * revenue
 
         nopat_norm = norm_ebit * (1.0 - tax_rate)
         if depreciation > 0 and maintenance_capex > 0:
             nopat_norm += (depreciation - maintenance_capex)
-        nopat_norm = max(nopat_norm, (current_price * shares) * 0.02)
+        if nopat_norm <= 0:
+            return 0.0
 
         w = max(wacc, 0.085)
         epv_firm = nopat_norm / w
         epv_equity = epv_firm + max(cash_and_equiv, 0.0) - max(total_debt, 0.0)
-        epv_equity = max(epv_equity, 0.10 * (current_price * shares))
+        if epv_equity <= 0:
+            return 0.0
 
         fv = epv_equity / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1331,7 +1606,7 @@ class ValuationModelsSuite:
         bvps: float,
         expected_growth_pct: float = 10.0,
         benchmark_bond_yield: float = 5.5,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 12: Benjamin Graham Growth Number & Modern Revised Formula.
@@ -1339,6 +1614,7 @@ class ValuationModelsSuite:
         Modern Revised Graham = EPS * (8.5 + 1.5g) * (4.4 / Y)
         FV = 0.50 * Classic + 0.50 * Growth
         """
+        current_price = _model_price(current_price, "model_12_graham_growth")
         if eps_ttm <= 0.0 or bvps <= 0.0:
             return 0.0
 
@@ -1363,7 +1639,7 @@ class ValuationModelsSuite:
         total_revenue: float = 0.0,
         net_debt: float = 0.0,
         shares_out: float = 1.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 13: Rule of 40 & Rule of X (Super-Stock Hyper-Growth) Valuation.
@@ -1371,6 +1647,7 @@ class ValuationModelsSuite:
         Rule X Score = 2.0 * RevGrowth% + FCFMargin%
         If Rule X >= 65% -> Super Stock EV/Sales multiple unlocked (12x to 25x).
         """
+        current_price = _model_price(current_price, "model_13_rule_of_40_growth")
         rule_40_score = rev_growth_pct + fcf_margin_pct
         rule_x_score = (rev_growth_pct * 2.0) + fcf_margin_pct
 
@@ -1384,12 +1661,15 @@ class ValuationModelsSuite:
         fair_multiple = clamp(fair_multiple, 1.0, 25.0)
 
         shares = max(shares_out, 1.0)
-        sps = max(sales_per_share, (current_price * 0.20))
+        if sales_per_share <= 0 and total_revenue <= 0:
+            return 0.0
+        sps = sales_per_share
         rev = total_revenue if total_revenue > 0 else sps * shares
 
         target_ev = fair_multiple * rev
         target_equity = target_ev - net_debt
-        target_equity = max(target_equity, 0.10 * (current_price * shares))
+        if target_equity <= 0:
+            return 0.0
 
         fv = target_equity / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1401,7 +1681,7 @@ class ValuationModelsSuite:
         net_debt: float,
         shares_out: float,
         sector_ev_ebit: float = 8.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 14: Acquirer's Multiple (Tobias Carlisle EV/EBIT).
@@ -1409,13 +1689,16 @@ class ValuationModelsSuite:
         Implied EV = Target Multiple * max(EBIT, 0.05 * Revenue)
         FV = max(Implied EV - Net Debt, 0.10 * Market Cap) / Shares
         """
+        current_price = _model_price(current_price, "model_14_acquirers_multiple")
         shares = max(shares_out, 1.0)
         target_mult = clamp(sector_ev_ebit, 4.0, 10.0)
-        clean_ebit = max(ebit, 0.05 * max(revenue, 1.0), (current_price * shares) * 0.04)
+        if ebit <= 0:
+            return 0.0
 
-        implied_ev = target_mult * clean_ebit
+        implied_ev = target_mult * ebit
         equity_val = implied_ev - net_debt
-        equity_val = max(equity_val, 0.10 * (current_price * shares))
+        if equity_val <= 0:
+            return 0.0
 
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1436,7 +1719,7 @@ class ValuationModelsSuite:
         gross_ppe: float = 0.0,
         ocf: float = 0.0,
         rf: float = DEFAULT_RF,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
         explicit_oe_series: Optional[List[float]] = None,
     ) -> float:
         """
@@ -1446,6 +1729,7 @@ class ValuationModelsSuite:
         Maintenance CapEx = max(0, Total_CapEx - Growth_CapEx)
         Owner Earnings = OCF - Maintenance CapEx (or NI + D&A - MaintCapEx - Delta_WC)
         """
+        current_price = _model_price(current_price, "model_15_buffett_owners_earnings")
         shares = max(shares_out, 1.0)
         clean_ke = max(ke, g_terminal + 0.02)
         gn = clamp(g_terminal, 0.02, 0.04)
@@ -1470,7 +1754,9 @@ class ValuationModelsSuite:
                 oe_0 = ocf - maint_capex_resolved
             else:
                 oe_0 = net_income + depreciation - maint_capex_resolved - delta_working_capital
-            oe_0 = max(oe_0, (current_price * shares) * 0.03)
+            if oe_0 <= 0:
+                # Negative owner earnings: no Buffett-style valuation.
+                return 0.0
 
             g = clamp(growth_rate, 0.03, 0.20)
 
@@ -1483,7 +1769,9 @@ class ValuationModelsSuite:
             tv = (oe_t * (1.0 + gn)) / (clean_ke - gn)
             pv_tv = tv / ((1.0 + clean_ke) ** 5)
 
-        equity_val = max(pv_oe_sum + pv_tv, 0.10 * (current_price * shares))
+        equity_val = pv_oe_sum + pv_tv
+        if equity_val <= 0:
+            return 0.0
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
 
@@ -1496,12 +1784,13 @@ class ValuationModelsSuite:
         base_epv_per_share: float,
         pipeline_projects: Optional[List[Dict[str, float]]] = None,
         net_cash_per_share: float = 0.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 16: Risk-Adjusted NPV (rNPV) — Pharma & Biotech Pipeline (ICB 4500).
         rNPV = sum(p_s,k * NPV_k) + Base Business EPV + Net Cash
         """
+        current_price = _model_price(current_price, "model_16_pharma_rnpv")
         if not pipeline_projects:
             pipeline_projects = [
                 {"npv_per_share": 0.15 * current_price, "success_prob": 0.70}, # Phase III
@@ -1509,8 +1798,11 @@ class ValuationModelsSuite:
             ]
 
         pipeline_rnpv = sum(p.get("npv_per_share", 0.0) * p.get("success_prob", 0.50) for p in pipeline_projects)
-        clean_base = max(base_epv_per_share, 0.60 * current_price)
-        fv = clean_base + pipeline_rnpv + max(net_cash_per_share, 0.0)
+        if base_epv_per_share <= 0:
+            # rNPV builds on the EPV base; without one there is nothing to
+            # risk-adjust. The old floor pinned it at 60% of the market price.
+            return 0.0
+        fv = base_epv_per_share + pipeline_rnpv + max(net_cash_per_share, 0.0)
         return clamp(fv, 0.0, current_price * 10.0)
 
     @staticmethod
@@ -1524,7 +1816,7 @@ class ValuationModelsSuite:
         rwa_growth: float = 0.12,
         target_car: float = 0.11,
         g_terminal: float = DEFAULT_TERMINAL_G,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 17: Equity Cash Flow & Basel II CAR — Banks & Insurance (ICB 8300 / 8500).
@@ -1532,8 +1824,11 @@ class ValuationModelsSuite:
         FCFE_t = Net Income_t - Delta Required Equity_t
         Combined 60% ECF + 40% Justified P/B-ROE.
         """
+        current_price = _model_price(current_price, "model_17_bank_equity_cash_flow")
         shares = max(shares_out, 1.0)
-        bvps = max(book_equity / shares, 0.30 * current_price)
+        if book_equity <= 0:
+            return 0.0
+        bvps = book_equity / shares
         clean_ke = max(ke, g_terminal + 0.02)
         gn = clamp(g_terminal, 0.025, 0.045)
 
@@ -1569,20 +1864,24 @@ class ValuationModelsSuite:
         total_debt: float,
         shares_out: float,
         cap_rate_vn: float = 0.085,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 18: AFFO DCF & Cap Rate — Real Estate Developers & REITs (ICB 8600).
         Operating Portfolio Value = NOI / CapRate_VN
         RNAV = Operating Portfolio + Landbank Pipeline (discounted) + Cash - Debt
         """
+        current_price = _model_price(current_price, "model_18_reit_affo_dcf")
         shares = max(shares_out, 1.0)
-        clean_noi = max(net_operating_income, (current_price * shares) * 0.06)
+        if net_operating_income <= 0:
+            return 0.0
+        clean_noi = net_operating_income
         cap_rate = clamp(cap_rate_vn, 0.06, 0.12)
         portfolio_val = clean_noi / cap_rate
 
         rnav = portfolio_val + max(landbank_pipeline_val, 0.0) + max(cash_and_equiv, 0.0) - max(total_debt, 0.0)
-        rnav = max(rnav, 0.10 * (current_price * shares))
+        if rnav <= 0:
+            return 0.0
 
         fv = rnav / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1595,7 +1894,7 @@ class ValuationModelsSuite:
         shares_out: float,
         allowed_spread: float = 0.03,
         digital_multiple: float = 9.0,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
         wacc: float = 0.10,
         g_terminal: float = DEFAULT_TERMINAL_G,
         allowed_return: Optional[float] = None,
@@ -1606,6 +1905,7 @@ class ValuationModelsSuite:
         EV_RAB = RAB * (allowed_return - g) / (wacc - g)
         Equity Value = EV_RAB - Net Debt
         """
+        current_price = _model_price(current_price, "model_19_telecom_unbundled_sotp")
         shares = max(shares_out, 1.0)
         clean_wacc = max(wacc, 0.06)
         g = min(max(g_terminal, 0.01), clean_wacc - 0.005)
@@ -1617,10 +1917,13 @@ class ValuationModelsSuite:
         rab_multiple = (r - g) / (clean_wacc - g)
         rab_multiple = clamp(rab_multiple, 0.50, 2.00)
         
-        rab = max(regulated_asset_base, (current_price * shares) * 0.40)
-        ev_rab = rab * rab_multiple
+        if regulated_asset_base <= 0:
+            return 0.0
+        ev_rab = regulated_asset_base * rab_multiple
 
-        equity_val = max(ev_rab - net_debt, 0.10 * (current_price * shares))
+        equity_val = ev_rab - net_debt
+        if equity_val <= 0:
+            return 0.0
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
 
@@ -1637,16 +1940,19 @@ class ValuationModelsSuite:
         z_score: float = 2.0,
         tax_rate: float = DEFAULT_TAX_RATE,
         g_terminal: float = DEFAULT_TERMINAL_G,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 20: Adjusted Present Value (APV) — Industrials & Materials (ICB 2700 / 1700).
         APV = V_unlevered + PV(Interest Tax Shield) - PV(Financial Distress)
         """
+        current_price = _model_price(current_price, "model_20_industrial_apv")
         shares = max(shares_out, 1.0)
         ku = rf + (max(beta_unlevered, 0.5) * erp)
         ku = max(ku, g_terminal + 0.02)
-        nopat_0 = max(ebit * (1.0 - tax_rate), (current_price * shares) * 0.04)
+        nopat_0 = ebit * (1.0 - tax_rate)
+        if nopat_0 <= 0:
+            return 0.0
 
         # 1. Unlevered firm value
         v_unlevered = (nopat_0 * (1.0 + g_terminal)) / (ku - g_terminal)
@@ -1661,7 +1967,9 @@ class ValuationModelsSuite:
         pv_distress = prob_default * distress_cost
 
         apv = v_unlevered + pv_tax_shield - pv_distress
-        equity_val = max(apv - max(total_debt, 0.0) + max(cash_and_equiv, 0.0), 0.10 * (current_price * shares))
+        equity_val = apv - max(total_debt, 0.0) + max(cash_and_equiv, 0.0)
+        if equity_val <= 0:
+            return 0.0
 
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1675,23 +1983,28 @@ class ValuationModelsSuite:
         shares_out: float,
         g_terminal: float = DEFAULT_TERMINAL_G,
         tax_rate: float = DEFAULT_TAX_RATE,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
     ) -> float:
         """
         Model 21: Economic Value Added (EVA & MVA) — Consumer Staples & Retail (ICB 3000 / 5000).
         EVA = NOPAT - WACC * Invested Capital
         Total EV = Invested Capital + MVA
         """
+        current_price = _model_price(current_price, "model_21_consumer_eva_mva")
         shares = max(shares_out, 1.0)
-        nopat = max(ebit * (1.0 - tax_rate), (current_price * shares) * 0.04)
-        ic_0 = max(invested_capital, (current_price * shares) * 0.30)
+        nopat = ebit * (1.0 - tax_rate)
+        if nopat <= 0 or invested_capital <= 0:
+            return 0.0
+        ic_0 = invested_capital
         w = max(wacc, g_terminal + 0.02)
 
         eva_0 = nopat - (w * ic_0)
         # MVA calculation
         mva = (eva_0 * (1.0 + g_terminal)) / (w - g_terminal)
         total_ev = ic_0 + mva
-        equity_val = max(total_ev - net_debt, 0.10 * (current_price * shares))
+        equity_val = total_ev - net_debt
+        if equity_val <= 0:
+            return 0.0
 
         fv = equity_val / shares
         return clamp(fv, 0.0, current_price * 10.0)
@@ -1703,7 +2016,7 @@ class ValuationModelsSuite:
         div_growth_initial: float = 0.08,
         g_terminal: float = 0.040,
         half_life_h: float = 2.5,
-        current_price: float = 10000.0,
+        current_price: float = _PRICE_REQUIRED,
         explicit_dividends_series: Optional[List[float]] = None,
     ) -> float:
         """
@@ -1711,6 +2024,7 @@ class ValuationModelsSuite:
         with support for explicit 5-year forecast dividend stream from 3-Way Engine.
         FV = [D_0 * (1 + g_n) + D_0 * H * (g_a - g_n)] / (Ke - g_n)
         """
+        current_price = _model_price(current_price, "model_22_utilities_3stage_ddm")
         clean_ke = max(ke, g_terminal + 0.015)
         gn = clamp(g_terminal, 0.02, 0.05)
 
@@ -1721,7 +2035,10 @@ class ValuationModelsSuite:
             pv_tv = tv / ((1.0 + clean_ke) ** 5)
             fv = pv_div_sum + pv_tv
         else:
-            d0 = max(dividend_per_share, 0.04 * current_price)
+            if dividend_per_share <= 0:
+                # A non-payer cannot be valued by a dividend discount model.
+                return 0.0
+            d0 = dividend_per_share
             ga = clamp(div_growth_initial, 0.02, 0.20)
             h = max(half_life_h, 1.0)
 
@@ -1735,6 +2052,11 @@ class ValuationModelsSuite:
 # =============================================================================
 # MULTI-ALGO ADAPTIVE ERROR WEIGHTING ENGINE (IVW & METRICS)
 # =============================================================================
+
+# Populated by AdaptiveWeightingEngine.calculate_weights on every call, so a
+# caller can tell whether the weighting it asked for is the weighting it got.
+LAST_WEIGHTING_DIAGNOSTICS: Dict[str, Any] = {}
+
 
 class AdaptiveWeightingEngine:
     """
@@ -1752,12 +2074,21 @@ class AdaptiveWeightingEngine:
         if len(values) < 4:
             return values, list(range(len(values)))
 
-        sorted_pairs = sorted(enumerate(values), key=lambda x: x[1])
-        n = len(values)
-        q1_idx = int(n * 0.25)
-        q3_idx = int(n * 0.75)
-        q1 = sorted_pairs[q1_idx][1]
-        q3 = sorted_pairs[q3_idx][1]
+        # Nearest-rank quartiles (int(n * 0.25)) put Q3 on the largest value at
+        # n = 4 and drifted upward for small n, inflating the IQR until the
+        # fence stopped rejecting anything. Use linear interpolation between
+        # order statistics, the standard definition.
+        srt = sorted(values)
+        n = len(srt)
+
+        def _quantile(q: float) -> float:
+            pos = (n - 1) * q
+            lo = int(math.floor(pos))
+            hi = min(lo + 1, n - 1)
+            return srt[lo] + (srt[hi] - srt[lo]) * (pos - lo)
+
+        q1 = _quantile(0.25)
+        q3 = _quantile(0.75)
         iqr = q3 - q1
 
         lower_bound = q1 - 1.5 * iqr
@@ -1844,6 +2175,7 @@ class AdaptiveWeightingEngine:
           - 'rmsle': Root Mean Squared Log Error
           - 'ivw': Scale-Free Inverse Variance Weighting
         """
+        LAST_WEIGHTING_DIAGNOSTICS.clear()
         if not active_models:
             return {}, []
 
@@ -1862,13 +2194,25 @@ class AdaptiveWeightingEngine:
             # --- BLENDED VALUATION (Sector-Calibrated Structural Prior Weights) ---
             sector_prefix = sector_code[:5] if len(sector_code) >= 5 else sector_code
             priors = SECTOR_WEIGHT_PRIORS.get(sector_prefix, SECTOR_WEIGHT_PRIORS.get(sector_code, {}))
-            if priors and any(m in priors for m in surviving_models):
-                raw_priors = {m: priors.get(m, 0.10) for m in surviving_models}
-                total_p = sum(raw_priors.values())
-                weights = {m: raw_priors[m] / total_p for m in surviving_models}
+            named = [m for m in surviving_models if m in priors]
+            unpriored = [m for m in surviving_models if m not in priors]
+            if named:
+                # SECTOR_MODEL_MAP lists more models per sector than
+                # SECTOR_WEIGHT_PRIORS assigns weights to. Handing every
+                # unlisted model a flat 0.10 and renormalising diluted the
+                # stated calibration by however many of them happened to be
+                # active - VNBNK's "35% pb_rhodes_kropf" was really 29%, and
+                # moved whenever an unrelated model dropped in or out. The
+                # prior now means what it says: it is renormalised among the
+                # models it actually names, and the gap in the table is
+                # reported rather than silently filled.
+                total_p = sum(priors[m] for m in named)
+                weights = {m: priors[m] / total_p for m in named}
+                LAST_WEIGHTING_DIAGNOSTICS["unpriored_models"] = unpriored
             else:
                 k = len(surviving_models)
                 weights = {m: 1.0 / k for m in surviving_models}
+                LAST_WEIGHTING_DIAGNOSTICS["fallback"] = "no_sector_prior_equal_weight"
         else:
             # --- OMNIBUS MASTER ENGINE (Loss Metric Weighting) ---
             if historical_errors and len(historical_errors) > 0:
@@ -1903,34 +2247,32 @@ class AdaptiveWeightingEngine:
                     k = len(surviving_models)
                     weights = {m: 1.0 / k for m in surviving_models}
             else:
-                # Instantaneous loss metric error weighting from model valuations vs benchmark median
-                raw_weights = {}
-                p_ref = safe_div(sum(kept_vals), len(kept_vals), 10000.0)
-                for m, val in zip(surviving_models, kept_vals):
-                    clean_v = max(val, 1.0)
-                    clean_p = max(p_ref, 1.0)
-                    if metric == "smape":
-                        score = abs(clean_v - clean_p) / ((clean_v + clean_p) / 2.0) * 100.0
-                        raw_weights[m] = 1.0 / max(score, 1.0)
-                    elif metric == "male":
-                        score = abs(math.log(clean_v) - math.log(clean_p))
-                        raw_weights[m] = 1.0 / max(score, 0.02)
-                    elif metric == "wmape":
-                        score = abs(clean_v - clean_p) / clean_p * 100.0
-                        raw_weights[m] = 1.0 / max(score, 1.0)
-                    elif metric == "rmsle":
-                        score = math.sqrt((math.log(clean_v + 1.0) - math.log(clean_p + 1.0)) ** 2)
-                        raw_weights[m] = 1.0 / max(score, 0.02)
-                    else:  # ivw
-                        score = ((clean_v - clean_p) / clean_p) ** 2
-                        raw_weights[m] = 1.0 / max(score, 0.0025)
-
-                total_raw = sum(raw_weights.values())
-                if total_raw > 0:
-                    weights = {m: raw_weights[m] / total_raw for m in surviving_models}
+                # No measured errors, so there is nothing to weight by.
+                #
+                # This branch used to compute each model's distance from the
+                # mean of the other models and weight by its inverse. That is
+                # not a loss metric - it is herding: the model that disagrees
+                # most with the consensus is damped hardest, which is exactly
+                # the model carrying information. Running 22 models and then
+                # suppressing their disagreement leaves an expensive average.
+                # Worse, no production caller ever supplies historical_errors,
+                # so every "Omnibus - SMAPE" request on the API took this path
+                # while the UI told the user it was error-calibrated.
+                #
+                # Fall back to the sector prior (or equal weight) and record
+                # that the requested metric was not applied.
+                sector_prefix = sector_code[:5] if len(sector_code) >= 5 else sector_code
+                priors = SECTOR_WEIGHT_PRIORS.get(
+                    sector_prefix, SECTOR_WEIGHT_PRIORS.get(sector_code, {}))
+                named = [m for m in surviving_models if m in priors]
+                if named:
+                    total_p = sum(priors[m] for m in named)
+                    weights = {m: priors[m] / total_p for m in named}
                 else:
                     k = len(surviving_models)
                     weights = {m: 1.0 / k for m in surviving_models}
+                LAST_WEIGHTING_DIAGNOSTICS["fallback"] = "no_history_metric_not_applied"
+                LAST_WEIGHTING_DIAGNOSTICS["requested_metric"] = metric
 
         return {m: round(weights.get(m, 0.0), 4) for m in surviving_models}, rejected_models
 
@@ -2057,6 +2399,9 @@ class ValuationEngine:
         self.models_suite = ValuationModelsSuite()
         self.weighting_engine = AdaptiveWeightingEngine()
         self.scenario_engine = ScenarioEngine()
+        # Provenance of the most recent calculate_all_models() call, so the
+        # comprehensive payload can report which drivers were real.
+        self.last_resolver: Optional[InputResolver] = None
 
     def calculate_wacc(
         self,
@@ -2136,32 +2481,66 @@ class ValuationEngine:
         fundamental_data = _sanitize_fundamental_data(fundamental_data)
 
         price = _require_price(symbol, fundamental_data)
-        shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
-        mcap = float(fundamental_data.get("market_cap") or (price * shares))
-        debt = float(fundamental_data.get("debt") or fundamental_data.get("total_debt_fq") or fundamental_data.get("interest_bearing_debt") or (mcap * 0.4))
-        cash = float(fundamental_data.get("cash") or fundamental_data.get("cash_fq") or fundamental_data.get("cash_and_equiv") or (mcap * 0.15))
+
+        # Resolve every driver through the provenance tracker. The structural
+        # stand-ins below are unchanged in value; what is new is that each one
+        # is recorded as IMPUTED, so add_model() can refuse to publish a model
+        # whose driver is a fraction of market cap rather than a filing.
+        res = InputResolver(fundamental_data)
+        self.last_resolver = res
+        res.mark("price", REAL)
+
+        shares = max(res.resolve("shares", ("shares_out", "shares"),
+                                 impute=lambda: 1e8, require_positive=True), 1.0)
+        mcap = res.resolve(
+            "market_cap", ("market_cap",),
+            derive=(("shares",), lambda: price * shares),
+            impute=lambda: price * shares, require_positive=True,
+        )
+        debt = res.resolve("debt", ("debt", "total_debt_fq", "interest_bearing_debt"),
+                           impute=lambda: mcap * 0.4)
+        cash = res.resolve("cash", ("cash", "cash_fq", "cash_and_equiv"),
+                           impute=lambda: mcap * 0.15)
         net_debt = debt - cash
-        revenue = float(fundamental_data.get("revenue") or fundamental_data.get("revenue_ttm") or (mcap * 0.8))
-        sps = max(revenue / shares, price * 0.5)
-        ebit = float(fundamental_data.get("ebit") or fundamental_data.get("ebit_ttm") or fundamental_data.get("operating_profit") or (revenue * 0.15))
-        ebitda = float(fundamental_data.get("ebitda") or (ebit * 1.25))
-        net_income = float(fundamental_data.get("net_income") or fundamental_data.get("net_income_ttm") or fundamental_data.get("pat") or (ebit * 0.8))
-        eps = float(fundamental_data.get("eps") or (net_income / shares))
-        equity_val = float(fundamental_data.get("equity") or fundamental_data.get("total_equity_fq") or (mcap * 0.6))
-        bvps = float(fundamental_data.get("bvps") or (equity_val / shares))
-        tbvps = float(fundamental_data.get("tbvps") or (bvps * 0.9))
-        cfo = float(fundamental_data.get("cfo") or fundamental_data.get("cfo_ttm") or (net_income * 1.1))
-        cfo_per_share = cfo / shares
-        pat_per_share = net_income / shares
-        fcf = float(fundamental_data.get("fcf") or (cfo * 0.7))
-        fcf_per_share = fcf / shares
-        affo = float(fundamental_data.get("affo") or (net_income * 0.9))
-        dividend_per_share = float(fundamental_data.get("dividend_per_share") or (eps * 0.3))
-        roe_raw = fundamental_data.get("roe") or 15.0
-        roe = float(roe_raw) / 100.0 if float(roe_raw) > 1.0 else float(roe_raw)
-        roic_raw = fundamental_data.get("roic") or 14.0
-        roic = float(roic_raw) / 100.0 if float(roic_raw) > 1.0 else float(roic_raw)
-        net_margin = float(fundamental_data.get("net_margin") or (net_income / max(revenue, 1.0)))
+        revenue = res.resolve("revenue", ("revenue", "revenue_ttm"),
+                              impute=lambda: mcap * 0.8)
+        # The old floor (price * 0.5) made sales-per-share a function of price
+        # for every small-revenue company; sales per share is now purely
+        # revenue / shares and inherits revenue's provenance.
+        sps = safe_div(revenue, shares, 0.0)
+        res.mark("sps", res.provenance.get("revenue", IMPUTED))
+        ebit = res.resolve("ebit", ("ebit", "ebit_ttm", "operating_profit"),
+                           impute=lambda: revenue * 0.15)
+        ebitda = res.resolve("ebitda", ("ebitda",),
+                             derive=(("ebit",), lambda: ebit * 1.25),
+                             impute=lambda: ebit * 1.25)
+        net_income = res.resolve("net_income", ("net_income", "net_income_ttm", "pat"),
+                                 impute=lambda: ebit * 0.8)
+        eps = res.resolve("eps", ("eps",),
+                          derive=(("net_income", "shares"), lambda: safe_div(net_income, shares, 0.0)),
+                          impute=lambda: safe_div(net_income, shares, 0.0))
+        equity_val = res.resolve("equity", ("equity", "total_equity_fq", "book_equity"),
+                                 impute=lambda: mcap * 0.6)
+        bvps = res.resolve("bvps", ("bvps",),
+                           derive=(("equity", "shares"), lambda: safe_div(equity_val, shares, 0.0)),
+                           impute=lambda: safe_div(equity_val, shares, 0.0))
+        tbvps = res.resolve("tbvps", ("tbvps",),
+                            impute=lambda: bvps * 0.9)
+        cfo = res.resolve("cfo", ("cfo", "cfo_ttm"), impute=lambda: net_income * 1.1)
+        cfo_per_share = safe_div(cfo, shares, 0.0)
+        pat_per_share = safe_div(net_income, shares, 0.0)
+        fcf = res.resolve("fcf", ("fcf",), impute=lambda: cfo * 0.7)
+        fcf_per_share = safe_div(fcf, shares, 0.0)
+        affo = res.resolve("affo", ("affo",), impute=lambda: net_income * 0.9)
+        dividend_per_share = res.resolve("dividend_per_share", ("dividend_per_share",),
+                                         impute=lambda: eps * 0.3)
+        roe = _as_rate(res.resolve("roe", ("roe",), impute=lambda: 15.0))
+        roic = _as_rate(res.resolve("roic", ("roic",), impute=lambda: 14.0))
+        net_margin = res.resolve(
+            "net_margin", ("net_margin",),
+            derive=(("net_income", "revenue"), lambda: safe_div(net_income, revenue, 0.0)),
+            impute=lambda: safe_div(net_income, revenue, 0.0),
+        )
         if net_margin > 1.0:
             net_margin /= 100.0
 
@@ -2207,11 +2586,44 @@ class ValuationEngine:
             category: str,
             val: float,
             diag: Optional[Dict[str, Any]] = None,
+            drivers: Sequence[str] = (),
         ):
+            """Publishes one model result, unless its drivers were invented.
+
+            ``drivers`` names the inputs the model is actually a function of.
+            If any of them was imputed, the model has no company-specific
+            information to offer: its output would be some multiple of the
+            price that was fed in. Publishing that as a fair value is what let
+            a payload with no financial statements produce 22 confident
+            valuations, so such a model is marked INSUFFICIENT_DATA and
+            excluded from the composite instead.
+            """
+            missing = [d for d in drivers if res.is_imputed(d)]
             clean_val = round(clamp(val, 0.0, price * 10.0), 0)
             upside = round(safe_div(clean_val - price, price) * 100.0, 2)
-            is_active = (applicable_model_ids is None) or (model_id in applicable_model_ids)
-            status = "ACTIVE" if is_active else "BYPASSED"
+            sector_ok = (applicable_model_ids is None) or (model_id in applicable_model_ids)
+
+            diagnostics = dict(diag or {})
+            if missing:
+                is_active = False
+                status = "INSUFFICIENT_DATA"
+                diagnostics["imputed_drivers"] = missing
+                diagnostics["suppressed_fair_value"] = clean_val
+                clean_val = 0.0
+                upside = 0.0
+            elif clean_val <= 0:
+                # The model declined to value this company (no earnings, no
+                # book equity, no dividend, equity wiped out by debt...). That
+                # is an answer, not a gap to be filled with a floor.
+                is_active = False
+                status = "NOT_APPLICABLE"
+            elif not sector_ok:
+                is_active = False
+                status = "BYPASSED"
+            else:
+                is_active = True
+                status = "ACTIVE"
+
             results.append(ModelValuationOutput(
                 model_id=model_id,
                 model_name=name,
@@ -2221,7 +2633,7 @@ class ValuationEngine:
                 weight=0.0,
                 active=is_active,
                 status=status,
-                diagnostics=diag or {}
+                diagnostics=diagnostics
             ))
 
         # --- 8 RELATIVE MULTIPLES ---
@@ -2229,72 +2641,84 @@ class ValuationEngine:
             eps_ttm=eps, historical_eps=hist_eps, sector_pe=sector_pe, hist_pe=hist_pe,
             eps_growth_rate=g_stage1, current_price=price
         )
-        add_model("blended_pe", "Blended P/E with CAPE", "relative", m1)
+        add_model("blended_pe", "Blended P/E with CAPE", "relative", m1,
+                  drivers=('eps',))
 
         m2 = self.models_suite.model_2_ps_margin_adjusted(
             sales_per_share=sps, net_margin=net_margin, sector_ps=sector_ps,
             sector_net_margin=sector_net_margin, current_price=price
         )
-        add_model("ps_margin_adj", "Margin-Adjusted P/S", "relative", m2)
+        add_model("ps_margin_adj", "Margin-Adjusted P/S", "relative", m2,
+                  drivers=('sps', 'net_margin'))
 
         m3 = self.models_suite.model_3_p_fcf(
             fcf_per_share=fcf_per_share, sales_per_share=sps, sector_pfcf=sector_pfcf,
             hist_pfcf=hist_pfcf, current_price=price
         )
-        add_model("p_fcf", "Price-to-FCF Yield", "relative", m3)
+        add_model("p_fcf", "Price-to-FCF Yield", "relative", m3,
+                  drivers=('fcf', 'sps'))
 
         m4 = self.models_suite.model_4_pb_rhodes_kropf(
             bvps=bvps, roe=roe, ke=wacc_res.cost_of_equity, sector_pb=sector_pb,
             rkv_is_overvalued=risk_res.rhodes_kropf.get("is_firm_overvalued", False), current_price=price
         )
-        add_model("pb_rhodes_kropf", "P/B with Rhodes-Kropf Filter", "relative", m4)
+        add_model("pb_rhodes_kropf", "P/B with Rhodes-Kropf Filter", "relative", m4,
+                  drivers=('bvps', 'roe'))
 
         m5 = self.models_suite.model_5_p_tbv(
             tbv_per_share=tbvps, bvps=bvps, roic=roic, wacc=wacc_res.wacc,
             sector_ptbv=sector_ptbv, current_price=price
         )
-        add_model("p_tbv", "Price-to-Tangible Book (P/TBV)", "relative", m5)
+        add_model("p_tbv", "Price-to-Tangible Book (P/TBV)", "relative", m5,
+                  drivers=('tbvps', 'bvps', 'roic'))
 
         m6 = self.models_suite.model_6_ev_ebitda(
             ebitda=ebitda, total_debt=debt, cash_and_equiv=cash, shares_out=shares,
             sector_ev_ebitda=sector_ev_ebitda, hist_ev_ebitda=hist_ev_ebitda, current_price=price
         )
-        add_model("ev_ebitda", "Blended EV/EBITDA Enterprise Multiple", "relative", m6)
+        add_model("ev_ebitda", "Blended EV/EBITDA Enterprise Multiple", "relative", m6,
+                  drivers=('ebitda', 'debt', 'cash', 'shares'))
 
         m7 = self.models_suite.model_7_p_cf(
             cfo_per_share=cfo_per_share, pat_per_share=pat_per_share, sector_pcf=sector_pcf, current_price=price
         )
-        add_model("p_cf", "Price-to-Operating Cash Flow (P/CF)", "relative", m7)
+        add_model("p_cf", "Price-to-Operating Cash Flow (P/CF)", "relative", m7,
+                  drivers=('cfo', 'net_income'))
 
         m8 = self.models_suite.model_8_p_affo(
             affo=affo, net_income=net_income, shares_out=shares, sector_paffo=sector_paffo, current_price=price
         )
-        add_model("p_affo", "Price-to-AFFO Multiple (P/AFFO)", "relative", m8)
+        add_model("p_affo", "Price-to-AFFO Multiple (P/AFFO)", "relative", m8,
+                  drivers=('affo', 'net_income', 'shares'))
 
         # --- 7 ABSOLUTE INTRINSIC MODELS ---
         m9 = self.models_suite.model_9_dcf_2stage_mckinsey(
             ebit=ebit, roic=roic, wacc=wacc_res.wacc, shares_out=shares,
             cash_and_equiv=cash, total_debt=debt, g_stage1=g_stage1, current_price=price
         )
-        add_model("dcf_2stage_mckinsey", "Extended 2-Stage McKinsey DCF", "absolute", m9)
+        add_model("dcf_2stage_mckinsey", "Extended 2-Stage McKinsey DCF", "absolute", m9,
+                  drivers=('ebit', 'roic', 'cash', 'debt', 'shares'))
 
         m10 = self.models_suite.model_10_rim_edwards_bell_ohlson(
             book_equity=bvps * shares, roe_base=roe, ke=wacc_res.cost_of_equity,
             shares_out=shares, current_price=price
         )
-        add_model("rim_edwards_bell_ohlson", "Residual Income Model (RIM / EBO)", "absolute", m10)
+        add_model("rim_edwards_bell_ohlson", "Residual Income Model (RIM / EBO)", "absolute", m10,
+                  drivers=('bvps', 'roe', 'shares'))
 
         m11 = self.models_suite.model_11_greenwald_epv(
             revenue=revenue, ebit_margin_avg=safe_div(ebit, revenue, 0.15),
             wacc=wacc_res.wacc, shares_out=shares, cash_and_equiv=cash, total_debt=debt, current_price=price
         )
-        add_model("greenwald_epv", "Greenwald Earnings Power Value (EPV)", "absolute", m11)
+        add_model("greenwald_epv", "Greenwald Earnings Power Value (EPV)", "absolute", m11,
+                  drivers=('revenue', 'ebit', 'cash', 'debt', 'shares'))
 
         m12 = self.models_suite.model_12_graham_growth(
             eps_ttm=eps, bvps=bvps, expected_growth_pct=g_fundamental_pct,
             benchmark_bond_yield=wacc_res.rf * 100.0, current_price=price
         )
-        add_model("graham_growth", "Benjamin Graham Growth Formula", "absolute", m12)
+        add_model("graham_growth", "Benjamin Graham Growth Formula", "absolute", m12,
+                  drivers=('eps', 'bvps'))
 
         m13 = self.models_suite.model_13_rule_of_40_growth(
             sales_per_share=sps,
@@ -2305,18 +2729,23 @@ class ValuationEngine:
             shares_out=shares,
             current_price=price,
         )
-        add_model("rule_of_40_growth", "Rule of 40 / Rule of X Valuation", "absolute", m13)
+        add_model("rule_of_40_growth", "Rule of 40 / Rule of X Valuation", "absolute", m13,
+                  drivers=('sps', 'revenue', 'fcf', 'debt', 'cash'))
 
         m14 = self.models_suite.model_14_acquirers_multiple(
             ebit=ebit, revenue=revenue, net_debt=net_debt, shares_out=shares,
             sector_ev_ebit=sector_ev_ebit, current_price=price
         )
-        add_model("acquirers_multiple_ev_ebit", "Acquirer's Multiple (EV/EBIT)", "absolute", m14)
+        add_model("acquirers_multiple_ev_ebit", "Acquirer's Multiple (EV/EBIT)", "absolute", m14,
+                  drivers=('ebit', 'revenue', 'debt', 'cash', 'shares'))
 
-        total_capex = float(fundamental_data.get("capex") or fundamental_data.get("capex_ttm") or (ebitda - ebit))
-        prev_rev = float(fundamental_data.get("prev_revenue") or (revenue * (1.0 - g_stage1)))
-        gross_ppe_val = fundamental_data.get("gross_ppe_fq") or fundamental_data.get("ppe_gross") or fundamental_data.get("fixed_assets") or (mcap * 0.4)
-        gross_ppe = float(gross_ppe_val)
+        total_capex = res.resolve("capex", ("capex", "capex_ttm"),
+                                  derive=(("ebitda", "ebit"), lambda: ebitda - ebit),
+                                  impute=lambda: ebitda - ebit)
+        prev_rev = res.resolve("prev_revenue", ("prev_revenue",),
+                               impute=lambda: revenue * (1.0 - g_stage1))
+        gross_ppe = res.resolve("gross_ppe", ("gross_ppe_fq", "ppe_gross", "fixed_assets"),
+                                impute=lambda: mcap * 0.4)
         delta_wc_val = float(fundamental_data.get("delta_working_capital") or 0.0)
         m15 = self.models_suite.model_15_buffett_owners_earnings(
             net_income=net_income,
@@ -2334,53 +2763,67 @@ class ValuationEngine:
             rf=wacc_res.rf,
             current_price=price,
         )
-        add_model("buffett_owners_earnings", "Warren Buffett Owner's Earnings DCF", "absolute", m15)
+        add_model("buffett_owners_earnings", "Warren Buffett Owner's Earnings DCF", "absolute", m15,
+                  drivers=('net_income', 'ebitda', 'ebit', 'cfo', 'revenue'))
 
         # --- 7 SECTOR-SPECIFIC MODELS ---
         m16 = self.models_suite.model_16_pharma_rnpv(
             base_epv_per_share=m11, net_cash_per_share=cash / shares, current_price=price
         )
-        add_model("pharma_rnpv", "Pharma Risk-Adjusted NPV (rNPV)", "sector", m16)
+        add_model("pharma_rnpv", "Pharma Risk-Adjusted NPV (rNPV)", "sector", m16,
+                  drivers=('revenue', 'ebit', 'cash', 'debt', 'shares'))
 
-        rwa_val = fundamental_data.get("bank_loans_fq") or fundamental_data.get("rwa") or (mcap * 1.2)
-        rwa_clean = float(rwa_val)
+        rwa_clean = res.resolve("rwa", ("bank_loans_fq", "rwa"), impute=lambda: mcap * 1.2)
         m17 = self.models_suite.model_17_bank_equity_cash_flow(
             net_income=net_income, rwa=rwa_clean,
             book_equity=bvps * shares, roe=roe, ke=wacc_res.cost_of_equity, shares_out=shares, current_price=price
         )
-        add_model("bank_equity_cash_flow", "Banking Equity Cash Flow & Basel II CAR", "sector", m17)
+        add_model("bank_equity_cash_flow", "Banking Equity Cash Flow & Basel II CAR", "sector", m17,
+                  drivers=('net_income', 'bvps', 'roe', 'rwa'))
 
-        landbank_clean = float(fundamental_data.get("landbank_fq") or (mcap * 0.2))
+        landbank_clean = res.resolve("landbank", ("landbank_fq",), impute=lambda: mcap * 0.2)
         m18 = self.models_suite.model_18_reit_affo_dcf(
             net_operating_income=ebit, landbank_pipeline_val=landbank_clean, cash_and_equiv=cash,
             total_debt=debt, shares_out=shares, current_price=price
         )
-        add_model("reit_affo_dcf", "REIT / Real Estate AFFO & RNAV", "sector", m18)
+        add_model("reit_affo_dcf", "REIT / Real Estate AFFO & RNAV", "sector", m18,
+                  drivers=('ebit', 'cash', 'debt', 'landbank'))
 
+        regulated_asset_base = res.resolve(
+            "regulated_asset_base", ("regulated_asset_base", "rab"),
+            impute=lambda: mcap * 0.5)
         m19 = self.models_suite.model_19_telecom_unbundled_sotp(
-            regulated_asset_base=mcap * 0.5, serveco_ebitda=ebitda * 0.5,
+            regulated_asset_base=regulated_asset_base, serveco_ebitda=ebitda * 0.5,
             net_debt=net_debt, shares_out=shares, current_price=price,
             wacc=wacc_res.wacc, g_terminal=DEFAULT_TERMINAL_G
         )
-        add_model("telecom_unbundled_sotp", "Unbundled SOTP & Regulated Asset Base", "sector", m19)
+        add_model("telecom_unbundled_sotp", "Unbundled SOTP & Regulated Asset Base", "sector", m19,
+                  drivers=('regulated_asset_base', 'ebitda', 'debt', 'cash'))
 
         m20 = self.models_suite.model_20_industrial_apv(
             ebit=ebit, total_debt=debt, cash_and_equiv=cash, shares_out=shares,
             rf=wacc_res.rf, erp=wacc_res.erp, kd=wacc_res.cost_of_debt_after_tax,
             z_score=risk_res.altman_z_score, current_price=price
         )
-        add_model("industrial_apv", "Adjusted Present Value (APV)", "sector", m20)
+        add_model("industrial_apv", "Adjusted Present Value (APV)", "sector", m20,
+                  drivers=('ebit', 'debt', 'cash'))
 
+        invested_capital = res.resolve(
+            "invested_capital", ("invested_capital", "capital_employed"),
+            derive=(("equity", "debt"), lambda: equity_val + debt),
+            impute=lambda: mcap * 0.5)
         m21 = self.models_suite.model_21_consumer_eva_mva(
-            ebit=ebit, invested_capital=mcap * 0.5, wacc=wacc_res.wacc,
+            ebit=ebit, invested_capital=invested_capital, wacc=wacc_res.wacc,
             net_debt=net_debt, shares_out=shares, current_price=price
         )
-        add_model("consumer_eva_mva", "Economic Value Added (EVA & MVA)", "sector", m21)
+        add_model("consumer_eva_mva", "Economic Value Added (EVA & MVA)", "sector", m21,
+                  drivers=('ebit', 'invested_capital'))
 
         m22 = self.models_suite.model_22_utilities_3stage_ddm(
             dividend_per_share=dividend_per_share, ke=wacc_res.cost_of_equity, current_price=price
         )
-        add_model("utilities_3stage_ddm", "3-Stage Dividend Discount Model (DDM)", "sector", m22)
+        add_model("utilities_3stage_ddm", "3-Stage Dividend Discount Model (DDM)", "sector", m22,
+                  drivers=('dividend_per_share',))
 
         return results
 
@@ -2397,12 +2840,17 @@ class ValuationEngine:
         - composite_mode='blended' (Default): Sector-calibrated fundamental structural blend
         - composite_mode='omnibus': Dynamic error metric weighting (SMAPE, MALE, WMAPE, RMSLE, IVW)
         """
-        active_models = [m.model_id for m in models if m.active]
-        active_vals = [m.fair_value for m in models if m.active]
+        active_models = [m.model_id for m in models if m.active and m.fair_value > 0]
+        active_vals = [m.fair_value for m in models if m.active and m.fair_value > 0]
 
+        # No usable model means no valuation. The previous behaviour fell back
+        # to averaging every model including the ones that had just been
+        # rejected, and then to a literal 10,000 VND - so a company with no
+        # data still produced a fair value that looked like every other one.
         if not active_models:
-            active_models = [m.model_id for m in models]
-            active_vals = [m.fair_value for m in models]
+            for m in models:
+                m.weight = 0.0
+            return 0.0
 
         weights, rejected = self.weighting_engine.calculate_weights(
             active_models=active_models,
@@ -2430,15 +2878,12 @@ class ValuationEngine:
         if total_w > 0:
             composite_fv = composite_fv / total_w
         else:
-            positive_vals = [v for v in active_vals if v > 0]
-            composite_fv = sum(positive_vals) / len(positive_vals) if positive_vals else 10000.0
+            # Every surviving model was filtered out by the weighting stage;
+            # fall back to the equal-weight mean of the survivors, never to a
+            # hardcoded price.
+            composite_fv = sum(active_vals) / len(active_vals) if active_vals else 0.0
 
-        if composite_fv <= 0:
-            positive_vals = [m.fair_value for m in models if m.fair_value > 0]
-            composite_fv = sum(positive_vals) / len(positive_vals) if positive_vals else 10000.0
-
-        composite_fv = round(composite_fv, 0)
-        return composite_fv
+        return round(max(composite_fv, 0.0), 0)
 
     def get_comprehensive_valuation(
         self,

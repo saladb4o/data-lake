@@ -17,6 +17,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -24,7 +27,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 from services.stock_service import (
     get_trading_board,
@@ -129,7 +132,8 @@ def _load_alert_rules() -> None:
             _alert_id_seq = itertools.count(max_id + 1)
         print(f"[ALERTS] Loaded {len(_alert_rules_store)} alert rule(s) from {ALERT_RULES_PATH}")
     except FileNotFoundError:
-        pass
+        # Expected on a fresh install: no rules have been saved yet.
+        print(f"[ALERTS] No rules file at {ALERT_RULES_PATH}; starting empty")
     except Exception as e:
         print(f"[ALERTS] Failed to load alert rules: {e}")
 
@@ -226,7 +230,9 @@ def _warm_rrg_cache_async():
             api_sectors_rrg(benchmark="VNINDEX", interval="1W", tail=8, method="jdk")
             api_sectors_rrg(benchmark="VNINDEX", interval="1W", tail=8, method="enhanced")
         except Exception:
-            pass
+            # Warming the cache is best-effort, but a warm-up that fails on
+            # every boot means the first real request pays for it every time.
+            logger.warning("RRG cache warm-up failed", exc_info=True)
 
     threading.Thread(target=_warm, daemon=True, name="rrg-cache-warmer").start()
 
@@ -814,7 +820,12 @@ def api_sectors_rrg(
             with open(_disk_path, "w", encoding="utf-8") as _f:
                 _json.dump(_disk, _f)
         except Exception:
-            pass
+            # The in-memory cache still holds the payload; only the on-disk
+            # copy that would survive a restart is lost.
+            logger.warning(
+                "Could not persist the RRG disk cache to %s", _disk_path,
+                exc_info=True,
+            )
         return JSONResponse(content={"status": "success", "data": payload})
     except Exception as e:
         return _error_response(e)
@@ -960,7 +971,12 @@ def api_quant_screener(
                 "composite": {"growth": 0.35, "quality": 0.25, "health": 0.20, "valuation": 0.20}
             }
         except Exception:
-            pass
+            # factor_weights is simply omitted from the response when this
+            # fails, which a client cannot tell apart from "not applicable".
+            logger.warning(
+                "Could not attach factor_weights to the screener response",
+                exc_info=True,
+            )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
         return _error_response(e)
@@ -1163,6 +1179,13 @@ def api_quant_institutional_run(
     margin_of_safety_pct: float = Query(15.0, description="Margin of Safety % for Valuation strategies"),
     composite_mode: str = Query("blended", description="blended or omnibus"),
     omnibus_metric: str = Query("smape", description="smape, male, wmape, rmsle, ivw"),
+    fundamentals_mode: str = Query(
+        "point_in_time",
+        description=(
+            "point_in_time (real filings published by the rebalance date) or "
+            "snapshot_projected (legacy price-derived fundamentals)"
+        ),
+    ),
     use_dynamic_beta_mos: bool = Query(False, description="Enable dynamic beta MoS adjustment"),
     filter_rkv_value_trap: bool = Query(True, description="Enable Rhodes-Kropf value trap filter"),
     backtest_mode: Optional[str] = Query(None, description="factor, valuation, or hybrid"),
@@ -1196,6 +1219,7 @@ def api_quant_institutional_run(
             margin_of_safety_pct=margin_of_safety_pct,
             composite_mode=composite_mode,
             omnibus_metric=omnibus_metric,
+            fundamentals_mode=fundamentals_mode,
             use_dynamic_beta_mos=use_dynamic_beta_mos,
             filter_rkv_value_trap=filter_rkv_value_trap,
             backtest_mode=backtest_mode,
@@ -1380,7 +1404,7 @@ def api_get_valuation_matrix_query(
 @app.get("/api/valuation/3-way-forecast/{symbol}")
 def api_get_three_statement_forecast(
     symbol: str,
-    start_year: int = Query(2026, description="Initial forecast year (default 2026)"),
+    start_year: Optional[int] = Query(None, description="Initial forecast year; defaults to the current year"),
     tax_rate: float = Query(0.20, description="Corporate income tax rate (default 20%)"),
 ):
     """
@@ -1403,7 +1427,7 @@ def api_get_three_statement_forecast(
 def api_export_financial_model_excel(
     symbol: str,
     scale_unit: str = Query("billion", description="Scale unit: 'billion' (default, in Billion VND) or 'raw'"),
-    start_year: int = Query(2026, description="Initial forecast year"),
+    start_year: Optional[int] = Query(None, description="Initial forecast year; defaults to the current year"),
     tax_rate: float = Query(0.20, description="Corporate income tax rate"),
 ):
     """
@@ -1469,9 +1493,18 @@ def api_run_fair_value_backtest(
     initial_capital: float = Query(100_000_000.0, description="Starting capital in VND"),
     holding_period_months: int = Query(12, description="Target holding horizon in months"),
     start_year: int = Query(2021, description="Start year"),
-    end_year: int = Query(2026, description="End year"),
+    end_year: Optional[int] = Query(None, description="End year; defaults to the current year"),
     composite_mode: str = Query("blended", description="blended or omnibus"),
     omnibus_metric: str = Query("smape", description="smape, male, wmape, rmsle, ivw"),
+    fundamentals_mode: str = Query(
+        "point_in_time",
+        description=(
+            "point_in_time (real quarterly filings, published by the rebalance "
+            "date; symbols without one are skipped) or snapshot_projected "
+            "(legacy: today's multiples projected onto historical prices, which "
+            "makes every fair value a fixed multiple of the entry price)"
+        ),
+    ),
 ):
     """
     Executes an Institutional 3-Mode Modular Fair Value Quant Backtest across the Vietnamese equity universe.
@@ -1499,6 +1532,7 @@ def api_run_fair_value_backtest(
             end_year=end_year,
             composite_mode=composite_mode,
             omnibus_metric=omnibus_metric,
+            fundamentals_mode=fundamentals_mode,
         )
         return JSONResponse(content={"status": "success", "data": res.to_dict()})
     except Exception as e:

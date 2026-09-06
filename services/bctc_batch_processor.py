@@ -26,6 +26,7 @@ from services.stock_service import (
     _fetch_cafef_single_page_raw
 )
 from services.bctc_pdf_parser import BCTCPdfParser
+from services.stable_identity import stable_hash
 
 try:
     import fitz
@@ -110,7 +111,7 @@ def _merge_shards_if_present(data: Dict[str, Any]) -> Dict[str, Any]:
                     except Exception as err:
                         logger.warning(f"Failed to read shard {fpath}: {err}")
         except Exception:
-            pass
+            logger.debug("_merge_shards_if_present: swallowed Exception", exc_info=True)
             
     if merged_count > 0:
         logger.info(f"Auto-merged {merged_count} symbols from Colab shards into BCTC lake")
@@ -160,7 +161,7 @@ def _save_lake_data(data: Dict[str, Any]) -> None:
             if 'tmp_file' in locals() and os.path.exists(tmp_file):
                 os.remove(tmp_file)
         except Exception:
-            pass
+            logger.debug("_save_lake_data: swallowed Exception", exc_info=True)
 
 
 def _get_corporate_actions_lake() -> Dict[str, Any]:
@@ -235,7 +236,7 @@ class BCTCBatchProcessor:
                         if len(doc) >= min_pages:
                             return local_path
                 except Exception:
-                    pass
+                    logger.debug("BCTCBatchProcessor: swallowed Exception", exc_info=True)
             else:
                 return local_path
 
@@ -255,7 +256,7 @@ class BCTCBatchProcessor:
                                 logger.info(f"Skipping PDF {pdf_url}: {len(doc)} pages < {min_pages} pages required for BCTC")
                                 return None
                         except Exception:
-                            pass
+                            logger.debug("BCTCBatchProcessor: swallowed Exception", exc_info=True)
                     with open(local_path, "wb") as f:
                         f.write(data)
                     return local_path
@@ -426,7 +427,7 @@ class BCTCBatchProcessor:
             if not pdf_url:
                 continue
 
-            doc_id = f"{symbol}_{rep.get('fiscal_year') or rep.get('year', '2024')}_{abs(hash(rep.get('title', '')))}"
+            doc_id = f"{symbol}_{rep.get('fiscal_year') or rep.get('year', '2024')}_{stable_hash(rep.get('title', ''))}"
             # Check if already processed in lake with valid statements or footnotes
             if doc_id in lake:
                 cached_rec = lake[doc_id]
@@ -530,7 +531,7 @@ class BCTCBatchProcessor:
                 if not local_pdf or not os.path.exists(local_pdf):
                     continue
 
-                doc_id = f"{symbol}_{r_type}_{abs(hash(local_pdf)) % 100000}"
+                doc_id = f"{symbol}_{r_type}_{stable_hash(local_pdf, 100000)}"
                 try:
                     parser = CorporateDisclosuresParser(local_pdf)
                     extracted = parser.extract_full_report(category_hint=r_type)
@@ -777,7 +778,7 @@ def enrich_forensic_bctc_with_structured_financials(symbol: str, ext_bctc: Dict[
                                     if val > 0:
                                         return val
                                 except Exception:
-                                    pass
+                                    logger.debug("enrich_forensic_bctc_with_structured_financials: swallowed Exception", exc_info=True)
             # 2. Substring match (excluding legacy rows)
             for row in rows:
                 name = (row.get("item_name") or "").strip()
@@ -789,7 +790,7 @@ def enrich_forensic_bctc_with_structured_financials(symbol: str, ext_bctc: Dict[
                             try:
                                 return float(str(v).replace(",", "").strip())
                             except Exception:
-                                pass
+                                logger.debug("enrich_forensic_bctc_with_structured_financials: swallowed Exception", exc_info=True)
             return None
 
         s_assets = _extract_val(bal, ["Tổng cộng tài sản", "TỔNG CỘNG TÀI SẢN"])

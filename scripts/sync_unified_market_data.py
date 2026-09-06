@@ -11,6 +11,9 @@ import os
 import sys
 import json
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure proper encoding on Windows
 if sys.platform == "win32":
@@ -18,7 +21,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:

@@ -18,6 +18,9 @@ from typing import Dict, Any, List, Optional
 from concurrent.futures import ThreadPoolExecutor
 
 from services.tls_config import tls_ssl_context
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -25,7 +28,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 ssl_ctx = tls_ssl_context()
 
@@ -273,7 +276,7 @@ def get_global_commodities_overview() -> Dict[str, Any]:
                 res = fut.result()
                 items.append(res)
             except Exception:
-                pass
+                logger.debug("get_global_commodities_overview: swallowed Exception", exc_info=True)
 
     if not items:
         return _build_initial_snapshot()

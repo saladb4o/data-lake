@@ -5,7 +5,7 @@ Gates:
   I1. Offline end-to-end: fake master_symbols_map (>= 30 symbols with
       realistic TradingView-shaped tv_data dicts incl. near-empty ones),
       ALL fetch functions monkeypatched to canned data (zero network),
-      SCREENER_SNAPSHOT_FILE redirected to a temp path. After
+      screener_snapshot_file() redirected to a temp path. After
       sync_unified_screener_universe:
         - every stock has a "percentiles" block with the exact consumer shape
         - all five quintiles Q1..Q5 are populated
@@ -30,7 +30,13 @@ from services import unified_data_service as uds
 PERCENTILES_SHAPE = {
     "growth", "quality", "health", "valuation", "composite",
     "quintile", "quintile_label", "quintile_color", "quintile_badge",
+    # How much of the record was actually reported, so a score built on two
+    # factors is distinguishable from one built on all ten.
+    "factor_coverage_pct",
 }
+
+#: Published only when they apply, so not part of the fixed shape.
+PERCENTILES_OPTIONAL = {"winsorized", "low_evidence"}
 
 SECTORS = [
     ("VNIND", "Công Nghiệp"),
@@ -131,8 +137,13 @@ def offline_sync(monkeypatch, tmp_path):
         monkeypatch.setattr(uds, "fetch_tradingview_batch_by_tickers", fake_fetch_tv)
         monkeypatch.setattr(uds, "fetch_vnstock_financials", fake_fetch_vnstock)
         monkeypatch.setattr(uds, "fetch_yfinance_financials", fake_fetch_yfinance)
+        # SCREENER_SNAPSHOT_FILE became screener_snapshot_file() when the
+        # import-time path constants were made lazy. Patching the old name
+        # raised AttributeError, which went unnoticed because this module was
+        # also (wrongly) tagged as a network module and never ran in CI - its
+        # own docstring says it makes no network calls.
         snapshot_path = tmp_path / "screener_snapshot.json"
-        monkeypatch.setattr(uds, "SCREENER_SNAPSHOT_FILE", str(snapshot_path))
+        monkeypatch.setattr(uds, "screener_snapshot_file", lambda: str(snapshot_path))
         return uds.sync_unified_screener_universe(master), snapshot_path
 
     return _run
@@ -149,8 +160,10 @@ def test_i1_offline_sync_scores_and_publishes_quintiles(offline_sync):
 
     # Shape: every stock has the exact new percentiles contract.
     for sym, s in stocks.items():
-        assert PERCENTILES_SHAPE == set(s["percentiles"].keys()), (
-            f"{sym}: percentiles shape drifted"
+        published = set(s["percentiles"].keys())
+        assert PERCENTILES_SHAPE <= published, f"{sym}: percentiles shape drifted"
+        assert published - PERCENTILES_SHAPE <= PERCENTILES_OPTIONAL, (
+            f"{sym}: unexpected keys {published - PERCENTILES_SHAPE - PERCENTILES_OPTIONAL}"
         )
         comp = s["percentiles"]["composite"]
         assert isinstance(comp, (int, float))

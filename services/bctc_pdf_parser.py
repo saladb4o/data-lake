@@ -1479,7 +1479,7 @@ class BCTCPdfParser:
                                     if vals:
                                         own_pct = vals[0]
                                 except Exception:
-                                    pass
+                                    logger.debug("BCTCPdfParser: swallowed Exception", exc_info=True)
 
                             capital_vnd = None
                             nums = re.findall(r"\b\d{1,3}(?:\.\d{3}){2,}\b", context)

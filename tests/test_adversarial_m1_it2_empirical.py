@@ -26,6 +26,19 @@ from services.fair_value_backtest_service import (
 )
 from services.backtest_service import QUARTERS_TIMELINE
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
 
 @pytest.fixture(autouse=True)
 def clean_cache():
@@ -68,6 +81,7 @@ class TestInvertedYearsAndBounds:
             start_year=start_y,
             end_year=end_y,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] >= 0
@@ -91,6 +105,7 @@ class TestInvertedYearsAndBounds:
             start_year=2026,
             end_year=2021,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         # Clear cache to ensure independent computation
         with _fv_backtest_cache._lock:
@@ -101,6 +116,7 @@ class TestInvertedYearsAndBounds:
             start_year=2021,
             end_year=2026,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_inverted.metrics["total_trades"] == res_normal.metrics["total_trades"]
         assert res_inverted.metrics["total_return_pct"] == res_normal.metrics["total_return_pct"]
@@ -124,6 +140,7 @@ class TestCacheKeyPartitioning:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_120 = service.run_backtest(
             mode=BacktestMode.HYBRID_FUNNEL,
@@ -131,6 +148,7 @@ class TestCacheKeyPartitioning:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         # Verify payloads reflect their respective requested parameters
         assert res_12.holding_period_months == 12
@@ -143,6 +161,7 @@ class TestCacheKeyPartitioning:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_12_cached.holding_period_months == 12
 
@@ -154,6 +173,7 @@ class TestCacheKeyPartitioning:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_500m = service.run_backtest(
             mode=BacktestMode.HYBRID_FUNNEL,
@@ -161,6 +181,7 @@ class TestCacheKeyPartitioning:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_500m.equity_curve[0]["strategy_equity"] != res_100m.equity_curve[0]["strategy_equity"]
         assert abs(res_500m.equity_curve[0]["strategy_equity"] / res_100m.equity_curve[0]["strategy_equity"] - 5.0) < 0.01
@@ -172,6 +193,7 @@ class TestCacheKeyPartitioning:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert abs(res_100m_cached.equity_curve[0]["strategy_equity"] - res_100m.equity_curve[0]["strategy_equity"]) < 1.0
 
@@ -191,6 +213,7 @@ class TestZeroExitPremiumTakeProfit:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.exit_premium_pct == 0.0
         assert res.metrics["total_trades"] > 0
@@ -211,6 +234,7 @@ class TestZeroExitPremiumTakeProfit:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.exit_premium_pct == 0.0
         tp_trades = [t for t in res.trades if t["exit_reason"] == "TAKE_PROFIT"]
@@ -232,6 +256,7 @@ class TestDynamicBetaMoSScaling:
             use_dynamic_beta_mos=True,
             start_year=2021,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         res_extreme = service.run_backtest(
             mode=BacktestMode.VALUATION_ONLY,
@@ -239,6 +264,7 @@ class TestDynamicBetaMoSScaling:
             use_dynamic_beta_mos=True,
             start_year=2021,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_normal.metrics["total_trades"] > 0
         assert res_extreme.metrics["total_trades"] == 0, (
@@ -255,6 +281,7 @@ class TestDynamicBetaMoSScaling:
                 use_dynamic_beta_mos=True,
                 start_year=2021,
                 end_year=2025,
+                fundamentals_mode=_SNAPSHOT,
             )
             trade_counts.append(res.metrics["total_trades"])
 
@@ -285,6 +312,7 @@ class TestAvgHoldingDaysCalculation:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.metrics["total_trades"] >= 0
         if res.trades:
@@ -305,6 +333,7 @@ class TestAvgHoldingDaysCalculation:
             use_dynamic_beta_mos=False,
             start_year=2024,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.metrics["total_trades"] == 0
         expected_fallback = float(18 * 30)

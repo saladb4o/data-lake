@@ -26,6 +26,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, Optional
 
 from services.stock_service import resolve_data_file
+import logging
+
+logger = logging.getLogger(__name__)
 
 DOMESTIC_CACHE_FILE = "domestic_commodity_cache.json"
 CACHE_TTL_SECONDS = 43200  # 12 Hours
@@ -251,7 +254,7 @@ def _load_disk_cache() -> Dict[str, Any]:
             with open(fpath, "r", encoding="utf-8") as f:
                 return json.load(f)
     except Exception:
-        pass
+        logger.debug("_load_disk_cache: swallowed Exception", exc_info=True)
     return {}
 
 
@@ -262,7 +265,7 @@ def _save_disk_cache(data: Dict[str, Any]) -> None:
         with open(fpath, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
     except Exception:
-        pass
+        logger.debug("_save_disk_cache: swallowed Exception", exc_info=True)
 
 
 def crawl_vietnambiz_live_hog_safe() -> Optional[Dict[str, Any]]:
@@ -306,7 +309,7 @@ def crawl_vietnambiz_live_hog_safe() -> Optional[Dict[str, Any]]:
                 "crawled_at": datetime.now(timezone(timedelta(hours=7))).strftime("%d/%m/%Y %H:%M")
             }
     except Exception:
-        pass
+        logger.debug("crawl_vietnambiz_live_hog_safe: swallowed Exception", exc_info=True)
     return None
 
 
@@ -336,7 +339,7 @@ def crawl_petrolimex_fuel_safe() -> Optional[Dict[str, Any]]:
                 "crawled_at": datetime.now(timezone(timedelta(hours=7))).strftime("%d/%m/%Y %H:%M")
             }
     except Exception:
-        pass
+        logger.debug("crawl_petrolimex_fuel_safe: swallowed Exception", exc_info=True)
     return None
 
 

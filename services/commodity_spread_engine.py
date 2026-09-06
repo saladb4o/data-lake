@@ -28,6 +28,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 
 from services.global_market_service import _fetch_single_yahoo_ticker, global_cache
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Sector & Commodity Cyclical Registry
 CYCLICAL_SECTORS_REGISTRY = {
@@ -377,7 +380,7 @@ def _build_cyclical_universe() -> Dict[str, List[str]]:
                 reverse=True
             )
     except Exception:
-        pass
+        logger.debug("_build_cyclical_universe: swallowed Exception", exc_info=True)
 
     for sec, sym_list in universe.items():
         for s in sym_list:

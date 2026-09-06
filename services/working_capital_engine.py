@@ -40,6 +40,8 @@ import logging
 from typing import Dict, List, Any, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
+from services.market_calendar import default_forecast_start_year
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -680,7 +682,7 @@ class WorkingCapitalEngine:
         convergence_rate: Optional[float] = None,
         days_in_period: int = 365,
         years: Optional[List[int]] = None,
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
         symbol: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
@@ -688,6 +690,7 @@ class WorkingCapitalEngine:
         Enforces the exact Delta NWC component additivity invariant:
         Delta NWC_t == Delta AR_t + Delta Inv_t + Delta OCA_t - Delta AP_t - Delta OCL_t
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         sec_info = resolve_sector_prior(sector, symbol=symbol)
         is_financial = (
             base_metrics.get("is_financial_sector", False) or
@@ -987,13 +990,14 @@ class WorkingCapitalEngine:
         cogs_forecast: List[float],
         sga_forecast: Optional[List[float]] = None,
         sector: str = "DEFAULT",
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
         mean_revert_speed: float = 0.20,
         convergence_rate: Optional[float] = None,
     ) -> WorkingCapitalForecastResult:
         """
         Top-level pipeline builder producing a fully validated WorkingCapitalForecastResult.
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         base_metrics_dict = WorkingCapitalEngine.calculate_historical_days(
             rev=base_data.get("revenue", base_data.get("rev", 0.0)),
             cogs=base_data.get("cogs", 0.0),
@@ -1050,7 +1054,7 @@ class WorkingCapitalEngine:
         revenue_series: List[float],
         cogs_series: List[float],
         sga_series: Optional[List[float]] = None,
-        start_year: int = 2026,
+        start_year: Optional[int] = None,
         mean_revert_speed: float = 0.0,
         sector: Optional[str] = None,
         **kwargs: Any,
@@ -1058,6 +1062,7 @@ class WorkingCapitalEngine:
         """
         Class-level alias for build_working_capital_schedule interface contract.
         """
+        start_year = start_year if start_year is not None else default_forecast_start_year()
         return build_working_capital_schedule(
             base_data=base_data,
             revenue_series=revenue_series,
@@ -1075,7 +1080,7 @@ def build_working_capital_schedule(
     revenue_series: List[float],
     cogs_series: List[float],
     sga_series: Optional[List[float]] = None,
-    start_year: int = 2026,
+    start_year: Optional[int] = None,
     mean_revert_speed: float = 0.0,
     sector: Optional[str] = None,
     **kwargs: Any,
@@ -1085,6 +1090,7 @@ def build_working_capital_schedule(
     Accepts base fundamental data and forecast series of Revenue, COGS, and SG&A.
     Returns a List of WorkingCapitalSchedulePeriod pydantic instances.
     """
+    start_year = start_year if start_year is not None else default_forecast_start_year()
     sec = sector or base_data.get("sector", "DEFAULT")
     sym = base_data.get("symbol")
     sec_info = resolve_sector_prior(sec, symbol=sym)

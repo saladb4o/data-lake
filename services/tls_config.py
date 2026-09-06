@@ -11,11 +11,14 @@ strict and leaves urllib3 warnings untouched.
 import os
 import ssl
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass
+    logger.debug("python-dotenv is not installed; .env will not be loaded")
 
 import urllib3
 
@@ -26,7 +29,13 @@ if _INSECURE_TLS:
     try:
         ssl._create_default_https_context = ssl._create_unverified_context
     except Exception:
-        pass
+        # Failing here leaves verification ON, which is the safe direction,
+        # but the caller asked for the opposite and deserves to know.
+        logger.warning(
+            "VNSTOCK_INSECURE_TLS=1 was set but the unverified SSL context "
+            "could not be installed; certificate verification stays on.",
+            exc_info=True,
+        )
 
 
 def tls_verify() -> bool:

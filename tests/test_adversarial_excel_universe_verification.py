@@ -55,7 +55,7 @@ class TestAdversarialExcelRealTickers:
     """
 
     @pytest.mark.parametrize("sym", ["HPG", "FPT", "MWG", "VCB", "NVL", "VIC", "VNM"])
-    def test_real_ticker_export_and_cell_integrity(self, sym, export_scratch_dir):
+    def test_real_ticker_export_and_cell_integrity(self, sym, export_scratch_dir, screener_snapshot):
         # 1. Run 3-Way statement forecast
         res = ThreeStatementEngine.build_forecast_from_screener(sym)
         assert res.all_years_balanced is True, f"Balance sheet not balanced for {sym}"
@@ -170,7 +170,7 @@ class TestAdversarialVN30UniverseClosure:
     """
 
     @pytest.mark.parametrize("sym", VN30_SYMBOLS)
-    def test_vn30_constituent_5y_balance_and_export(self, sym, export_scratch_dir):
+    def test_vn30_constituent_5y_balance_and_export(self, sym, export_scratch_dir, screener_snapshot):
         # 1. Compute 5Y synchronized forecast
         res = ThreeStatementEngine.build_forecast_from_screener(sym)
         assert res.symbol == sym

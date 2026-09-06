@@ -165,7 +165,11 @@ class TestValuationEngineSuite:
             assert isinstance(m, ModelValuationOutput)
             assert m.fair_value >= 0.0
             assert m.fair_value <= sample_fundamental_data["price"] * 10.0
-            assert m.status in ["ACTIVE", "INACTIVE", "BYPASSED", "OUTLIER_REJECTED"]
+            assert m.status in [
+                "ACTIVE", "INACTIVE", "BYPASSED", "OUTLIER_REJECTED",
+                "INSUFFICIENT_DATA",   # a driver was imputed, not observed
+                "NOT_APPLICABLE",      # the model declined (no earnings, no book equity...)
+            ]
 
     def test_comprehensive_valuation_flow(self, sample_fundamental_data):
         engine = ValuationEngine()
@@ -210,6 +214,7 @@ class TestValuationEngineSuite:
             bvps=15000.0,
             expected_growth_pct=10.0,
             benchmark_bond_yield=5.0,
+            current_price=25000.0,
         )
         assert fv_neg == 0.0
 
@@ -219,6 +224,7 @@ class TestValuationEngineSuite:
             bvps=20000.0,
             expected_growth_pct=10.0,
             benchmark_bond_yield=5.0,
+            current_price=25000.0,
         )
         # Classic = sqrt(22.5 * 2000 * 20000) = 30000
         # Growth = 2000 * (8.5 + 1.5*10) * (4.4 / 5.0) = 2000 * 23.5 * 0.88 = 41360

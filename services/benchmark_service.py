@@ -19,6 +19,7 @@ if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
+        # silent-ok: cosmetic console encoding, before the logger exists.
         pass
 
 import pandas as pd
@@ -29,7 +30,11 @@ try:
     from services.tls_config import tls_verify, configure_urllib_warnings
     configure_urllib_warnings()
 except Exception:
-    pass
+    logger.warning(
+        "services.tls_config could not be loaded; urllib3 warning "
+        "configuration was skipped.",
+        exc_info=True,
+    )
 
 # Import vnstock safely
 try:
@@ -42,7 +47,11 @@ try:
         try:
             setup_api_key(api_key)
         except Exception:
-            pass
+            logger.warning(
+                "VNSTOCK_API_KEY is set but could not be registered; "
+                "requests fall back to the anonymous tier.",
+                exc_info=True,
+            )
 except Exception:
     Quote = None
 

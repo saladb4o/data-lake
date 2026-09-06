@@ -340,10 +340,20 @@ def test_published_percentiles_shape_exact():
     expected_keys = {
         "growth", "quality", "health", "valuation", "composite",
         "quintile", "quintile_label", "quintile_color", "quintile_badge",
+        # Added deliberately: how much of the record was actually reported.
+        # A score built on two factors out of ten is not the same claim as one
+        # built on all ten, and consumers had no way to tell them apart.
+        "factor_coverage_pct",
     }
+    # Present only when they apply, so they are not part of the fixed shape.
+    optional_keys = {"winsorized", "low_evidence"}
     for sym, s in universe.items():
-        assert expected_keys == set(s["percentiles"].keys()), (
+        published = set(s["percentiles"].keys())
+        assert expected_keys <= published, (
             f"{sym}: percentiles shape drifted from consumer contract"
+        )
+        assert published - expected_keys <= optional_keys, (
+            f"{sym}: unexpected keys {published - expected_keys - optional_keys}"
         )
 
 

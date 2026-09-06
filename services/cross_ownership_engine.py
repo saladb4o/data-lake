@@ -211,8 +211,13 @@ class CrossOwnershipEngine:
                         own_val = 0.0
                         m_val = re.search(r"(\d+(?:\.\d+)?)%", own_str)
                         if m_val:
-                            try: own_val = float(m_val.group(1))
-                            except: pass
+                            try:
+                                own_val = float(m_val.group(1))
+                            except ValueError:
+                                logger.debug(
+                                    "cross-ownership: unparseable ownership %r",
+                                    m_val.group(1),
+                                )
                         holdings.append({
                             "holder_symbol": core_sym,
                             "holder_name": ALL_SYMBOLS_MAP.get(core_sym, {}).get("name", f"Tập đoàn {core_sym}"),
@@ -553,7 +558,7 @@ class CrossOwnershipEngine:
                 u = get_stock_unified_data(sym)
                 total_assets = float(u.get("total_assets", 0.0) or 0.0)
             except Exception:
-                pass
+                logger.debug("CrossOwnershipEngine: swallowed Exception", exc_info=True)
         if total_assets <= 0.0:
             total_assets = 73_563_000_000_000.0 if sym == "FPT" else 25_000_000_000_000.0
 

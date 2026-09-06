@@ -4,6 +4,17 @@
  * ==========================================================================
  */
 
+// Earliest year the price/fundamentals lake covers. Mirrors
+// services/market_calendar.EARLIEST_DATA_YEAR; keep the two in step.
+const EARLIEST_MARKET_DATA_YEAR = 2016;
+
+// A metric the backend withheld (null) because there was no meaningful
+// denominator must read as "n/a", not as the string "null".
+function fmtMetric(value, suffix = '') {
+  if (value === null || value === undefined || Number.isNaN(value)) return 'n/a';
+  return `${value}${suffix}`;
+}
+
 function escapeHTML(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -10040,25 +10051,25 @@ class VnstockApp {
   }
 
   switchBacktestSubtab(subtab) {
-    const btnPortfolio = document.getElementById('btnSubtabBtPortfolio');
-    const btnInst = document.getElementById('btnSubtabBtInstitutional');
-    const secPortfolio = document.getElementById('btPortfolioSection');
-    const secInst = document.getElementById('btInstitutionalSection');
+    // Three independent labs share this tab. 'fair_value' used to alias to the
+    // institutional section because its own panel did not exist; it does now.
+    const panes = {
+      portfolio: ['btnSubtabBtPortfolio', 'btPortfolioSection'],
+      institutional: ['btnSubtabBtInstitutional', 'btInstitutionalSection'],
+      fair_value: ['btnSubtabBtFairValue', 'btFairValueSection'],
+    };
+    if (!panes[subtab]) subtab = 'portfolio';
 
-    if (subtab === 'portfolio') {
-      if (btnPortfolio) btnPortfolio.classList.add('active');
-      if (btnInst) btnInst.classList.remove('active');
-      if (secPortfolio) secPortfolio.style.display = 'flex';
-      if (secInst) secInst.style.display = 'none';
-    } else if (subtab === 'institutional' || subtab === 'fair_value') {
-      if (btnPortfolio) btnPortfolio.classList.remove('active');
-      if (btnInst) btnInst.classList.add('active');
-      if (secPortfolio) secPortfolio.style.display = 'none';
-      if (secInst) secInst.style.display = 'flex';
+    Object.entries(panes).forEach(([key, [btnId, secId]]) => {
+      const btn = document.getElementById(btnId);
+      const sec = document.getElementById(secId);
+      const on = key === subtab;
+      if (btn) btn.classList.toggle('active', on);
+      if (sec) sec.style.display = on ? 'flex' : 'none';
+    });
 
-      if (!this.hasRunInstitutionalBt) {
-        this.runInstitutionalBacktest();
-      }
+    if (subtab === 'institutional' && !this.hasRunInstitutionalBt) {
+      this.runInstitutionalBacktest();
     }
   }
 
@@ -10103,11 +10114,11 @@ class VnstockApp {
       setTxt('instKpiMaxDd', `-${m.max_drawdown_pct}%`, 'mono txt-down');
       setTxt('instKpiUlcer', `Ulcer Index: ${m.ulcer_index}`);
 
-      setTxt('instKpiSharpe', `${m.sharpe_ratio} / ${m.sortino_ratio}`, 'mono font-bold');
-      setTxt('instKpiCalmar', `Calmar: ${m.calmar_ratio} (Vol: ${m.annualized_volatility_pct}%)`);
+      setTxt('instKpiSharpe', `${fmtMetric(m.sharpe_ratio)} / ${fmtMetric(m.sortino_ratio)}`, 'mono font-bold');
+      setTxt('instKpiCalmar', `Calmar: ${fmtMetric(m.calmar_ratio)} (Vol: ${fmtMetric(m.annualized_volatility_pct, '%')})`);
 
-      setTxt('instKpiWinRate', `${m.win_rate_pct}% (PF: ${m.profit_factor})`, 'mono font-bold');
-      setTxt('instKpiTradesCount', `${m.total_trades} Lệnh (${m.winning_trades_count}W/${m.losing_trades_count}L, Payoff: ${m.payoff_ratio})`);
+      setTxt('instKpiWinRate', `${fmtMetric(m.win_rate_pct, '%')} (PF: ${fmtMetric(m.profit_factor)})`, 'mono font-bold');
+      setTxt('instKpiTradesCount', `${m.total_trades} Lệnh (${m.winning_trades_count}W/${m.losing_trades_count}L, Payoff: ${fmtMetric(m.payoff_ratio)})`);
 
       setTxt('instKpiExpectancy', `${Number(m.expectancy_per_trade_vnd || 0).toLocaleString()} đ/lệnh`, `mono ${m.expectancy_per_trade_vnd >= 0 ? 'txt-up' : 'txt-down'}`);
       setTxt('instKpiFriction', `Tổng ma sát: ${Number(m.total_friction_vnd || 0).toLocaleString()} đ`);
@@ -10481,12 +10492,12 @@ class VnstockApp {
 
       const d = json.data;
       if (badge) {
-        badge.textContent = `WFE: ${d.walk_forward_efficiency} (${d.wfe_rating})`;
-        badge.className = `badge-tag ${d.walk_forward_efficiency >= 0.7 ? 'badge-success' : (d.walk_forward_efficiency >= 0.5 ? 'badge-info' : 'badge-danger')}`;
+        badge.textContent = `WFE: ${fmtMetric(d.walk_forward_efficiency)} (${d.wfe_rating})`;
+        badge.className = `badge-tag ${d.walk_forward_efficiency == null ? 'badge-info' : (d.walk_forward_efficiency >= 0.7 ? 'badge-success' : (d.walk_forward_efficiency >= 0.5 ? 'badge-info' : 'badge-danger'))}`;
       }
 
       if (desc) {
-        desc.textContent = `Walk-Forward Efficiency: ${d.walk_forward_efficiency} • Tổng lợi nhuận OOS ghép nối: ${d.wfa_metrics?.total_return_pct}% (${d.splits_count} chu kỳ trượt)`;
+        desc.textContent = `Walk-Forward Efficiency: ${fmtMetric(d.walk_forward_efficiency)} • Tổng lợi nhuận OOS ghép nối: ${d.wfa_metrics?.total_return_pct}% (${d.splits_count} chu kỳ trượt)`;
       }
 
       if (container) {
@@ -10936,9 +10947,10 @@ class VnstockApp {
     const compositeMode = document.getElementById('fvBtCompositeModeSelect')?.value || 'blended';
     const omnibusMetric = document.getElementById('fvBtOmnibusMetricSelect')?.value || 'smape';
     const horizon = parseInt(document.getElementById('fvBtHorizonSelect')?.value || '5');
-    const endYear = 2026;
-    let startYear = endYear - horizon;
-    if (horizon === 10) startYear = 2016;
+    // The backtest window ends at the real current year. Hardcoding it meant the
+    // range silently went stale — and stayed wrong for a whole year at a time.
+    const endYear = new Date().getFullYear();
+    const startYear = Math.max(EARLIEST_MARKET_DATA_YEAR, endYear - horizon);
 
     const mos = parseFloat(document.getElementById('fvBtMosSelect')?.value || '15');
     const exit = parseFloat(document.getElementById('fvBtExitSelect')?.value || '20');
@@ -10952,9 +10964,10 @@ class VnstockApp {
     const forensic = Boolean(document.getElementById('fvBtForensicToggle')?.checked);
     const zSafe = Boolean(document.getElementById('fvBtZSafeToggle')?.checked ?? true);
     const rkv = Boolean(document.getElementById('fvBtRkvToggle')?.checked);
+    const fundamentalsMode = document.getElementById('fvBtFundamentalsModeSelect')?.value || 'point_in_time';
 
     try {
-      const url = `/api/backtest/fair_value/run?mode=${encodeURIComponent(mode)}&screening_strategy=${encodeURIComponent(screener)}&valuation_model_id=${encodeURIComponent(valModel)}&composite_mode=${encodeURIComponent(compositeMode)}&omnibus_metric=${encodeURIComponent(omnibusMetric)}&margin_of_safety_pct=${mos}&exit_premium_pct=${exit}&exchange=${encodeURIComponent(exchange)}&top_k=${topK}&rebalance_cadence=${encodeURIComponent(cadence)}&fill_mode=${encodeURIComponent(fillMode)}&survival_filter=${survival}&tsmom_filter=${tsmom}&forensic_filter=${forensic}&use_dynamic_beta_mos=${dynamicMos}&filter_z_score_safe=${zSafe}&filter_rkv_value_trap=${rkv}&start_year=${startYear}&end_year=${endYear}`;
+      const url = `/api/backtest/fair_value/run?mode=${encodeURIComponent(mode)}&screening_strategy=${encodeURIComponent(screener)}&valuation_model_id=${encodeURIComponent(valModel)}&composite_mode=${encodeURIComponent(compositeMode)}&omnibus_metric=${encodeURIComponent(omnibusMetric)}&margin_of_safety_pct=${mos}&exit_premium_pct=${exit}&exchange=${encodeURIComponent(exchange)}&top_k=${topK}&rebalance_cadence=${encodeURIComponent(cadence)}&fill_mode=${encodeURIComponent(fillMode)}&survival_filter=${survival}&tsmom_filter=${tsmom}&forensic_filter=${forensic}&use_dynamic_beta_mos=${dynamicMos}&filter_z_score_safe=${zSafe}&filter_rkv_value_trap=${rkv}&start_year=${startYear}&end_year=${endYear}&fundamentals_mode=${encodeURIComponent(fundamentalsMode)}`;
 
       const res = await fetch(url, { method: 'POST' });
       const json = await res.json();
@@ -10979,8 +10992,17 @@ class VnstockApp {
       setTxt('fvBtMetricCagr', `${m.cagr_pct > 0 ? '+' : ''}${m.cagr_pct}%`);
       setTxt('fvBtMetricTotal', `${m.total_return_pct > 0 ? '+' : ''}${m.total_return_pct}%`);
       setTxt('fvBtMetricMaxDd', `-${m.max_drawdown_pct}%`);
-      setTxt('fvBtMetricSharpe', `${m.sharpe_ratio} (Sortino: ${m.sortino_ratio})`);
+      // Sharpe/Sortino are withheld (null) when the volatility denominator is
+      // too small to divide by; render that rather than printing "null".
+      setTxt('fvBtMetricSharpe', `${fmtMetric(m.sharpe_ratio)} (Sortino: ${fmtMetric(m.sortino_ratio)})`);
       setTxt('fvBtMetricWinRate', `${m.win_rate_pct}% (${m.total_trades} lệnh)`);
+
+      // 1b. Methodology banner. A run built on price-derived fundamentals
+      // renders identically to one built on filings unless we say otherwise,
+      // and only the second is evidence of anything.
+      this.renderFundamentalsProvenance(
+        'fvBtProvenanceBanner', (d.diagnostics || {}).fundamentals || {}
+      );
 
       // 2. Draw Visual Curves Canvas
       this.drawFairValueEquityChart(d.equity_curve || []);
@@ -11088,6 +11110,63 @@ class VnstockApp {
         btn.innerHTML = '<span>▶</span> Chạy Backtest Định Giá Modular';
       }
     }
+  }
+
+  /**
+   * Renders the provenance banner for a backtest result.
+   *
+   * A run whose fundamentals were reconstructed from price looks exactly like
+   * one built on real filings once it is drawn as an equity curve, and only
+   * the second says anything about the strategy. The payload now states which
+   * it is; this puts that on screen instead of leaving it in the JSON.
+   *
+   * Creates the banner element if the host page does not define one, and does
+   * nothing when there is no container to attach it to.
+   */
+  renderFundamentalsProvenance(elementId, info) {
+    if (!info || !Object.keys(info).length) return;
+
+    let el = document.getElementById(elementId);
+    if (!el) {
+      const anchor = document.getElementById('fvBtWinnerTitle')
+        || document.getElementById('fvBtWinnerDesc');
+      if (!anchor || !anchor.parentNode) return;
+      el = document.createElement('div');
+      el.id = elementId;
+      anchor.parentNode.insertBefore(el, anchor);
+    }
+
+    const trustworthy = info.is_evidence_of_skill !== false;
+    const valued = info.symbol_quarters_valued || 0;
+    const skipped = info.symbol_quarters_skipped_no_filing || 0;
+
+    const parts = [];
+    if (trustworthy) {
+      parts.push(
+        `<strong>Dữ liệu point-in-time</strong> — ${valued} mã-quý định giá từ ` +
+        `BCTC thật, ${skipped} mã-quý bỏ qua vì chưa có báo cáo công bố.`
+      );
+    } else {
+      parts.push(`<strong>⚠️ Kết quả này không phải bằng chứng về hiệu quả chiến lược.</strong>`);
+      if (info.warning) parts.push(escapeHTML(info.warning));
+    }
+    (info.notes || []).forEach((n) => parts.push(escapeHTML(n)));
+    if ((info.unmatched_custom_symbols || []).length) {
+      parts.push(
+        'Mã không có trong universe, đã loại: ' +
+        escapeHTML(info.unmatched_custom_symbols.join(', '))
+      );
+    }
+
+    const tone = trustworthy
+      ? 'background:rgba(16,185,129,.10); border-left:3px solid #10b981;'
+      : 'background:rgba(239,68,68,.10); border-left:3px solid #ef4444;';
+    el.setAttribute(
+      'style',
+      `${tone} padding:12px 14px; margin:0 0 14px; border-radius:6px; ` +
+      'font-size:13px; line-height:1.6;'
+    );
+    el.innerHTML = parts.join('<br>');
   }
 
   drawFairValueEquityChart(curve) {

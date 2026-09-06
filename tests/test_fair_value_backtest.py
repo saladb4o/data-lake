@@ -14,6 +14,19 @@ from services.fair_value_backtest_service import (
     fv_backtest_service,
 )
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
 
 @pytest.fixture
 def test_service():
@@ -31,7 +44,8 @@ class TestFairValueBacktestModes:
             holding_period_months=12,
             start_year=2022,
             end_year=2025,
-            custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"]
+            custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.mode == BacktestMode.VALUATION_ONLY
@@ -48,7 +62,8 @@ class TestFairValueBacktestModes:
             holding_period_months=12,
             start_year=2022,
             end_year=2025,
-            custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"]
+            custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.mode == BacktestMode.SCREENING_ONLY
@@ -70,7 +85,8 @@ class TestFairValueBacktestModes:
             holding_period_months=12,
             start_year=2021,
             end_year=2025,
-            custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI", "REE", "VNM", "PNJ"]
+            custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI", "REE", "VNM", "PNJ"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.mode == BacktestMode.HYBRID_FUNNEL
@@ -88,7 +104,8 @@ class TestFairValueBacktestModes:
             valuation_model_id="all",
             start_year=2023,
             end_year=2025,
-            custom_symbols=["HPG", "FPT", "VCB"]
+            custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.model_tournament_matrix is not None
         assert len(res.model_tournament_matrix) >= 10
@@ -106,7 +123,8 @@ class TestFairValueBacktestModes:
             composite_mode="blended",
             start_year=2023,
             end_year=2025,
-            custom_symbols=["HPG", "FPT", "VCB"]
+            custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_blended.diagnostics["valuation_settings"]["composite_mode"] == "blended"
         assert res_blended.metrics["total_trades"] >= 0
@@ -119,7 +137,8 @@ class TestFairValueBacktestModes:
             omnibus_metric="smape",
             start_year=2023,
             end_year=2025,
-            custom_symbols=["HPG", "FPT", "VCB"]
+            custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_omnibus.diagnostics["valuation_settings"]["composite_mode"] == "omnibus"
         assert res_omnibus.diagnostics["valuation_settings"]["omnibus_metric"] == "smape"
@@ -142,7 +161,8 @@ class TestBacktestEdgeCasesAndFixes:
             margin_of_safety_pct=99.0,  # near-impossible threshold
             start_year=2024,
             end_year=2025,
-            # No custom_symbols — uses real universe; may have 0 trades if nothing passes MoS
+            # No custom_symbols — uses real universe; may have 0 trades if nothing passes MoS,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         # Result must be structurally valid regardless of trade count
@@ -164,6 +184,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2024,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         # monthly with quarterly data → same granularity as quarterly, trades must exist
@@ -179,6 +200,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2022,
             end_year=2024,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_annual = test_service.run_backtest(
             mode=BacktestMode.SCREENING_ONLY,
@@ -186,6 +208,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2022,
             end_year=2024,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         # Annual should produce fewer or equal trades than quarterly
         assert res_annual.metrics["total_trades"] <= res_quarterly.metrics["total_trades"]
@@ -197,6 +220,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         beta = res.metrics["beta"]
         # Beta should be a finite float in a plausible range
@@ -214,6 +238,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         m = res.metrics
         alpha = m["alpha_pct"]
@@ -235,6 +260,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         bm_mdd = res_long.metrics["benchmark_max_drawdown_pct"]
         assert math.isfinite(bm_mdd)
@@ -252,6 +278,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2021,
             end_year=2024,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         # Build expected annual VNI returns from QUARTERS_TIMELINE
         vni_annual: dict = {}
@@ -276,6 +303,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         matrix = res.model_tournament_matrix
         assert matrix is not None
@@ -297,6 +325,7 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         curve = res.equity_curve
         assert len(curve) > 1
@@ -320,12 +349,14 @@ class TestBacktestEdgeCasesAndFixes:
             start_year=2022,
             end_year=2023,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_late = test_service.run_backtest(
             mode=BacktestMode.VALUATION_ONLY,
             start_year=2024,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         # Both should return valid BacktestResultPayload without errors
         assert isinstance(res_early, BacktestResultPayload)

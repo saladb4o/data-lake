@@ -399,7 +399,7 @@ class CorporateDisclosuresParser:
                         try:
                             pct = float(pct_m[0].replace(",", "."))
                         except Exception:
-                            pass
+                            logger.debug("CorporateDisclosuresParser: swallowed Exception", exc_info=True)
 
                     # Extract Person Name from line
                     person_name = line.strip()

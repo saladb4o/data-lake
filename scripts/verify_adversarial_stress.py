@@ -13,13 +13,16 @@ import math
 import json
 import concurrent.futures
 from typing import Dict, List, Any
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

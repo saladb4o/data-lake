@@ -35,6 +35,19 @@ from services.valuation_engine import (
 )
 from server import app
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
 
 @pytest.fixture(scope="module")
 def api_client():
@@ -75,6 +88,7 @@ class TestTier1FeatureCoverage:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.mode == BacktestMode.VALUATION_ONLY
@@ -105,6 +119,7 @@ class TestTier1FeatureCoverage:
                 start_year=2022,
                 end_year=2025,
                 custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+                fundamentals_mode=_SNAPSHOT,
             )
             assert isinstance(res, BacktestResultPayload)
             assert res.mode == BacktestMode.SCREENING_ONLY
@@ -128,6 +143,7 @@ class TestTier1FeatureCoverage:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.mode == BacktestMode.HYBRID_FUNNEL
@@ -148,6 +164,7 @@ class TestTier1FeatureCoverage:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.diagnostics["execution_settings"]["rebalance_cadence"] == cadence
@@ -173,6 +190,7 @@ class TestTier1FeatureCoverage:
             start_year=2022,
             end_year=2025,
             custom_symbols=syms,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.holding_period_months == horizon
@@ -190,6 +208,7 @@ class TestTier1FeatureCoverage:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_static = backtest_engine.run_backtest(
             mode=BacktestMode.HYBRID_FUNNEL,
@@ -200,6 +219,7 @@ class TestTier1FeatureCoverage:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_dynamic.diagnostics["firewalls_applied"]["dynamic_beta_mos"] is True
         assert res_static.diagnostics["firewalls_applied"]["dynamic_beta_mos"] is False
@@ -220,6 +240,7 @@ class TestTier1FeatureCoverage:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.diagnostics["firewalls_applied"]["z_score_safe"] is True
         assert res.diagnostics["firewalls_applied"]["rkv_value_trap_excluded"] is True
@@ -234,6 +255,7 @@ class TestTier1FeatureCoverage:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         matrix = res.model_tournament_matrix
         assert matrix is not None
@@ -292,6 +314,7 @@ class TestTier2BoundaryAndCornerCases:
             margin_of_safety_pct=99.0,
             start_year=2024,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] >= 0
@@ -308,6 +331,7 @@ class TestTier2BoundaryAndCornerCases:
             margin_of_safety_pct=100.0,
             start_year=2024,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.metrics["total_trades"] >= 0
         assert math.isfinite(res.metrics["total_return_pct"])
@@ -342,6 +366,7 @@ class TestTier2BoundaryAndCornerCases:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res_high_tp, BacktestResultPayload)
         assert res_high_tp.metrics["total_trades"] >= 0
@@ -398,6 +423,7 @@ class TestTier2BoundaryAndCornerCases:
             start_year=2022,
             end_year=2024,
             custom_symbols=["HPG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] >= 0
@@ -433,6 +459,7 @@ class TestTier3CrossFeatureCombinations:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.mode == mode
@@ -450,6 +477,7 @@ class TestTier3CrossFeatureCombinations:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.diagnostics["valuation_settings"]["composite_mode"] == "omnibus"
         assert res.diagnostics["valuation_settings"]["omnibus_metric"] == metric
@@ -467,6 +495,7 @@ class TestTier3CrossFeatureCombinations:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res.diagnostics["firewalls_applied"]["survival_filter"] is True
         assert res.diagnostics["firewalls_applied"]["tsmom_filter"] is True
@@ -482,6 +511,7 @@ class TestTier3CrossFeatureCombinations:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_ideal = backtest_engine.run_backtest(
             mode=BacktestMode.SCREENING_ONLY,
@@ -490,6 +520,7 @@ class TestTier3CrossFeatureCombinations:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res_strict.diagnostics["execution_settings"]["fill_mode"] == "strict"
         assert res_ideal.diagnostics["execution_settings"]["fill_mode"] == "ideal"
@@ -515,6 +546,7 @@ class TestTier4RealWorldAndAPIContracts:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert len(res.yearly_returns) == 5  # 2021, 2022, 2023, 2024, 2025
@@ -538,6 +570,7 @@ class TestTier4RealWorldAndAPIContracts:
             start_year=2022,
             end_year=2024,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         curve = res.equity_curve
         assert len(curve) >= 8  # 3 years * 4 quarters = up to 12 points

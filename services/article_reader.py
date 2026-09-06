@@ -11,6 +11,9 @@ from typing import Dict, Any, List, Optional
 from bs4 import BeautifulSoup, NavigableString
 
 from services.tls_config import tls_ssl_context
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -18,7 +21,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 # TLS policy comes from services/tls_config.py (verify ON by default,
 # VNSTOCK_INSECURE_TLS=1 to opt out).
@@ -83,12 +86,12 @@ def extract_article(url: str) -> Dict[str, Any]:
                 try:
                     raw_html = gzip.decompress(raw_html)
                 except Exception:
-                    pass
+                    logger.debug("extract_article: swallowed Exception", exc_info=True)
             elif 'deflate' in enc:
                 try:
                     raw_html = zlib.decompress(raw_html)
                 except Exception:
-                    pass
+                    logger.debug("extract_article: swallowed Exception", exc_info=True)
 
             # Detect encoding
             charset = resp.headers.get_content_charset()

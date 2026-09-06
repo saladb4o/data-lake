@@ -19,6 +19,9 @@ import datetime
 import urllib.request
 import urllib.parse
 from typing import Dict, Any, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -26,7 +29,7 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
-        pass
+        logger.debug("Could not switch the console to UTF-8", exc_info=True)
 
 
 class MacroCache:

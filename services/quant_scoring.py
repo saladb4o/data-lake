@@ -135,6 +135,25 @@ QUINTILE_META: Dict[str, Tuple[str, str, str]] = {
 
 NEUTRAL_PERCENTILE: float = 50.0
 
+# Evidence-weighted shrinkage of the composite toward the neutral midpoint.
+#
+# A missing factor used to be scored at the 50th percentile, which made
+# non-disclosure free: a company reporting only its flattering metrics was
+# ranked on those and handed the median for everything else. Two changes fix
+# that. Pillar weights are renormalised over the factors a record actually
+# has, so it is ranked on what is known rather than diluted toward 50; and the
+# result is then shrunk back toward 50 in proportion to how much of the record
+# is missing, so a thin record cannot reach either extreme. A company with one
+# excellent factor out of ten is uncertain, not excellent.
+#
+# shrunk = 50 + weight * (raw - 50), weight rising from
+# COVERAGE_SHRINKAGE_FLOOR at zero coverage to 1.0 at full coverage.
+COVERAGE_SHRINKAGE_FLOOR: float = 0.0
+
+# Records below this share of primary factors are reported as low-evidence in
+# their published percentiles, so a consumer can filter them out.
+LOW_COVERAGE_FLAG_THRESHOLD: float = 0.50
+
 # Number of decimals on the PUBLISHED composite grid. Must stay coarse
 # enough to hide float noise but fine enough that the anti-tie separation
 # (~0.02 * 100/n per rank position) survives rounding.
@@ -577,20 +596,38 @@ def score_universe(stocks: Dict[str, Dict]) -> None:
     pillar_specs = _pillar_weights()
     composites: Dict[str, float] = {}
     pillar_display: Dict[str, Dict[str, float]] = {}
+    coverage_by_symbol: Dict[str, float] = {}
 
     for sym, s in stocks.items():
         vals = resolved[sym]
 
         # --- Pillar percentiles at FULL precision -----------------------
+        # Weights are renormalised over the factors this record actually
+        # carries. Scoring an absent factor at the 50th percentile silently
+        # dragged every pillar toward the median and made the pillar say more
+        # about disclosure than about the company.
         pillar_values: List[float] = []
         for fields, weights in pillar_specs:
-            pv = 0.0
-            for field, w in zip(fields, weights):
-                pv += w * _pct(field, vals[field])
-            pillar_values.append(pv)
+            present = [(f, w) for f, w in zip(fields, weights) if vals[f] is not None]
+            if not present:
+                pillar_values.append(NEUTRAL_PERCENTILE)
+                continue
+            total_w = sum(w for _, w in present)
+            pillar_values.append(
+                sum(w * _pct(f, vals[f]) for f, w in present) / total_w
+            )
 
         g, q, h, v = pillar_values
         composite_primary = 0.35 * g + 0.25 * q + 0.20 * h + 0.20 * v
+
+        # --- Evidence weighting -----------------------------------------
+        present_count = sum(1 for name in primary_names if vals[name] is not None)
+        coverage = present_count / len(primary_names) if primary_names else 0.0
+        shrinkage = COVERAGE_SHRINKAGE_FLOOR + (1.0 - COVERAGE_SHRINKAGE_FLOOR) * coverage
+        composite_primary = NEUTRAL_PERCENTILE + shrinkage * (
+            composite_primary - NEUTRAL_PERCENTILE
+        )
+        coverage_by_symbol[sym] = coverage
 
         # --- Centered anti-tie component (secondary REAL fields) --------
         # Only anti-cancellation-SURVIVING components enter the average;
@@ -632,6 +669,12 @@ def score_universe(stocks: Dict[str, Dict]) -> None:
         "kept_components": list(kept_tb),
         "dropped_components": dict(dropped_tb),
         "dispersion_floor_groups": floor_groups,
+        "low_evidence_records": sum(
+            1 for c in coverage_by_symbol.values() if c < LOW_COVERAGE_FLAG_THRESHOLD
+        ),
+        "mean_factor_coverage_pct": round(
+            100.0 * sum(coverage_by_symbol.values()) / len(coverage_by_symbol), 1
+        ) if coverage_by_symbol else 0.0,
     })
 
     # --- Rank-based quintile assignment ----------------------------------
@@ -667,6 +710,10 @@ def score_universe(stocks: Dict[str, Dict]) -> None:
         p["quintile_badge"] = badge
         if winsorized_symbols.get(sym):
             p["winsorized"] = True
+        coverage = coverage_by_symbol.get(sym, 0.0)
+        p["factor_coverage_pct"] = round(coverage * 100.0, 1)
+        if coverage < LOW_COVERAGE_FLAG_THRESHOLD:
+            p["low_evidence"] = True
         s["percentiles"] = p
 
 

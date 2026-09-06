@@ -27,6 +27,19 @@ from services.fair_value_backtest_service import (
     BacktestMode,
 )
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
 
 @pytest.fixture(scope="module")
 def api_client():
@@ -172,6 +185,7 @@ class TestFairValueBacktestUniverseIntegration:
             start_year=2024,
             end_year=2025,
             top_k=5,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert res is not None
         assert res.mode == BacktestMode.VALUATION_ONLY

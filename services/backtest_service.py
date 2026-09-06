@@ -27,6 +27,9 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 
 from services.stock_service import ALL_SYMBOLS_MAP, get_quant_screener, SimpleCache, resolve_data_file
+import logging
+
+logger = logging.getLogger(__name__)
 
 # TTL cache for full multi-strategy comparison runs. One run executes 26
 # sequential backtests (~30s cold), so identical parameter sets are served
@@ -501,7 +504,7 @@ def _load_real_price_database() -> Dict[str, Any]:
                 if m > max_mtime:
                     max_mtime = m
             except Exception:
-                pass
+                logger.debug("_load_real_price_database: swallowed Exception", exc_info=True)
 
     if _REAL_PRICES_CACHE is not None and max_mtime > 0 and max_mtime <= _REAL_PRICES_MTIME:
         return _REAL_PRICES_CACHE
@@ -522,7 +525,7 @@ def _load_real_price_database() -> Dict[str, Any]:
                         if sym not in merged_symbols or len(val["quarters"]) > len(merged_symbols[sym].get("quarters", {})):
                             merged_symbols[sym] = val
         except Exception:
-            pass
+            logger.debug("_load_real_price_database: swallowed Exception", exc_info=True)
 
     _REAL_PRICES_CACHE = merged_symbols
     _REAL_PRICES_MTIME = max_mtime if max_mtime > 0 else 1.0
@@ -1888,12 +1891,16 @@ def _filter_stocks_for_strategy(
             if len(codes) >= 4:
                 try:
                     rets = [float(quarters[k].get("return_pct", 0.0)) for k in codes]
-                    std = float(np.std(rets)) if len(rets) > 1 else 1.0
+                    std = float(np.std(rets, ddof=1)) if len(rets) > 1 else None
                 except Exception:
-                    std = 10.0
+                    std = None
             else:
-                std = 10.0
-            vol_adj = mom / max(1.0, std)
+                std = None
+            # Volatility-adjusted momentum needs a measured volatility. It used
+            # to divide by max(1.0, std) and substitute 10.0 when unmeasurable,
+            # so a symbol with no return history was ranked on an invented
+            # denominator. Without one, rank on raw momentum alone.
+            vol_adj = mom / std if (std is not None and std >= 0.01) else mom
             return (mom, vol_adj)
 
         passing = [c for c in candidates if _t12m_momentum(price_db, c.get("symbol")) > 0]
@@ -2328,18 +2335,34 @@ def run_screener_backtest(
     else:
         vni_cagr = 0.0
 
+    # A risk-adjusted ratio whose denominator was clamped (max(0.1, vol)) is
+    # not conservative, it is inflated: a strategy with near-zero measured
+    # volatility got its excess return divided by 0.1 instead of by the real
+    # figure. And substituting 1.0 for an unmeasurable volatility invents the
+    # denominator outright. Both are withheld instead - see the same fix in
+    # fair_value_backtest_service.
+    MIN_MEANINGFUL_PCT = 0.01
+
+    def _ratio(numerator: float, denominator: Optional[float]) -> Optional[float]:
+        if denominator is None or denominator < MIN_MEANINGFUL_PCT:
+            return None
+        return round(numerator / denominator, 2)
+
     q_returns = [p["quarter_return_pct"] for p in quarterly_history]
-    std_dev = float(np.std(q_returns)) if len(q_returns) > 1 else 1.0
-    annualized_volatility = round(std_dev * math.sqrt(4), 2)
+    std_dev = float(np.std(q_returns, ddof=1)) if len(q_returns) > 1 else None
+    annualized_volatility = round(std_dev * math.sqrt(4), 2) if std_dev is not None else None
 
     # rf_annual: annual risk-free assumption (see RF_ANNUAL module constant).
     rf_annual_pct = RF_ANNUAL * 100.0
     excess_return = cagr - rf_annual_pct
-    sharpe_ratio = round(excess_return / max(0.1, annualized_volatility), 2) if annualized_volatility > 0 else 0.0
+    sharpe_ratio = _ratio(excess_return, annualized_volatility)
 
     downside_rets = [r for r in q_returns if r < 0]
-    downside_std = float(np.std(downside_rets)) * math.sqrt(4) if len(downside_rets) > 1 else 1.0
-    sortino_ratio = round(excess_return / max(0.1, downside_std), 2)
+    downside_std = (
+        float(np.std(downside_rets, ddof=1)) * math.sqrt(4)
+        if len(downside_rets) > 1 else None
+    )
+    sortino_ratio = _ratio(excess_return, downside_std)
 
     win_rate_pct = round((win_quarters / total_quarters) * 100.0, 1) if total_quarters > 0 else 0.0
 
@@ -2469,7 +2492,7 @@ def compare_all_screener_strategies(
                         _compare_cache.set(cache_key, precalc, ttl_seconds=3600)
                         return precalc
             except Exception:
-                pass
+                logger.debug("compare_all_screener_strategies: swallowed Exception", exc_info=True)
 
     # Pin ONE universe snapshot and ONE price database for the whole comparison so
     # every strategy is reconciled on exactly the same data, regardless of how many

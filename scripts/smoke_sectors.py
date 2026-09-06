@@ -34,6 +34,9 @@ import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOST = "127.0.0.1"
@@ -141,7 +144,7 @@ def to_epoch(v) -> float | None:
         try:
             return float(s)
         except ValueError:
-            pass
+            logger.debug("to_epoch: swallowed ValueError", exc_info=True)
         for fmt_len in (19, 10):  # full ISO or date-only
             try:
                 dt = datetime.strptime(s[:fmt_len].replace("Z", ""), "%Y-%m-%dT%H:%M:%S" if fmt_len == 19 else "%Y-%m-%d")
@@ -358,7 +361,7 @@ def main() -> int:
                 with open(log_path, encoding="utf-8", errors="replace") as fh:
                     print("".join(fh.readlines()[-40:]))
             except OSError:
-                pass
+                logger.debug("main: swallowed OSError", exc_info=True)
             record("boot", "server readiness", False, last_err)
             return summarize()
         record("boot", "server readiness", True, f"ready in <{READY_TIMEOUT}s on :{PORT}")
