@@ -81,19 +81,19 @@ class CorporateDisclosuresParser:
 
             sample_text = ""
             chars = 0
-            check_pages = min(5, self.total_pages)
-            image_count = 0
+            check_pages = min(8, self.total_pages)
+            text_rich_pages = 0
             for i in range(check_pages):
-                txt = doc[i].get_text()
-                chars += len(txt.strip())
+                txt = doc[i].get_text().strip()
+                chars += len(txt)
                 sample_text += " " + txt
-                if doc[i].get_images():
-                    image_count += 1
+                if len(txt) > 150:
+                    text_rich_pages += 1
 
-            if image_count >= 2 and (chars / max(1, check_pages)) < 150:
-                self.doc_type = "SCANNED_IMAGE"
-            else:
+            if text_rich_pages >= 2 or (chars / max(1, check_pages)) > 80:
                 self.doc_type = "NATIVE"
+            else:
+                self.doc_type = "SCANNED_IMAGE"
 
             unit_name, scale = detect_currency_unit(sample_text)
             self.currency_unit = unit_name
@@ -112,9 +112,10 @@ class CorporateDisclosuresParser:
             limit = min(max_pages, len(doc))
             for p_idx in range(limit):
                 txt = doc[p_idx].get_text().strip()
-                if not txt and self.doc_type == "SCANNED_IMAGE" and _rapid_ocr_engine:
+                if (not txt or len(txt) < 120) and _rapid_ocr_engine:
                     lines = self._get_ocr_lines_for_page(doc, p_idx)
-                    txt = "\n".join(lines)
+                    if lines:
+                        txt = txt + "\n" + "\n".join(lines) if txt else "\n".join(lines)
                 collected.append(txt)
 
         self._full_text_cache = "\n\n".join(collected)
@@ -152,6 +153,12 @@ class CorporateDisclosuresParser:
         """
         text = self.get_full_text(max_pages=20)
         norm_text = strip_accents(text).lower()
+        # Normalize frequent OCR misreadings
+        norm_text = re.sub(r"l[qg]i\s*nhu[a-z\?]*n", "loi nhuan", norm_text)
+        norm_text = re.sub(r"thu[5e]", "thue", norm_text)
+        norm_text = re.sub(r"d[6o1]ng", "dong", norm_text)
+        norm_text = re.sub(r"c[6o]\s*t[i1u]rc", "co tuc", norm_text)
+        norm_text = re.sub(r"k[eê]\s*ho[aạ]ch", "ke hoach", norm_text)
 
         result = {
             "report_type": "RESOLUTION",
@@ -175,8 +182,9 @@ class CorporateDisclosuresParser:
 
         # 1. Revenue Target (Doanh thu kế hoạch)
         rev_patterns = [
-            r"(?:tong\s+)?doanh\s+thu(?:\s+thuan)?(?:\s+hop\s+nhat)?\s*(?:ke\s+hoach|\s*\(?\s*kh\s*\)?|\s*nam\s*202\d)?\s*[:\-=]\s*([\d\.,]+)\s*(ty|trieu|dong|vnd)?",
-            r"ke\s+hoach\s+(?:tong\s+)?doanh\s+thu\s*[:\-=]\s*([\d\.,]+)\s*(ty|trieu|dong|vnd)?"
+            r"(?:tong\s+)?doanh\s+thu(?:\s+thuan)?(?:\s+hop\s+nhat)?\s*(?:ke\s+hoach|\s*\(?\s*kh\s*\)?|\s*nam\s*202\d)?\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?",
+            r"ke\s+hoach\s+(?:tong\s+)?(?:doanh\s+thu|sxkd|kinh\s+doanh)\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?",
+            r"tong\s+doanh\s+thu\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?"
         ]
         for pat in rev_patterns:
             m = re.search(pat, norm_text)
@@ -184,15 +192,17 @@ class CorporateDisclosuresParser:
                 val = parse_vietnamese_accounting_number(m.group(1))
                 unit = m.group(2) if len(m.groups()) > 1 else None
                 if val:
-                    scale = 1_000_000_000.0 if unit == "ty" else (1_000_000.0 if unit == "trieu" else self.currency_scale)
+                    scale = 1_000_000_000.0 if unit == "ty" else (1_000_000.0 if unit == "trieu" else (1.0 if val > 1_000_000 else self.currency_scale))
                     result["target_revenue_vnd"] = val * scale
                     result["raw_matches"].append(m.group(0))
                     break
 
         # 2. Profit After Tax Target (LNST kế hoạch)
         npat_patterns = [
-            r"loi\s+nhuan\s+sau\s+thue(?:\s+hop\s+nhat)?\s*(?:ke\s+hoach|\s*\(?\s*kh\s*\)?|\s*nam\s*202\d)?\s*[:\-=]\s*([\d\.,]+)\s*(ty|trieu|dong|vnd)?",
-            r"lnst(?:\s+hop\s+nhat)?\s*[:\-=]\s*([\d\.,]+)\s*(ty|trieu|dong|vnd)?"
+            r"loi\s+nhuan\s+sau\s+thue(?:\s+hop\s+nhat)?\s*(?:ke\s+hoach|\s*\(?\s*kh\s*\)?|\s*nam\s*202\d)?\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?",
+            r"lnst(?:\s+hop\s+nhat)?\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?",
+            r"loi\s+nhuan\s+truoc\s+thue(?:\s+hop\s+nhat)?\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?",
+            r"tong\s+loi\s+nhuan\s+(?:sau\s+thue|phan\s+phoi)\s*[:\-=]\s*([\d\.,'\s]+)\s*(ty|trieu|dong|vnd)?"
         ]
         for pat in npat_patterns:
             m = re.search(pat, norm_text)
@@ -200,14 +210,15 @@ class CorporateDisclosuresParser:
                 val = parse_vietnamese_accounting_number(m.group(1))
                 unit = m.group(2) if len(m.groups()) > 1 else None
                 if val:
-                    scale = 1_000_000_000.0 if unit == "ty" else (1_000_000.0 if unit == "trieu" else self.currency_scale)
+                    scale = 1_000_000_000.0 if unit == "ty" else (1_000_000.0 if unit == "trieu" else (1.0 if val > 1_000_000 else self.currency_scale))
                     result["target_npat_vnd"] = val * scale
                     result["raw_matches"].append(m.group(0))
                     break
 
         # 3. Dividend Target Rate (% cổ tức)
         div_patterns = [
-            r"(?:co\s+tuc|ty\s+le\s+co\s+tuc|chi\s+tra\s+co\s+tuc).*?(\d+(?:[\.,]\d+)?)\s*%",
+            r"(?:co\s+tuc|ty\s+le\s+co\s+tuc|chi\s+tra\s+co\s+tuc|tra\s+co\s+tuc).*?([\d\.,]+)\s*%",
+            r"co\s+tuc.*?(\d{1,2}(?:[\.,]\d+)?)\s*%",
         ]
         for pat in div_patterns:
             m = re.search(pat, norm_text)
@@ -284,7 +295,7 @@ class CorporateDisclosuresParser:
           - Board of Directors attendance & composition (Biểu IV)
           - Related-party transactions & insider contracts (Biểu VIII)
         """
-        text = self.get_full_text(max_pages=30)
+        text = self.get_full_text(max_pages=10)
         lines = text.split("\n")
         norm_full = strip_accents(text).lower()
 
@@ -551,20 +562,22 @@ class CorporateDisclosuresParser:
 
         # 5. Dividend Rate (% or VND/share or ratio)
         if result["payout_form"] == "CASH":
-            rate_match = re.search(r"(?:ty\s+le\s+thuc\s+hien|ty\s+le\s+chi\s+tra|ty\s+le).*?([\d\.,]+)\s*%", norm_text)
+            rate_match = re.search(r"(?:ty\s+le\s+thuc\s+hien|ty\s+le\s+chi\s+tra|ty\s+le).*?([\d\.,'\s]+)\s*%", norm_text)
             if rate_match:
                 pct = parse_vietnamese_accounting_number(rate_match.group(1))
                 if pct:
                     result["dividend_rate_pct"] = pct
                     result["cash_value_per_share_vnd"] = pct * 100.0
+                    result["cash_payout_per_share_vnd"] = result["cash_value_per_share_vnd"]
 
-            val_match = re.search(r"(\d+(?:\.\d{3})*)\s*(?:dong|vnd)\s*\/\s*(?:co\s+phieu|cp)", norm_text)
+            val_match = re.search(r"(\d+(?:[\.,]\d{3})*)\s*(?:dong|vnd)\s*\/\s*(?:co\s+phieu|cp)", norm_text)
             if not val_match:
-                val_match = re.search(r"nhan\s*(\d+(?:\.\d{3})*)\s*(?:dong|vnd)", norm_text)
+                val_match = re.search(r"nhan\s*(\d+(?:[\.,]\d{3})*)\s*(?:dong|vnd)", norm_text)
             if val_match:
                 val = parse_vietnamese_accounting_number(val_match.group(1))
                 if val:
                     result["cash_value_per_share_vnd"] = val
+                    result["cash_payout_per_share_vnd"] = val
                     result["dividend_rate_pct"] = (val / 10000.0) * 100.0
         else:
             ratio_match = re.search(r"(?:ty\s+le\s+thuc\s+hien|ty\s+le).*?(\d{1,3}\s*:\s*\d{1,3})", norm_text)
@@ -572,10 +585,45 @@ class CorporateDisclosuresParser:
                 result["stock_split_ratio"] = ratio_match.group(1).replace(" ", "")
                 result["raw_matches"].append(ratio_match.group(0))
             else:
-                pct_match = re.search(r"([\d\.,]+)\s*%", norm_text)
+                pct_match = re.search(r"([\d\.,'\s]+)\s*%", norm_text)
                 if pct_match:
                     result["dividend_rate_pct"] = parse_vietnamese_accounting_number(pct_match.group(1))
 
+        # Bilingual / English corporate dividend announcement support (e.g. CEO Group)
+        if any(re.search(p, norm_text) for p in [r"share\s*issuance\s*for\s*dividend", r"shares?\s*expected\s*to\s*be\s*issued", r"tra\s*co\s*tuc"]):
+            if any(k in norm_text for k in ["share", "co phieu"]) and not any(k in norm_text for k in ["tien mat", "cash"]):
+                result["payout_form"] = "STOCK"
+            m_iss = re.search(r"(?:shares?\s*expected\s*to\s*be\s*issued|so\s*co\s*phieu\s*du\s*kien\s*phat\s*hanh)[^\d]*([\d\.,'\s]+)", norm_text)
+            m_tot = re.search(r"(?:total\s*number\s*of\s*issued\s*shares|outstanding\s*shares|tong\s*so\s*co\s*phieu\s*dang\s*luu\s*hanh)[^\d]*([\d\.,'\s]+)", norm_text)
+            if m_iss and m_tot:
+                iss_val = parse_vietnamese_accounting_number(m_iss.group(1))
+                tot_val = parse_vietnamese_accounting_number(m_tot.group(1))
+                if iss_val and tot_val and tot_val > 0:
+                    pct = round((iss_val / tot_val) * 100.0, 1)
+                    result["dividend_rate_pct"] = pct
+                    result["stock_split_ratio"] = f"{int(round(pct))}:100"
+
+        # English date support (e.g. Hanoi, May 26, 2026)
+        if not result["record_date"] and not result["payment_date"]:
+            m_en_date = re.search(r"(january|february|march|april|may|june|july|august|september|october|november|december)\s*(\d{1,2}),?\s*(202\d)", norm_text)
+            if m_en_date:
+                m_name, day, yr = m_en_date.groups()
+                months_map = {"january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6,
+                              "july": 7, "august": 8, "september": 9, "october": 10, "november": 11, "december": 12}
+                m_num = months_map.get(m_name.lower(), 1)
+                result["record_date"] = f"{int(day):02d}/{m_num:02d}/{yr}"
+
+        # Filename / title hints fallback (e.g. PVS__15_9_2026__chot_DS_tra_co_tuc)
+        fname = os.path.basename(self.pdf_path).lower()
+        if not result["record_date"]:
+            fn_date = re.search(r"(\d{1,2})[_\.\-](\d{1,2})[_\.\-](202\d)", fname)
+            if fn_date:
+                d, m, y = fn_date.groups()
+                result["record_date"] = f"{int(d):02d}/{int(m):02d}/{y}"
+        if "co phieu" in fname and result["payout_form"] == "CASH" and "tien" not in fname:
+            result["payout_form"] = "STOCK"
+
+        result["cash_payout_per_share_vnd"] = result.get("cash_value_per_share_vnd")
         return result
 
     # =========================================================================
@@ -584,6 +632,7 @@ class CorporateDisclosuresParser:
     def extract_full_report(self, category_hint: Optional[str] = None) -> Dict[str, Any]:
         """
         Automatically detects document category or uses category_hint to extract structured payload.
+        Both nested and root keys are populated for complete consumer compatibility.
         """
         sample = strip_accents(self.get_full_text(max_pages=3)).lower()
 
@@ -605,14 +654,24 @@ class CorporateDisclosuresParser:
         }
 
         if detected_type == "RESOLUTION":
-            payload["resolution_data"] = self.extract_agm_resolution()
+            res_data = self.extract_agm_resolution()
+            payload["resolution_data"] = res_data
+            payload.update(res_data)
         elif detected_type == "GOVERNANCE":
-            payload["governance_data"] = self.extract_governance_report()
+            gov_data = self.extract_governance_report()
+            payload["governance_data"] = gov_data
+            payload.update(gov_data)
         elif detected_type == "DIVIDEND":
-            payload["dividend_data"] = self.extract_dividend_announcement()
+            div_data = self.extract_dividend_announcement()
+            payload["dividend_data"] = div_data
+            payload.update(div_data)
         else:
-            payload["resolution_data"] = self.extract_agm_resolution()
-            payload["dividend_data"] = self.extract_dividend_announcement()
+            res_data = self.extract_agm_resolution()
+            div_data = self.extract_dividend_announcement()
+            payload["resolution_data"] = res_data
+            payload["dividend_data"] = div_data
+            payload.update(res_data)
+            payload.update(div_data)
 
         return payload
 

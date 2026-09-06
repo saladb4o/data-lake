@@ -39,8 +39,11 @@ BCTC_NEGATIVE_KEYWORDS = [
     "thông báo", "công văn", "cbtt", "biên bản", "tờ trình", "thư mời",
     "quyết định", "điều lệ", "thay đổi nhân sự", "bổ nhiệm", "miễn nhiệm",
     "ký hợp đồng", "hop dong kiem toan", "hợp đồng kiểm toán", "đơn vị kiểm toán",
-    "lựa chọn kiểm toán", "lựa chọn công ty kiểm toán", "đơn xin thôi", "đơn nghỉ việc",
-    "kết quả giao dịch", "đăng ký giao dịch", "thay đổi sở hữu"
+    "lựa chọn kiểm toán", "lựa chọn công ty kiểm toán", "lựa chọn đvkt",
+    "đơn xin thôi", "đơn nghỉ việc", "kết quả giao dịch", "đăng ký giao dịch",
+    "thay đổi sở hữu", "giao dịch cổ phiếu", "giao dịch người nội bộ",
+    "danh sách cổ đông", "chốt danh sách", "thông báo về việc ký", "tài liệu họp",
+    "báo cáo tình hình quản trị", "bản cáo bạch"
 ]
 
 PDF_LAKE_DIR = os.path.join(os.path.dirname(resolve_data_file("screener_snapshot.json")), "pdf_lake")
@@ -480,8 +483,8 @@ class BCTCBatchProcessor:
     def process_corporate_disclosures(
         self,
         symbol: str,
-        report_types: List[str] = ["resolution", "governance", "dividend"],
-        limit_per_type: int = 2
+        report_types: List[str] = ["resolution", "governance", "dividend", "annual"],
+        limit_per_type: int = 3
     ) -> Dict[str, Any]:
         """
         Downloads and parses non-BCTC filings (Resolutions, Governance, Dividend notices).

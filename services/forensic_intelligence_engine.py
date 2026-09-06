@@ -168,11 +168,11 @@ class SayDoManagementIntegrityEngine:
         has_midyear_adjustment = False
         notes = []
 
-        # Find matching AGM resolutions in corp_lake
         for doc_id, doc in corp_lake.items():
             if doc.get("symbol", "").upper() == symbol_clean:
                 title = doc.get("title", "").lower()
-                res_data = doc.get("extracted_data", {}).get("resolution_data", {})
+                ext = doc.get("extracted_data", {})
+                res_data = ext.get("resolution_data") or ext
                 
                 if res_data.get("target_revenue_vnd") and not agm_target_rev:
                     agm_target_rev = res_data["target_revenue_vnd"]

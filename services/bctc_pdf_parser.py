@@ -430,7 +430,7 @@ def parse_vietnamese_accounting_number(cell_str: Any) -> Optional[float]:
             return None
         return float(cell_str)
 
-    s = str(cell_str).strip().replace('\xa0', ' ').replace(' ', '')
+    s = str(cell_str).strip().replace('\xa0', ' ').replace(' ', '').replace("'", "").replace("`", "")
     if not s or s in ('-', '--', '—', 'nil', 'null', 'None', 'không', 'khong'):
         return 0.0
 
@@ -452,12 +452,10 @@ def parse_vietnamese_accounting_number(cell_str: Any) -> Optional[float]:
             # 1,234.56 (US standard: comma thousand, dot decimal)
             s = s.replace(',', '')
     elif '.' in s:
-        parts = s.split('.')
-        if all(len(p) == 3 for p in parts[1:]):
+        if s.count('.') > 1 or all(len(p) == 3 for p in s.split('.')[1:]):
             s = s.replace('.', '')
     elif ',' in s:
-        parts = s.split(',')
-        if all(len(p) == 3 for p in parts[1:]):
+        if s.count(',') > 1 or all(len(p) == 3 for p in s.split(',')[1:]):
             s = s.replace(',', '')
         else:
             s = s.replace(',', '.')
@@ -592,27 +590,26 @@ class BCTCPdfParser:
                 return
 
             total_chars = 0
-            sample_pages = min(5, self.total_pages)
+            sample_pages = min(12, self.total_pages)
             sample_text = ""
+            text_rich_pages = 0
+            scanned_empty_pages = 0
+
             for i in range(sample_pages):
-                txt = doc[i].get_text()
-                total_chars += len(txt)
+                txt = doc[i].get_text().strip()
                 sample_text += " " + txt
+                total_chars += len(txt)
+                if len(txt) > 200:
+                    text_rich_pages += 1
+                elif len(txt) < 40:
+                    scanned_empty_pages += 1
 
-            image_pages = 0
-            low_text_pages = 0
-            for i in range(min(10, self.total_pages)):
-                imgs = doc[i].get_images()
-                txt_len = len(doc[i].get_text().strip())
-                if imgs:
-                    image_pages += 1
-                if txt_len < 150:
-                    low_text_pages += 1
-
-            avg_chars = total_chars / max(1, sample_pages)
-            if image_pages >= 2 and low_text_pages >= 2:
+            # Determine doc_type based on interior page text density (cover pages 0-1 often have logo images)
+            if text_rich_pages >= 3 or (sample_pages > 2 and text_rich_pages / sample_pages >= 0.35):
+                self.doc_type = "NATIVE"
+            elif scanned_empty_pages / max(1, sample_pages) >= 0.7:
                 self.doc_type = "SCANNED_IMAGE"
-            elif avg_chars > 30:
+            elif total_chars / max(1, sample_pages) > 50:
                 self.doc_type = "NATIVE"
             else:
                 self.doc_type = "SCANNED"
@@ -658,24 +655,31 @@ class BCTCPdfParser:
         # Pass 1: Native Vector Text
         with fitz.open(self.pdf_path) as doc:
             for page_idx in range(len(doc)):
-                txt_norm = strip_accents(doc[page_idx].get_text()).upper()
+                txt_raw = doc[page_idx].get_text()
+                txt_norm = strip_accents(txt_raw).upper()
 
-                if any(k in txt_norm for k in ["BAO CAO CUA CONG TY KIEM TOAN", "BAO CAO KIEM TOAN", "KIEM TOAN VIEN", "AUDITOR"]):
-                    locations["auditor_report"].append(page_idx)
-                if any(k in txt_norm for k in [
-                    "BANG CAN DOI KE TOAN", "MAU SO B 01", "MAU B 01", "B 01/TCTD", "B 01 - TCTD", "B 01 - CTC",
-                    "FINANCIAL POSITION", "BALANCE SHEET", "TINH HINH TAI CHINH"
-                ]):
-                    locations["balance_sheet"].append(page_idx)
-                if any(k in txt_norm for k in [
-                    "KET QUA HOAT DONG KINH DOANH", "MAU SO B 02", "MAU B 02", "B 02/TCTD", "B 02 - TCTD", "B 02 - CTC",
-                    "INCOME STATEMENT", "FINANCIAL PERFORMANCE", "KET QUA KINH DOANH"
-                ]):
-                    locations["income_statement"].append(page_idx)
-                if any(k in txt_norm for k in [
-                    "LUU CHUYEN TIEN TE", "MAU SO B 03", "MAU B 03", "B 03/TCTD", "B 03 - TCTD", "B 03 - CTC", "CASH FLOW"
-                ]):
-                    locations["cash_flow"].append(page_idx)
+                # Filter out Table of Contents (Mục Lục) - especially on early pages
+                is_toc = ("MUC LUC" in txt_norm or "TABLE OF CONTENTS" in txt_norm or "NOI DUNG" in txt_norm) and bool(re.search(r'\.{3,}\s*\d+', txt_norm))
+                if is_toc and page_idx < 8:
+                    continue
+
+                if page_idx <= 25:
+                    if any(k in txt_norm for k in ["BAO CAO CUA CONG TY KIEM TOAN", "BAO CAO KIEM TOAN", "KIEM TOAN VIEN", "AUDITOR"]):
+                        locations["auditor_report"].append(page_idx)
+                    if any(k in txt_norm for k in [
+                        "BANG CAN DOI KE TOAN", "MAU SO B 01", "MAU B 01", "B 01/TCTD", "B 01 - TCTD", "B 01 - CTC",
+                        "FINANCIAL POSITION", "BALANCE SHEET", "TINH HINH TAI CHINH"
+                    ]):
+                        locations["balance_sheet"].append(page_idx)
+                    if any(k in txt_norm for k in [
+                        "KET QUA HOAT DONG KINH DOANH", "MAU SO B 02", "MAU B 02", "B 02/TCTD", "B 02 - TCTD", "B 02 - CTC",
+                        "INCOME STATEMENT", "FINANCIAL PERFORMANCE", "KET QUA KINH DOANH"
+                    ]):
+                        locations["income_statement"].append(page_idx)
+                    if any(k in txt_norm for k in [
+                        "LUU CHUYEN TIEN TE", "MAU SO B 03", "MAU B 03", "B 03/TCTD", "B 03 - TCTD", "B 03 - CTC", "CASH FLOW"
+                    ]):
+                        locations["cash_flow"].append(page_idx)
                 if any(k in txt_norm for k in [
                     "THUYET MINH BAO CAO TAI CHINH", "THUYET MINH BCTC", "NOTES TO THE FINANCIAL", "THUYET MINH"
                 ]):
@@ -814,7 +818,7 @@ class BCTCPdfParser:
         method_used = "NATIVE_VECTOR"
 
         # Route 1: Try native vector extraction via pdfplumber
-        if bs_pages and pdfplumber and self.doc_type != "SCANNED_IMAGE":
+        if bs_pages and pdfplumber:
             with pdfplumber.open(self.pdf_path) as pdf:
                 for p_idx in bs_pages:
                     if p_idx >= len(pdf.pages):
@@ -953,7 +957,7 @@ class BCTCPdfParser:
         is_pages = pages_map.get("income_statement", [])
         method_used = "NATIVE_VECTOR"
 
-        if is_pages and pdfplumber and self.doc_type != "SCANNED_IMAGE":
+        if is_pages and pdfplumber:
             with pdfplumber.open(self.pdf_path) as pdf:
                 for p_idx in is_pages:
                     if p_idx >= len(pdf.pages):
@@ -1189,7 +1193,7 @@ class BCTCPdfParser:
         cf_pages = pages_map.get("cash_flow", [])
         method_used = "NATIVE_VECTOR"
 
-        if cf_pages and pdfplumber and self.doc_type != "SCANNED_IMAGE":
+        if cf_pages and pdfplumber:
             with pdfplumber.open(self.pdf_path) as pdf:
                 for p_idx in cf_pages:
                     if p_idx >= len(pdf.pages):
@@ -1832,6 +1836,10 @@ class BCTCPdfParser:
             "forensic_triangles": forensics,
             "provenance": f"DUAL_ROUTE_PDF_PARSER_{self.accounting_regime}"
         }
+
+    # Method Aliases for backward compatibility
+    extract_cash_flow = extract_cash_flow_statement
+    extract_debt_schedule_notes = extract_debt_footnotes
 
 
 def calculate_forensic_triangles(

@@ -108,13 +108,17 @@ def main():
                     max_reports=args.max_bctc,
                     fetch_10y_annual=args.crawl_10y_annual
                 )
+                filings = [
+                    p for p in res.get("results", [])
+                    if p.get("extracted_data", {}).get("total_pages", 0) >= 8
+                    or len(p.get("extracted_data", {}).get("balance_sheet", {}).get("items", {})) > 0
+                ]
                 shard_data[sym] = {
                     "symbol": sym,
-                    "periods": res.get("results", []),
-                    "count": len(res.get("results", [])),
+                    "periods": filings,
+                    "count": len(filings),
                     "updated_at": int(time.time())
                 }
-                filings = res.get("results", [])
                 extracted_count = len(filings)
                 total_bs = sum(len(p.get("extracted_data", {}).get("balance_sheet", {}).get("items", {})) for p in filings)
                 total_is = sum(len(p.get("extracted_data", {}).get("income_statement", {}).get("items", {})) for p in filings)
@@ -128,7 +132,11 @@ def main():
         # 2. Corporate Disclosures (TT96 Governance & AGM Resolutions)
         if sym not in corp_shard_data:
             try:
-                c_res = processor.process_corporate_disclosures(symbol=sym, report_types=["governance", "resolution"], limit_per_type=2)
+                c_res = processor.process_corporate_disclosures(
+                    symbol=sym,
+                    report_types=["governance", "resolution", "dividend", "annual"],
+                    limit_per_type=3
+                )
                 corp_shard_data[sym] = {
                     "symbol": sym,
                     "records": c_res.get("results", []),
@@ -136,9 +144,9 @@ def main():
                     "updated_at": int(time.time())
                 }
                 corp_count = len(c_res.get("results", []))
-                print(f"  [{idx}/{len(symbols_to_run)}] {sym} Governance/AGM: Extracted {corp_count} filings")
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} Corporate Disclosures: Extracted {corp_count} filings (Gov/AGM/Div/Annual)")
             except Exception as err:
-                print(f"  [{idx}/{len(symbols_to_run)}] {sym} Governance Error: {err}")
+                print(f"  [{idx}/{len(symbols_to_run)}] {sym} Corporate Disclosures Error: {err}")
                 corp_shard_data[sym] = {"symbol": sym, "records": [], "count": 0, "error": str(err), "updated_at": int(time.time())}
 
         # Periodic atomic checkpoint
