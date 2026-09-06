@@ -10979,8 +10979,18 @@ class VnstockApp {
       setTxt('fvBtMetricCagr', `${m.cagr_pct > 0 ? '+' : ''}${m.cagr_pct}%`);
       setTxt('fvBtMetricTotal', `${m.total_return_pct > 0 ? '+' : ''}${m.total_return_pct}%`);
       setTxt('fvBtMetricMaxDd', `-${m.max_drawdown_pct}%`);
-      setTxt('fvBtMetricSharpe', `${m.sharpe_ratio} (Sortino: ${m.sortino_ratio})`);
+      // Sharpe/Sortino are withheld (null) when the volatility denominator is
+      // too small to divide by; render that rather than printing "null".
+      const ratio = (v) => (v === null || v === undefined ? 'n/a' : v);
+      setTxt('fvBtMetricSharpe', `${ratio(m.sharpe_ratio)} (Sortino: ${ratio(m.sortino_ratio)})`);
       setTxt('fvBtMetricWinRate', `${m.win_rate_pct}% (${m.total_trades} lệnh)`);
+
+      // 1b. Methodology banner. A run built on price-derived fundamentals
+      // renders identically to one built on filings unless we say otherwise,
+      // and only the second is evidence of anything.
+      this.renderFundamentalsProvenance(
+        'fvBtProvenanceBanner', (d.diagnostics || {}).fundamentals || {}
+      );
 
       // 2. Draw Visual Curves Canvas
       this.drawFairValueEquityChart(d.equity_curve || []);
@@ -11088,6 +11098,63 @@ class VnstockApp {
         btn.innerHTML = '<span>▶</span> Chạy Backtest Định Giá Modular';
       }
     }
+  }
+
+  /**
+   * Renders the provenance banner for a backtest result.
+   *
+   * A run whose fundamentals were reconstructed from price looks exactly like
+   * one built on real filings once it is drawn as an equity curve, and only
+   * the second says anything about the strategy. The payload now states which
+   * it is; this puts that on screen instead of leaving it in the JSON.
+   *
+   * Creates the banner element if the host page does not define one, and does
+   * nothing when there is no container to attach it to.
+   */
+  renderFundamentalsProvenance(elementId, info) {
+    if (!info || !Object.keys(info).length) return;
+
+    let el = document.getElementById(elementId);
+    if (!el) {
+      const anchor = document.getElementById('fvBtWinnerTitle')
+        || document.getElementById('fvBtWinnerDesc');
+      if (!anchor || !anchor.parentNode) return;
+      el = document.createElement('div');
+      el.id = elementId;
+      anchor.parentNode.insertBefore(el, anchor);
+    }
+
+    const trustworthy = info.is_evidence_of_skill !== false;
+    const valued = info.symbol_quarters_valued || 0;
+    const skipped = info.symbol_quarters_skipped_no_filing || 0;
+
+    const parts = [];
+    if (trustworthy) {
+      parts.push(
+        `<strong>Dữ liệu point-in-time</strong> — ${valued} mã-quý định giá từ ` +
+        `BCTC thật, ${skipped} mã-quý bỏ qua vì chưa có báo cáo công bố.`
+      );
+    } else {
+      parts.push(`<strong>⚠️ Kết quả này không phải bằng chứng về hiệu quả chiến lược.</strong>`);
+      if (info.warning) parts.push(escapeHTML(info.warning));
+    }
+    (info.notes || []).forEach((n) => parts.push(escapeHTML(n)));
+    if ((info.unmatched_custom_symbols || []).length) {
+      parts.push(
+        'Mã không có trong universe, đã loại: ' +
+        escapeHTML(info.unmatched_custom_symbols.join(', '))
+      );
+    }
+
+    const tone = trustworthy
+      ? 'background:rgba(16,185,129,.10); border-left:3px solid #10b981;'
+      : 'background:rgba(239,68,68,.10); border-left:3px solid #ef4444;';
+    el.setAttribute(
+      'style',
+      `${tone} padding:12px 14px; margin:0 0 14px; border-radius:6px; ` +
+      'font-size:13px; line-height:1.6;'
+    );
+    el.innerHTML = parts.join('<br>');
   }
 
   drawFairValueEquityChart(curve) {

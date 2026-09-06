@@ -1163,6 +1163,13 @@ def api_quant_institutional_run(
     margin_of_safety_pct: float = Query(15.0, description="Margin of Safety % for Valuation strategies"),
     composite_mode: str = Query("blended", description="blended or omnibus"),
     omnibus_metric: str = Query("smape", description="smape, male, wmape, rmsle, ivw"),
+    fundamentals_mode: str = Query(
+        "point_in_time",
+        description=(
+            "point_in_time (real filings published by the rebalance date) or "
+            "snapshot_projected (legacy price-derived fundamentals)"
+        ),
+    ),
     use_dynamic_beta_mos: bool = Query(False, description="Enable dynamic beta MoS adjustment"),
     filter_rkv_value_trap: bool = Query(True, description="Enable Rhodes-Kropf value trap filter"),
     backtest_mode: Optional[str] = Query(None, description="factor, valuation, or hybrid"),
@@ -1196,6 +1203,7 @@ def api_quant_institutional_run(
             margin_of_safety_pct=margin_of_safety_pct,
             composite_mode=composite_mode,
             omnibus_metric=omnibus_metric,
+            fundamentals_mode=fundamentals_mode,
             use_dynamic_beta_mos=use_dynamic_beta_mos,
             filter_rkv_value_trap=filter_rkv_value_trap,
             backtest_mode=backtest_mode,

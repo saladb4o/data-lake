@@ -868,6 +868,9 @@ def run_bar_by_bar_backtest(
                 "total_trades": len(trades),
                 "winning_trades_count": len(winning_trades),
                 "losing_trades_count": len(losing_trades),
+                # Carried up from the underlying fair-value run: whether these
+                # numbers rest on filings or on price-derived arithmetic.
+                "fundamentals": (fv_res.diagnostics or {}).get("fundamentals", {}),
                 "avg_win_vnd": round(avg_win, 0),
                 "avg_loss_vnd": round(avg_loss, 0),
                 "payoff_ratio": payoff_ratio,
