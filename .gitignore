@@ -48,3 +48,8 @@ all_shards/
 
 # Agent working notes / scratch output
 .agents/
+
+# Lake database (SQLite working store; JSON stays the interchange format)
+data/*.db
+data/*.db-wal
+data/*.db-shm

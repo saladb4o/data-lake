@@ -211,6 +211,7 @@ class DiskDataLake:
         # memory for these, or a pending write would be read straight back out.
         self._dirty: Set[str] = set()
         self._flush_timer: Optional[threading.Timer] = None
+        self._store = None  # lazily built SQLite store when the backend is on
 
     def get_data_dir(self) -> str:
         gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data")
@@ -221,7 +222,30 @@ class DiskDataLake:
         os.makedirs(d, exist_ok=True)
         return d
 
+    @staticmethod
+    def _backend() -> str:
+        """'json' (default) or 'sqlite'. See services/lake_store.py."""
+        return os.environ.get("DATA_LAKE_BACKEND", "json").strip().lower() or "json"
+
+    def _sqlite_store(self):
+        """The SQLite working store, built on first use."""
+        if self._store is None:
+            with self._lock:
+                if self._store is None:
+                    from services.lake_store import SQLiteLakeStore
+                    self._store = SQLiteLakeStore()
+        return self._store
+
+    @staticmethod
+    def _lake_name(filename: str) -> str:
+        return os.path.basename(filename)[:-5] if filename.endswith(".json") else filename
+
     def read_json(self, filename: str) -> Dict[str, Any]:
+        if self._backend() == "sqlite":
+            try:
+                return self._sqlite_store().get_all(self._lake_name(filename))
+            except Exception as e:
+                logger.warning("SQLite lake read failed for %s (%s); using JSON.", filename, e)
         # Pending writes live only in memory until the next flush; reloading
         # from disk here would silently drop them.
         if filename in self._dirty:
@@ -264,6 +288,22 @@ class DiskDataLake:
         symbol = str(symbol).upper().strip()
         if not symbol:
             return
+        if self._backend() == "sqlite":
+            try:
+                # O(1) and durable immediately. The JSON file is still produced,
+                # debounced, because merge_shards.py, the crawler workflows and
+                # the Colab notebooks all read it by path.
+                self._sqlite_store().put(self._lake_name(filename), symbol, record)
+                with self._lock:
+                    self._dirty.add(filename)
+                    interval = self._flush_interval()
+                    if interval <= 0:
+                        self._flush_locked()
+                    else:
+                        self._schedule_flush_locked(interval)
+                return
+            except Exception as e:
+                logger.warning("SQLite lake write failed for %s (%s); using JSON.", filename, e)
         try:
             with self._lock:
                 lake = dict(self._cache_mem.get(filename) or self.read_json(filename))
@@ -312,9 +352,23 @@ class DiskDataLake:
         self._last_loaded[filename] = os.path.getmtime(out_file)
 
     def _flush_locked(self) -> None:
+        sqlite_backend = self._backend() == "sqlite"
         for filename in sorted(self._dirty):
             try:
-                self._write_file(filename, self._cache_mem.get(filename) or {})
+                lake = None
+                if sqlite_backend:
+                    try:
+                        lake = self._sqlite_store().get_all(self._lake_name(filename))
+                    except Exception as e:
+                        # The write may already have fallen back to the JSON
+                        # path; exporting from a broken store would discard it.
+                        logger.warning(
+                            "SQLite lake export failed for %s (%s); using the in-memory copy.",
+                            filename, e,
+                        )
+                if lake is None:
+                    lake = self._cache_mem.get(filename) or {}
+                self._write_file(filename, lake)
             except Exception as e:
                 logger.warning("Failed to persist data lake %s: %s", filename, e)
                 continue
