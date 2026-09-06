@@ -175,3 +175,12 @@ def test_api_export_excel_endpoint_raw_scale_fpt(client):
     assert len(wb.sheetnames) == 7
     assert wb.active.title == "Summary & Dashboard"
 
+
+
+def test_error_response_maps_value_error_to_422():
+    """A ValueError is a data gap the caller can act on, not a server fault."""
+    from server import _error_response
+
+    assert _error_response(ValueError("no price")).status_code == 422
+    assert _error_response(RuntimeError("boom")).status_code == 500
+    assert _error_response(KeyError("k")).status_code == 500

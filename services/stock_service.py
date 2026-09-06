@@ -209,7 +209,9 @@ def resolve_data_file(filename: str) -> str:
     candidates.sort(key=lambda c: (c[2], c[1]), reverse=True)
     return candidates[0][0]
 
-QUANT_SNAPSHOT_FILE = resolve_data_file("screener_snapshot.json")
+def quant_snapshot_file() -> str:
+    """Resolved per call; as a constant this froze at import time."""
+    return resolve_data_file("screener_snapshot.json")
 
 class DiskDataLake:
     """Manages persistent L2 data lake across Google Drive and local data/ directories with thread-safe atomic caching and Stale-While-Revalidate support."""
@@ -2637,12 +2639,16 @@ def enrich_article_metadata(art: Dict[str, Any]) -> Dict[str, Any]:
 
 CENTRAL_NEWS_LAKE: Dict[str, Dict[str, Any]] = {}
 
-# News-lake indexes: ticker/sector -> set of article links.
-# NEWS_SECTOR_INVERTED_INDEX is deliberately separate from the module-level
-# SECTOR_INVERTED_INDEX, which maps sector -> set of *ticker symbols* and is
-# consumed by sector_index_service as index constituents. Sharing one dict for
-# both let article URLs leak into sector constituent lists.
-TICKER_INVERTED_INDEX: Dict[str, Set[str]] = {}
+# News-lake sector index: sector -> set of article links. Deliberately separate
+# from the module-level SECTOR_INVERTED_INDEX, which maps sector -> set of
+# *ticker symbols* and is consumed by sector_index_service as index
+# constituents. Sharing one dict for both let article URLs leak into sector
+# constituent lists.
+#
+# There is no ticker equivalent on purpose. One existed and was never read: the
+# news-by-ticker consumers match on a symbols tag OR a title regex OR the
+# company name OR a leader name, so an index over the tag alone cannot replace
+# their scan - it only added memory and a second thing to keep pruned.
 NEWS_SECTOR_INVERTED_INDEX: Dict[str, Set[str]] = {}
 _lake_lock = threading.Lock()
 MAX_LAKE_SIZE = 3000
@@ -2675,12 +2681,6 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
                     if k not in CENTRAL_NEWS_LAKE[link] or not CENTRAL_NEWS_LAKE[link][k]:
                         CENTRAL_NEWS_LAKE[link][k] = enriched[k]
 
-            # Update in-memory inverted index for tickers and sectors
-            for sym in enriched.get("symbols", []):
-                if sym not in TICKER_INVERTED_INDEX:
-                    TICKER_INVERTED_INDEX[sym] = set()
-                TICKER_INVERTED_INDEX[sym].add(link)
-
             sec_k = enriched.get("sector_key")
             if sec_k:
                 if sec_k not in NEWS_SECTOR_INVERTED_INDEX:
@@ -2696,7 +2696,7 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
             evicted = set(sorted_links[:excess])
             for old_link in evicted:
                 del CENTRAL_NEWS_LAKE[old_link]
-            for index in (TICKER_INVERTED_INDEX, NEWS_SECTOR_INVERTED_INDEX):
+            for index in (NEWS_SECTOR_INVERTED_INDEX,):
                 for key in list(index.keys()):
                     remaining = index[key] - evicted
                     if remaining:
@@ -2704,7 +2704,6 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
                     else:
                         del index[key]
 
-import threading
 _news_poller_thread = None
 
 def fetch_vietstock_doanhnghiep_news() -> List[Dict[str, Any]]:
@@ -4184,7 +4183,7 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
                     ratio = row.get("ownership_percentage", 0)
                     try:
                         shares_int = int(shares) if pd.notna(shares) else 0
-                    except:
+                    except Exception:
                         shares_int = 0
                     ratio_str = f"{float(ratio):.2f}%" if pd.notna(ratio) else ""
                     if name:
@@ -4335,7 +4334,6 @@ import xml.etree.ElementTree as ET
 import urllib.request
 import urllib.parse
 import ssl
-import re
 from email.utils import parsedate_to_datetime
 
 # TLS policy comes from services/tls_config.py (verify ON by default,
@@ -8304,7 +8302,7 @@ def _load_quant_snapshot_if_valid(max_age_hours: float) -> Optional[Dict[str, An
     Old-schema or corrupt snapshots are treated as stale -> None.
     Every rejection is logged with its reason (corrupt vs stale vs old schema).
     """
-    snapshot_path = QUANT_SNAPSHOT_FILE
+    snapshot_path = quant_snapshot_file()
     if not os.path.exists(snapshot_path):
         logger.debug("Quant snapshot absent at %s", snapshot_path)
         return None
@@ -8322,7 +8320,7 @@ def _load_quant_snapshot_if_valid(max_age_hours: float) -> Optional[Dict[str, An
         except (OSError, ValueError) as exc:
             logger.warning(
                 "Quant snapshot rejected: corrupt/unreadable JSON (%s: %s) at %s",
-                type(exc).__name__, exc, QUANT_SNAPSHOT_FILE,
+                type(exc).__name__, exc, snapshot_path,
             )
             return None
         stocks = snapshot_data.get("stocks") if isinstance(snapshot_data, dict) else None
@@ -8427,7 +8425,7 @@ def compute_quant_percentile_universe(force_recompute: bool = False, max_age_hou
             return snap
         raise RuntimeError(
             "Unified screener universe sync failed and no fresh, schema-valid "
-            f"snapshot exists at {QUANT_SNAPSHOT_FILE} "
+            f"snapshot exists at {quant_snapshot_file()} "
             f"(max_age_hours={max_age_hours}). Refusing to serve fabricated data."
         ) from exc
 

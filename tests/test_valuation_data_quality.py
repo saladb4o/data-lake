@@ -64,3 +64,27 @@ class TestPayload:
         assert rich.data_quality["grade"] == "HIGH"
         assert thin.data_quality["grade"] == "LOW"
         assert thin.data_quality["warnings"], "a thin valuation must carry a warning"
+
+
+class TestStructuralAssumptions:
+    """Structural stand-ins must be named, not just silently applied."""
+
+    def test_assumptions_are_listed_when_their_inputs_are_absent(self):
+        q = assess_data_quality({"price": 20000.0, "eps": 2500})
+        fields = {a["field"] for a in q["assumptions_applied"]}
+        assert fields == {"shares_out", "market_cap", "debt"}
+        assert all(a["assumption"] for a in q["assumptions_applied"])
+
+    def test_no_assumptions_when_the_data_is_there(self):
+        assert assess_data_quality(RICH)["assumptions_applied"] == []
+
+    def test_an_alternate_source_field_counts(self):
+        """debt has three possible source fields; any one suppresses the stand-in."""
+        q = assess_data_quality({"price": 20000.0, "interest_bearing_debt": 4.0e14})
+        assert "debt" not in {a["field"] for a in q["assumptions_applied"]}
+
+    def test_it_reaches_the_payload(self):
+        res = ValuationEngine().get_comprehensive_valuation(
+            "XYZ", fundamental_data={"price": 20000.0}
+        )
+        assert res.to_dict()["data_quality"]["assumptions_applied"]
