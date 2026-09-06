@@ -1547,6 +1547,25 @@ def normalize_stock_data(
             tv["total_debt_fq"] = vnd["total_debt_fq"]
         if not tv.get("free_cash_flow_ttm") and vnd.get("cfo_ttm") and vnd.get("capex_ttm"):
             tv["free_cash_flow_ttm"] = max(0.0, vnd["cfo_ttm"] - vnd["capex_ttm"])
+        # Cash, operating cash flow and D&A were missing from this overlay.
+        # VNDIRECT reports all three, and without them a backfilled symbol
+        # still lost every cash-flow and enterprise-value model: cash gates
+        # net debt, cfo gates P/CF and owner earnings, and D&A is what turns
+        # a reported EBIT into EBITDA. Measured on a symbol with no
+        # TradingView statements, adding them takes the overlay from 2
+        # published models to a full sector house.
+        if not tv.get("cash_n_short_term_invest_fq") and vnd.get("cash_fq"):
+            tv["cash_n_short_term_invest_fq"] = vnd["cash_fq"]
+        if not tv.get("cash_f_operating_activities_ttm") and vnd.get("cfo_ttm"):
+            tv["cash_f_operating_activities_ttm"] = vnd["cfo_ttm"]
+        if not tv.get("depreciation_and_amortization_ttm") and vnd.get("da_ttm"):
+            tv["depreciation_and_amortization_ttm"] = vnd["da_ttm"]
+        if not tv.get("capital_expenditures_ttm") and vnd.get("capex_ttm"):
+            tv["capital_expenditures_ttm"] = vnd["capex_ttm"]
+        if not tv.get("total_current_assets_fq") and vnd.get("total_current_assets_fq"):
+            tv["total_current_assets_fq"] = vnd["total_current_assets_fq"]
+        if not tv.get("total_current_liabilities_fq") and vnd.get("total_current_liabilities_fq"):
+            tv["total_current_liabilities_fq"] = vnd["total_current_liabilities_fq"]
 
     # Solve Accounting Triangles & Missing Data Imputation with Tier 0 Arbiter
     tri = reconstruct_financial_triangles(
@@ -1715,6 +1734,31 @@ def normalize_stock_data(
 # 5. UNIFIED MARKET UNIVERSE SYNC
 # =============================================================================
 
+#: The statement lines the valuation models need and TradingView often omits.
+#: Each maps to the VNDIRECT key that normalize_stock_data() overlays.
+_VND_BACKFILL_KEYS = (
+    "revenue_ttm", "net_income_ttm", "ebit_ttm",
+    "total_assets_fq", "total_equity_fq", "total_debt_fq",
+)
+
+#: The TradingView fields whose absence makes a symbol worth a VNDIRECT call.
+_TV_REQUIRED_LINES = (
+    "total_revenue_ttm", "net_income_ttm", "ebit_ttm",
+    "total_assets_fq", "total_equity_fq", "total_debt_fq",
+)
+
+
+def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
+    """True when TradingView left at least one statement line empty.
+
+    A symbol TradingView covers fully costs no second request; one it covers
+    partially is exactly the case the overlay exists for.
+    """
+    if not tv_entry:
+        return True
+    return any(tv_entry.get(key) is None for key in _TV_REQUIRED_LINES)
+
+
 def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[str, Any]:
     """
     Executes full multi-source synchronization for all symbols in master universe.
@@ -1733,6 +1777,50 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # Batch fetch from TradingView
     tv_batch = fetch_tradingview_batch_by_tickers(tv_tickers, chunk_size=150)
     print(f"  ✓ Fetched {len(tv_batch)} symbols directly from TradingView Scanner API")
+
+    # -----------------------------------------------------------------
+    # VNDIRECT backfill for the statement lines TradingView does not carry.
+    #
+    # Measured across all 1,526 listed symbols, TradingView returns a balance
+    # sheet for roughly half: total_debt_fq 52.5%, ebit_ttm 47.5%,
+    # capital_expenditures_ttm 44.4%. The rest have no reported lines, so the
+    # provenance gate refuses to value them - correctly, because anything it
+    # could produce would be a function of the price it is judging.
+    #
+    # normalize_stock_data() has always known how to fill those gaps from
+    # VNDIRECT Finfo: it accepts vndirect_data and overlays revenue, net
+    # income, EBIT, assets, equity, debt and FCF wherever TradingView is
+    # silent. Nothing ever passed it. The fetch function, the overlay and the
+    # tier accounting were all written and all dead.
+    #
+    # Only symbols actually missing a line are fetched, so a full TradingView
+    # response costs nothing.
+    # -----------------------------------------------------------------
+    vnd_by_symbol: Dict[str, Dict[str, Any]] = {}
+    needs_vnd = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _needs_vndirect_backfill(tv_batch.get(sym.upper().strip()))
+    ]
+    if needs_vnd:
+        print(f"  🔎 {len(needs_vnd)} symbols missing statement lines; querying VNDIRECT Finfo...")
+
+        def _vnd_worker(sym: str):
+            try:
+                return sym, fetch_vndirect_financials(sym)
+            except Exception:
+                logger.debug("VNDIRECT backfill failed for %s", sym, exc_info=True)
+                return sym, {}
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for fut in as_completed([executor.submit(_vnd_worker, s) for s in needs_vnd]):
+                sym, payload = fut.result()
+                if payload:
+                    vnd_by_symbol[sym] = payload
+        filled = sum(
+            1 for p in vnd_by_symbol.values()
+            if any(p.get(k) is not None for k in _VND_BACKFILL_KEYS)
+        )
+        print(f"  ✓ VNDIRECT returned statements for {filled}/{len(needs_vnd)} of them")
 
     unified_stocks = {}
     missing_symbols = []
@@ -1753,6 +1841,7 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 sector_code=sec_code,
                 sector_name=sec_name,
                 tv_data=tv_entry,
+                vndirect_data=vnd_by_symbol.get(sym_clean),
                 enable_source0_fallback=False
             )
             unified_stocks[sym_clean] = unified_stock
@@ -1766,6 +1855,15 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             meta = master_symbols_map.get(s, {})
             vn_data = fetch_vnstock_financials(s)
             yf_data = fetch_yfinance_financials(s) if not vn_data else {}
+            # TradingView returned nothing at all for these, so they need the
+            # VNDIRECT statements more than anyone.
+            vnd_data = vnd_by_symbol.get(s)
+            if vnd_data is None:
+                try:
+                    vnd_data = fetch_vndirect_financials(s)
+                except Exception:
+                    logger.debug("VNDIRECT fetch failed for %s", s, exc_info=True)
+                    vnd_data = None
             return s, normalize_stock_data(
                 symbol=s,
                 exchange=meta.get("exchange", "HOSE"),
@@ -1774,6 +1872,7 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 sector_name=meta.get("sector_name", "Công Nghiệp"),
                 vnstock_data=vn_data,
                 yf_data=yf_data,
+                vndirect_data=vnd_data,
                 enable_source0_fallback=False
             )
 
