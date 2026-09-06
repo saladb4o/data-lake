@@ -141,8 +141,10 @@ def resolve_data_file(filename: str) -> str:
     if not candidates:
         return local_path
         
-    # Sort by file size descending (prefer richer dataset), then by mtime descending
-    candidates.sort(key=lambda c: (c[1], c[2]), reverse=True)
+    # Freshness decides, size only breaks ties. Sorting by size first let a large
+    # stale copy beat a smaller current one, which for financial data is simply
+    # wrong: "bigger" and "more correct" are unrelated.
+    candidates.sort(key=lambda c: (c[2], c[1]), reverse=True)
     return candidates[0][0]
 
 QUANT_SNAPSHOT_FILE = resolve_data_file("screener_snapshot.json")
@@ -198,9 +200,13 @@ class DiskDataLake:
                 lake[symbol] = record
                 self._cache_mem[filename] = lake
                 
-                # Save to primary data directory in background
-                target_dir = self.get_data_dir()
-                out_file = os.path.join(target_dir, filename)
+                # Write back to the copy readers actually resolve to. Always
+                # writing to get_data_dir() forked a second, partial lake
+                # whenever the real one lived elsewhere.
+                out_file = resolve_data_file(filename)
+                if not os.path.exists(out_file):
+                    out_file = os.path.join(self.get_data_dir(), filename)
+                os.makedirs(os.path.dirname(out_file), exist_ok=True)
                 temp_file = out_file + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
                 with open(temp_file, "w", encoding="utf-8") as f:
                     json.dump(lake, f, ensure_ascii=False)

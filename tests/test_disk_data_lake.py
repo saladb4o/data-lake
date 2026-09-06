@@ -90,3 +90,99 @@ def test_concurrent_writers_do_not_lose_records(lake_dir):
 
     written = json.loads((lake_dir / fn).read_text(encoding="utf-8"))
     assert len(written) == 40, f"lost records: only {len(written)}/40 persisted"
+
+
+
+@pytest.fixture
+def local_data_file():
+    """Yields a factory for throwaway files in the repo's real data/ dir.
+
+    resolve_data_file() derives the local candidate from the module's own
+    location, so exercising the real path beats monkeypatching os.path.
+    """
+    import services.stock_service as ss
+    base = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(ss.__file__))), "data")
+    os.makedirs(base, exist_ok=True)
+    created = []
+
+    def make(name, content, mtime):
+        path = os.path.join(base, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.utime(path, (mtime, mtime))
+        created.append(path)
+        return path
+
+    yield make
+    for path in created:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+class TestDataFileResolution:
+    """resolve_data_file() picks which copy of a data file wins.
+
+    It used to sort by (size, mtime) descending, so a large stale file beat a
+    smaller fresh one - wrong for financial data, where "bigger" and "more
+    correct" are unrelated. Freshness now decides, with size only as tiebreak.
+    """
+
+    def test_fresher_file_wins_over_larger_stale_one(self, tmp_path, monkeypatch, local_data_file):
+        import services.stock_service as ss
+
+        gdrive = tmp_path / "gdrive"
+        gdrive.mkdir()
+        monkeypatch.setenv("GOOGLE_DRIVE_DATA_DIR", str(gdrive))
+
+        fn = "pytest_freshness_probe.json"
+        stale_big = gdrive / fn
+        stale_big.write_text(json.dumps({"pad": "x" * 5000}), encoding="utf-8")
+        os.utime(stale_big, (1_000_000, 1_000_000))
+
+        fresh_small = local_data_file(fn, json.dumps({"a": 1}), 2_000_000)
+
+        assert ss.resolve_data_file(fn) == fresh_small, (
+            "resolver preferred the larger stale file over the fresher one"
+        )
+
+    def test_size_still_breaks_ties_at_equal_mtime(self, tmp_path, monkeypatch, local_data_file):
+        import services.stock_service as ss
+
+        gdrive = tmp_path / "gdrive"
+        gdrive.mkdir()
+        monkeypatch.setenv("GOOGLE_DRIVE_DATA_DIR", str(gdrive))
+
+        fn = "pytest_tiebreak_probe.json"
+        big = gdrive / fn
+        big.write_text(json.dumps({"pad": "x" * 5000}), encoding="utf-8")
+        os.utime(big, (3_000_000, 3_000_000))
+        local_data_file(fn, json.dumps({"a": 1}), 3_000_000)
+
+        assert ss.resolve_data_file(fn) == str(big), "equal mtime should prefer the richer file"
+
+    def test_writes_update_the_existing_copy_instead_of_forking_one(self, tmp_path, monkeypatch, local_data_file):
+        """Writes went to get_data_dir() regardless of where the lake already lived.
+
+        With a lake in data/ and GOOGLE_DRIVE_DATA_DIR set, a write created a
+        second, partial copy on Drive instead of updating the real one, leaving
+        two diverging lakes.
+        """
+        import services.stock_service as ss
+
+        gdrive = tmp_path / "gdrive"
+        gdrive.mkdir()
+        monkeypatch.setenv("GOOGLE_DRIVE_DATA_DIR", str(gdrive))
+
+        fn = "pytest_fork_probe.json"
+        local_path = local_data_file(fn, json.dumps({"OLD": {"v": 0}}), 9_000_000)
+
+        lake = DiskDataLake()
+        lake.save_symbol_record(fn, "VCB", {"v": 1})
+
+        with open(local_path, encoding="utf-8") as fh:
+            updated = json.load(fh)
+        assert updated.get("VCB") == {"v": 1}, "existing lake was not updated"
+        assert updated.get("OLD") == {"v": 0}, "existing records were dropped"
+        assert not (gdrive / fn).exists(), "write forked a second copy onto Google Drive"
