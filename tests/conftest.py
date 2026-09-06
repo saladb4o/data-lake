@@ -158,6 +158,75 @@ _SNAPSHOT_DEFAULT = dict(revenue=3.00e13, market_cap=6.00e13, ps=2.00,
                          roe=15.0, de_ratio=0.80)
 
 
+#: Filler tickers. get_quant_screener() rejects a snapshot with 50 or fewer
+#: stocks and falls back to a live sync, so the API tests that read through it
+#: were never exercising this fixture at all - they were asserting against
+#: whatever a network call happened to return, and against nothing when the
+#: network was unavailable. Padding past the gate makes them hermetic.
+_SNAPSHOT_PADDING = [
+    "AAA", "ACL", "ANV", "ASM", "BCG", "BMP", "BWE", "CII", "CMG", "CTD",
+    "DBC", "DCM", "DGC", "DGW", "DHC", "DPM", "DXG", "FRT", "GEX", "HAH",
+    "HCM", "HDG", "HSG", "IDC", "IJC", "KBC", "KDH", "NKG", "NLG", "PAN",
+    "PC1", "PET", "PNJ", "PVD", "PVT", "REE", "SCS", "SZC", "TCH", "VCI",
+]
+
+
+def _snapshot_record(symbol: str) -> dict:
+    """One screener record shaped the way the real sync writes them.
+
+    The engine refuses to value a record whose drivers are flagged as
+    reconstructed from market cap, so a fixture that carries only ratios
+    produces nothing and the test measures the refusal rather than the code
+    under test. These records therefore carry the absolute statement lines and
+    a tier for each, exactly as normalize_stock_data() publishes them.
+    """
+    payload = dict(_SNAPSHOT_FIXTURES.get(symbol, _SNAPSHOT_DEFAULT))
+    payload["symbol"] = symbol
+    payload.setdefault("name", f"CTCP {symbol}")
+
+    market_cap = float(payload["market_cap"])
+    revenue = float(payload["revenue"])
+    price = 25_000.0
+    shares_out = market_cap / price
+    equity = market_cap / 1.6
+    net_income = revenue * (float(payload["net_margin"]) / 100.0)
+    ebit = revenue * (float(payload["op_margin"]) / 100.0)
+
+    payload.update(
+        price=price,
+        shares_out=shares_out,
+        market_cap_vnd=market_cap,
+        eps=net_income / shares_out,
+        total_assets=equity * 1.9,
+        total_liabilities=equity * 0.9,
+        equity=equity,
+        debt=equity * float(payload["de_ratio"]),
+        cash=equity * 0.12,
+        net_income=net_income,
+        ebit=ebit,
+        ebitda=ebit * 1.25,
+        cfo=net_income * 1.1,
+        capex=revenue * 0.05,
+    )
+
+    # Tier 3 = vendor reported. These are stated inputs, not reconstructions
+    # from the price being judged, so the gate should let them through.
+    provenance = {key: 3 for key in payload if key not in ("symbol", "name")}
+    payload["field_provenance"] = provenance
+    payload["is_imputed"] = {key: False for key in provenance}
+    payload["percentiles"] = {"composite": 50.0}
+    payload["_metadata"] = {
+        "is_imputed": payload["is_imputed"],
+        "field_provenance": provenance,
+        "provenance_tier": "Tier 3 (Reported / Audited)",
+        "is_valid_fundamental": True,
+        "is_real_data": True,
+        "data_quality_score": 90.0,
+        "sources_used": ["fixture"],
+    }
+    return payload
+
+
 @pytest.fixture
 def screener_snapshot(tmp_path, monkeypatch):
     """Writes a screener snapshot into the isolated data dir and returns it."""
@@ -167,15 +236,22 @@ def screener_snapshot(tmp_path, monkeypatch):
     from services.stock_service import VN30_SYMBOLS
 
     stocks = {}
-    for symbol in set(list(_SNAPSHOT_FIXTURES) + list(VN30_SYMBOLS)):
-        payload = dict(_SNAPSHOT_FIXTURES.get(symbol, _SNAPSHOT_DEFAULT))
-        payload["symbol"] = symbol
-        payload.setdefault("name", f"CTCP {symbol}")
-        stocks[symbol] = payload
+    for symbol in set(list(_SNAPSHOT_FIXTURES) + list(VN30_SYMBOLS) + _SNAPSHOT_PADDING):
+        stocks[symbol] = _snapshot_record(symbol)
 
     data_dir = os.environ.get("DATA_LOCAL_DIR") or str(tmp_path)
     os.makedirs(data_dir, exist_ok=True)
     path = os.path.join(data_dir, "screener_snapshot.json")
     with open(path, "w", encoding="utf-8") as handle:
         json.dump({"stocks": stocks}, handle)
+
+    # compute_quant_percentile_universe() memoises the derived universe for an
+    # hour in a process-wide cache. Without this, the first test in a session
+    # to reach that code path decides what every later test sees: one that ran
+    # before any snapshot existed poisons the cache with the result of a failed
+    # live sync, and tests that pass alone fail in a full run. Writing a new
+    # snapshot has to invalidate what was derived from the old one.
+    from services.stock_service import cache
+    cache.invalidate("quant_percentile_universe_v2")
+
     return path

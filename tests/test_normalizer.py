@@ -32,6 +32,26 @@ GOLDEN_KEYS = {
     "cfo_to_pat", "share_dilution_3y", "ebit_expansion", "operating_leverage",
     "dilution_spread", "is_cyclical", "size_category", "size_damper",
     "_metadata",
+    # Provenance at the top level, where InputResolver and the coverage
+    # audit read it. Copies remain under "_metadata".
+    "field_provenance", "is_imputed",
+    # Always present: derived from market_cap, which always resolves.
+    "market_cap_vnd",
+}
+
+#: Absolute statement lines, raw VND. The engine looks these up by name;
+#: publishing only the ratios derived from them is what blocked every
+#: per-share model for the whole universe.
+#:
+#: These are OPTIONAL by design. A line is published only when it has a
+#: provenance tier, so a payload that reports nothing omits it rather than
+#: carrying a null that would read as an observation. Asserting exact
+#: equality here would force the record to fabricate a placeholder for
+#: every line it has no evidence for - the exact habit this whole audit
+#: has been removing.
+OPTIONAL_LINE_KEYS = {
+    "total_assets", "total_liabilities", "equity", "debt", "cash",
+    "revenue", "net_income", "ebit", "ebitda", "cfo", "capex", "shares_out",
 }
 
 # Identity / classification keys that are NOT fundamental scalars and thus
@@ -41,6 +61,8 @@ NON_SCALAR_KEYS = {
     "symbol", "name", "exchange", "price", "change_pct", "sector_code",
     "sector_name", "industry", "is_cyclical", "size_category", "size_damper",
     "_metadata",
+    # Provenance maps, not scalars: they describe the other keys.
+    "field_provenance", "is_imputed",
 }
 
 CORE_REPORTED_FIELDS = ["market_cap", "pe", "pb", "eps", "roe"]
@@ -84,7 +106,7 @@ def test_full_tv_is_imputed_map_and_core_fields_false():
     assert isinstance(imp, dict) and len(imp) > 0
 
     # Every fundamental scalar exposed at the top level must be covered.
-    scalars = GOLDEN_KEYS - NON_SCALAR_KEYS
+    scalars = (GOLDEN_KEYS - NON_SCALAR_KEYS) | (OPTIONAL_LINE_KEYS & set(rec))
     missing = [k for k in scalars if k not in imp]
     assert not missing, f"is_imputed missing scalar fields: {missing}"
 
@@ -110,7 +132,7 @@ def test_empty_sources_honest_discard():
     assert md["imputed_field_count"] > 0
 
     imp = md["is_imputed"]
-    scalars = GOLDEN_KEYS - NON_SCALAR_KEYS
+    scalars = (GOLDEN_KEYS - NON_SCALAR_KEYS) | (OPTIONAL_LINE_KEYS & set(rec))
     missing = [k for k in scalars if k not in imp]
     assert not missing, f"is_imputed missing scalar fields: {missing}"
 
@@ -127,11 +149,16 @@ def test_mixed_sources_honest_flags_and_golden_keys():
 
     rec = normalize_stock_data("MIX", tv_data=tv, vnstock_data=vn, yf_data=None)
 
-    # Downstream compatibility: exact golden top-level key set.
-    assert set(rec.keys()) == GOLDEN_KEYS, (
-        f"top-level key drift: "
-        f"extra={set(rec.keys()) - GOLDEN_KEYS}, missing={GOLDEN_KEYS - set(rec.keys())}"
+    # Downstream compatibility: every golden key present, and nothing beyond
+    # them except the statement lines this payload had evidence for.
+    keys = set(rec.keys())
+    assert GOLDEN_KEYS <= keys, f"top-level keys went missing: {GOLDEN_KEYS - keys}"
+    assert (keys - GOLDEN_KEYS) <= OPTIONAL_LINE_KEYS, (
+        f"top-level key drift: {keys - GOLDEN_KEYS - OPTIONAL_LINE_KEYS}"
     )
+    # This payload reports assets and liabilities, so equity is derivable and
+    # all three must be published rather than silently dropped.
+    assert {"total_assets", "total_liabilities", "equity"} <= keys
 
     md = rec["_metadata"]
     assert set(md.keys()) >= {
