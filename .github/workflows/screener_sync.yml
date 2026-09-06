@@ -64,6 +64,10 @@ jobs:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
         run: python scripts/sync_unified_market_data.py
 
+      # The sync itself now refuses and exits non-zero when the master list
+      # will not load, so this is a second line of defence rather than the
+      # only one: it also catches a snapshot that was written and then
+      # truncated.
       - name: Fail if the sync produced a thin universe
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data

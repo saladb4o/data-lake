@@ -28,10 +28,21 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from services.unified_data_service import sync_unified_screener_universe
-from services.stock_service import SECTOR_ICB_REGISTRY
+from services.stock_service import SECTOR_ICB_REGISTRY, resolve_data_file
+
+#: Below this, the master list did not load. A real Vietnamese equity
+#: universe is ~1,500 symbols across HOSE, HNX and UPCOM.
+MIN_PLAUSIBLE_UNIVERSE = 100
+
 
 def load_local_symbols() -> dict:
-    symbols_file = os.path.join(PROJECT_ROOT, "data", "all_symbols.json")
+    # Through the shared resolver. As a hardcoded PROJECT_ROOT/data/... this
+    # ignored DATA_LOCAL_DIR and GOOGLE_DRIVE_DATA_DIR, so the list was
+    # invisible on a machine that keeps its lake on Drive, and absent
+    # entirely on a CI runner - where the sync then reported "Loaded 0
+    # valid equity symbols" and cheerfully went on to build an empty
+    # snapshot.
+    symbols_file = resolve_data_file("all_symbols.json")
     master = {}
 
     # Build reverse lookup from representative stocks
@@ -64,7 +75,34 @@ def main():
     print("=====================================================================")
     symbols_map = load_local_symbols()
     print(f"📦 Loaded {len(symbols_map)} valid equity symbols from local master list.")
-    
+
+    # A fresh checkout has no master list: data/*.json is gitignored, so a CI
+    # runner starts with nothing. Build it from the live listing rather than
+    # syncing an empty universe over a good snapshot.
+    if len(symbols_map) < MIN_PLAUSIBLE_UNIVERSE:
+        print("📥 Master list missing or too small; fetching the listing from vnstock...")
+        try:
+            from services.stock_service import sync_universe_from_vnstock
+            stats = sync_universe_from_vnstock(force=True)
+            print(f"   listing sync reports {stats.get('total_symbols', 0)} symbols")
+        except Exception as exc:
+            print(f"   listing sync failed: {type(exc).__name__}: {exc}")
+        symbols_map = load_local_symbols()
+        print(f"📦 Reloaded {len(symbols_map)} valid equity symbols.")
+
+    if len(symbols_map) < MIN_PLAUSIBLE_UNIVERSE:
+        # Refuse rather than publish. sync_unified_screener_universe() writes
+        # screener_snapshot.json unconditionally, so continuing here would
+        # replace a good snapshot with an empty one - which is exactly how a
+        # 1,645-symbol snapshot nearly got destroyed once already.
+        print(
+            f"\n❌ Only {len(symbols_map)} symbols available; refusing to sync.\n"
+            f"   Nothing was written. Check that all_symbols.json is reachable\n"
+            f"   (DATA_LOCAL_DIR / GOOGLE_DRIVE_DATA_DIR) or that the vnstock\n"
+            f"   listing endpoint is responding."
+        )
+        return 1
+
     payload = sync_unified_screener_universe(symbols_map)
     
     # Verification Sample
@@ -80,5 +118,10 @@ def main():
             tier = meta.get("provenance_tier", "")
             print(f"  • {sym:4s} | Price: {s['price']:>8,.0f} | P/E: {s['pe']:>5.1f} | P/B: {s['pb']:>4.2f} | ROE: {s['roe']:>5.1f}% | Net D/E: {s['net_de_ratio']:>4.2f} | Quality: {q_score:>5.1f}% [{tier}] | Sources: [{sources}]")
 
+    return 0
+
 if __name__ == "__main__":
-    main()
+    # Propagate the refusal above as a non-zero exit. Returning 1 from main()
+    # without this exits 0, and a CI step that refused to sync would look
+    # like a step that succeeded.
+    sys.exit(main())
