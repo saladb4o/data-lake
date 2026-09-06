@@ -1342,6 +1342,11 @@ def api_get_comprehensive_valuation(
             omnibus_metric=metric,
         )
         return JSONResponse(content={"status": "success", "data": val_res.to_dict()})
+    except ValueError as e:
+        # Missing or unusable inputs (no fundamentals, no price): a data gap,
+        # not a server fault. Surfaced so the UI can say why rather than
+        # rendering a valuation built on defaults.
+        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 

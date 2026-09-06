@@ -216,6 +216,27 @@ _STRING_KEYS = frozenset({
 })
 
 
+def _require_price(symbol: str, fundamental_data: Dict[str, Any]) -> float:
+    """Returns a usable market price or raises.
+
+    Price anchors every upside, margin-of-safety and risk-firewall figure, so a
+    fabricated one produces a confident-looking valuation built on nothing.
+    Consistent with the no-silent-fills policy already applied to a missing
+    fundamental_data payload, an unusable price is refused rather than defaulted.
+    """
+    raw = fundamental_data.get("price")
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        price = float("nan")
+    if not math.isfinite(price) or price <= 0:
+        raise ValueError(
+            f"A valid market price is required for quantitative valuation of {symbol} "
+            f"(got {raw!r}). Fallback to a default price is disabled."
+        )
+    return price
+
+
 def _sanitize_fundamental_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Sanitize fundamental_data dict: convert NaN, Inf, and unparseable string
@@ -725,7 +746,7 @@ class RiskFirewallEngine:
         market_returns: Optional[List[float]] = None,
     ) -> RiskFirewallResult:
         """Runs full risk firewall diagnostic pipeline."""
-        price = float(fundamental_data.get("price") or 10000.0)
+        price = _require_price(str(fundamental_data.get("symbol") or "?"), fundamental_data)
         shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
         mcap = float(fundamental_data.get("market_cap") or (price * shares))
 
@@ -2018,7 +2039,7 @@ class ValuationEngine:
         # Sanitize NaN / Inf / invalid string values → None for safe fallbacks
         fundamental_data = _sanitize_fundamental_data(fundamental_data)
 
-        price = max(float(fundamental_data.get("price") or 10000.0), 100.0)
+        price = _require_price(symbol, fundamental_data)
         shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
         mcap = float(fundamental_data.get("market_cap") or (price * shares))
         debt = float(fundamental_data.get("debt") or fundamental_data.get("total_debt_fq") or fundamental_data.get("interest_bearing_debt") or (mcap * 0.4))
@@ -2355,7 +2376,7 @@ class ValuationEngine:
         # Sanitize NaN / Inf / invalid string values → None for safe fallbacks
         fundamental_data = _sanitize_fundamental_data(fundamental_data)
 
-        price = max(float(fundamental_data.get("price") or 10000.0), 100.0)
+        price = _require_price(symbol, fundamental_data)
         company_name = str(fundamental_data.get("name") or fundamental_data.get("company_name") or symbol)
         exchange = str(fundamental_data.get("exchange") or "HOSE")
         sector_code = str(fundamental_data.get("sector_code") or "DEFAULT").upper()
