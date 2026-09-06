@@ -524,3 +524,82 @@ data lake instead of `tmp_path`. Unsetting the variable does not help - it has
 to point at a path that does not exist. An autouse fixture now does that.
 Reproduced with a simulated mount (4 failures), fixed, and verified green both
 with and without one.
+
+## 10. The second vendor was wired up and never called
+
+Section 9 established the ceiling: TradingView returns a balance sheet for
+about half the listed universe. The obvious next question was whether the BCTC
+PDF lake could cover the other half, since the repository already runs a
+20-worker GitHub Actions crawler against it every Sunday.
+
+Measured on the 100 MB lake in the repository:
+
+```
+records                   1,769
+with any extracted data      22
+with statement items          7  (0.4%)
+distinct symbols usable       4
+document types:  SCANNED_IMAGE 13 | NATIVE 9
+```
+
+Four usable symbols out of 1,769 records, after running weekly for months. The
+bottleneck is not compute - GitHub grants twenty parallel runners and they have
+been busy. It is OCR of Vietnamese financial statements filed as images, with a
+different layout per issuer. Not worth pursuing.
+
+Looking for a cheaper source turned up a fourth break in the same pipeline, of
+exactly the same kind as the first three:
+
+- `fetch_vndirect_financials()` exists and returns normalised VND statements.
+- `reconstruct_financial_triangles()` accepts `vnd_data` and reads it as a
+  reported, tier-3 witness.
+- `normalize_stock_data()` accepts `vndirect_data` and carries an overlay that
+  fills revenue, net income, EBIT, assets, equity, debt and FCF wherever
+  TradingView is silent.
+- `sync_unified_screener_universe()` called `normalize_stock_data(tv_data=...)`
+  and passed no `vndirect_data`.
+
+Every piece was written, tiered and reachable except the one call that would
+have used it. Half the universe was refused for want of lines a second vendor
+was already able to supply.
+
+The sync now queries VNDIRECT for the symbols whose TradingView entry is
+missing a statement line, in a thread pool, and forwards the result. A symbol
+TradingView covers fully costs no second request.
+
+### The overlay was itself incomplete
+
+With VNDIRECT wired in, a symbol with no TradingView statements published only
+**2** models. The overlay mapped seven fields and omitted cash, operating cash
+flow and D&A - all three of which VNDIRECT reports. Cash gates net debt, CFO
+gates P/CF and owner earnings, and D&A is what turns a reported EBIT into
+EBITDA, so the cash-flow and enterprise-value models stayed dark. Adding those
+(plus current assets and current liabilities) takes the same symbol from 2
+models to **6 of 22** - a full house for its sector - with every driver at
+tier 2 or higher.
+
+Measured, through the real path, for a symbol TradingView reports nothing for:
+
+| | active models |
+|---|---|
+| no VNDIRECT | 0 of 22 |
+| VNDIRECT wired | 6 of 22 |
+
+The gate is untouched. What changed is that evidence which existed now reaches
+it.
+
+### Running it on a clean machine
+
+`.github/workflows/screener_sync.yml` runs the sync on a GitHub runner and
+publishes the snapshot as an artifact. The backfill is hundreds of extra
+requests, and on a Windows machine with TLS-intercepting antivirus it is also
+the step most likely to die on certificate verification - which is what pushed
+an earlier run toward `VNSTOCK_INSECURE_TLS=1`, a setting that disables
+certificate verification process-wide and should never be used for a run that
+writes into the data lake.
+
+The snapshot is uploaded as an artifact and deliberately **not** committed:
+this repository is public, and the BCTC workflow's habit of pushing data
+straight to `main` would publish the entire fundamentals lake. The run also
+refuses to publish a snapshot holding fewer than 100 symbols, so a failed
+master-list load cannot overwrite a good local copy with an empty one.

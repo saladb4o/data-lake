@@ -1,0 +1,101 @@
+name: Screener Universe Sync
+
+# Builds data/screener_snapshot.json on a clean runner and publishes it as a
+# private artifact.
+#
+# Why here rather than on a laptop: the sync now queries VNDIRECT Finfo for
+# every symbol TradingView leaves without statements, which is roughly half
+# the universe. That is hundreds of requests, and on a Windows machine with
+# TLS-intercepting antivirus it is also the step most likely to fail on
+# certificate verification. A runner has a clean network and finishes in
+# minutes.
+#
+# The snapshot is uploaded as an artifact, NOT committed. This repository is
+# public, and committing the snapshot would publish the whole fundamentals
+# lake to anyone who visits it. Download the artifact from the run page and
+# drop it into your data directory.
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_after:
+        description: 'Chạy audit độ phủ sau khi sync (true/false)'
+        required: false
+        default: 'true'
+  schedule:
+    # 06:00 sáng thứ Hai giờ VN = 23:00 UTC Chủ Nhật, after the weekly BCTC run.
+    - cron: '0 23 * * 0'
+
+concurrency:
+  group: screener-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    name: Sync universe and audit coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Sync the universe
+        env:
+          # Keep every write inside the workspace. Without this the resolver
+          # would look for a Google Drive mount that does not exist here.
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: python scripts/sync_unified_market_data.py
+
+      - name: Fail if the sync produced a thin universe
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          path = os.path.join(os.environ["DATA_LOCAL_DIR"], "screener_snapshot.json")
+          stocks = json.load(open(path, encoding="utf-8")).get("stocks", {})
+          print(f"snapshot holds {len(stocks)} symbols")
+          # A snapshot this small means the master list did not load or the
+          # upstreams refused us. Publishing it would overwrite a good local
+          # copy with a broken one.
+          if len(stocks) < 100:
+              sys.exit(f"refusing to publish a {len(stocks)}-symbol snapshot")
+          PY
+
+      - name: Audit valuation coverage
+        if: ${{ github.event.inputs.audit_after != 'false' }}
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+        run: |
+          python scripts/audit_valuation_coverage.py \
+            --show-blocked 20 --json "$DATA_LOCAL_DIR/coverage.json" \
+            | tee "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: screener_snapshot
+          path: |
+            data/screener_snapshot.json
+            data/coverage.json
+          retention-days: 14
+          if-no-files-found: error

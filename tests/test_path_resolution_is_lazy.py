@@ -73,6 +73,36 @@ def test_old_constants_are_gone():
         )
 
 
+def test_server_write_paths_follow_the_environment(tmp_path, monkeypatch):
+    """server.py wrote three files at a hardcoded relative "data/...".
+
+    That ignored DATA_LOCAL_DIR, so a test run persisted the RRG cache and
+    the alert rules into the checkout instead of its isolated directory -
+    which the leak guard in conftest correctly failed the run on. Same
+    defect as the five lake paths above, including one that was an
+    import-time constant.
+    """
+    import server
+
+    first = tmp_path / "one"
+    monkeypatch.setenv("DATA_LOCAL_DIR", str(first))
+    assert str(first) in server._rrg_disk_path()
+    assert str(first) in server.alert_rules_path()
+
+    second = tmp_path / "two"
+    monkeypatch.setenv("DATA_LOCAL_DIR", str(second))
+    assert str(second) in server._rrg_disk_path(), "path was frozen"
+    assert str(second) in server.alert_rules_path(), "path was frozen"
+
+
+def test_server_alert_rules_path_is_not_a_constant():
+    import server
+
+    assert not isinstance(getattr(server, "ALERT_RULES_PATH", None), str), (
+        "server.ALERT_RULES_PATH is an import-time constant again"
+    )
+
+
 def test_valuation_engine_uses_the_shared_resolver(tmp_path, monkeypatch):
     """It read data/screener_snapshot.json directly, bypassing the resolver."""
     import json
