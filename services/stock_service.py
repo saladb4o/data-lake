@@ -95,10 +95,47 @@ except Exception:
 executor = ThreadPoolExecutor(max_workers=24)
 
 class SimpleCache:
-    """Thread-safe in-memory cache supporting Stale-While-Revalidate (SWR)."""
-    def __init__(self):
+    """Thread-safe in-memory cache supporting Stale-While-Revalidate (SWR).
+
+    Bounded: entries were only ever dropped when a caller happened to read one
+    past its stale window, so a key never touched again lived forever. With
+    per-symbol keys across ~1600 symbols and long TTLs holding whole statement
+    payloads, the cache grew without limit. Eviction now prefers entries that
+    are already stale, falling back to the oldest.
+    """
+
+    DEFAULT_MAX_ENTRIES = 5000
+
+    def __init__(self, max_entries: Optional[int] = None):
         self._store: Dict[str, Tuple[Any, float, float]] = {}
         self._lock = threading.Lock()
+        if max_entries is None:
+            raw = os.environ.get("CACHE_MAX_ENTRIES", "").strip()
+            try:
+                max_entries = int(raw) if raw else self.DEFAULT_MAX_ENTRIES
+            except ValueError:
+                max_entries = self.DEFAULT_MAX_ENTRIES
+        self.max_entries = max(1, int(max_entries))
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._store)
+
+    def _evict_locked(self) -> None:
+        """Trims the store back to max_entries. Caller must hold the lock."""
+        overflow = len(self._store) - self.max_entries
+        if overflow <= 0:
+            return
+        now = time.time()
+        # Anything past its stale window is dead weight - drop that first.
+        for key in [k for k, (_, _, stale_until) in self._store.items() if now >= stale_until]:
+            del self._store[key]
+            overflow -= 1
+            if overflow <= 0:
+                return
+        # Still over: drop the entries closest to expiry.
+        for key, _ in sorted(self._store.items(), key=lambda kv: kv[1][1])[:overflow]:
+            del self._store[key]
 
     def get(self, key: str) -> Optional[Any]:
         with self._lock:
@@ -120,6 +157,7 @@ class SimpleCache:
         with self._lock:
             now = time.time()
             self._store[key] = (value, now + ttl_seconds, now + (ttl_seconds * stale_multiplier))
+            self._evict_locked()
 
     def invalidate(self, key: str) -> None:
         """Drop a cached entry (no-op if absent)."""

@@ -216,6 +216,78 @@ _STRING_KEYS = frozenset({
 })
 
 
+# Inputs the 22 models actually read. Absence does not stop a valuation - the
+# engine substitutes sector or structural defaults - but it does change how much
+# the number is worth, which the caller has no other way to know.
+CORE_VALUATION_INPUTS: Tuple[str, ...] = (
+    "price", "eps", "bvps", "pe", "pb", "roe", "roic",
+    "revenue", "net_income", "pat", "ebit", "operating_profit",
+    "equity", "total_assets", "debt", "shares_out", "market_cap",
+    "rev_1y_growth", "pat_1y_growth", "sector_code",
+)
+
+# Below this share of core inputs the composite is structurally driven rather
+# than data driven, and should be presented that way.
+LOW_COVERAGE_THRESHOLD = 0.40
+HIGH_COVERAGE_THRESHOLD = 0.75
+
+
+def assess_data_quality(fundamental_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Reports how much of the valuation rests on real data.
+
+    Every missing input is silently replaced with a sector or structural
+    default somewhere in the model suite, so two valuations that look
+    identical can be backed by very different amounts of evidence. This makes
+    that difference explicit in the payload instead of leaving it implicit in
+    the code.
+
+    Coverage is measured over CORE_VALUATION_INPUTS; a field counts as present
+    only if it is non-null and, for numerics, finite.
+    """
+    present, missing = [], []
+    for key in CORE_VALUATION_INPUTS:
+        value = fundamental_data.get(key)
+        if value is None or value == "":
+            missing.append(key)
+            continue
+        if isinstance(value, (int, float)) and not math.isfinite(float(value)):
+            missing.append(key)
+            continue
+        present.append(key)
+
+    coverage = len(present) / len(CORE_VALUATION_INPUTS)
+    if coverage >= HIGH_COVERAGE_THRESHOLD:
+        grade = "HIGH"
+    elif coverage >= LOW_COVERAGE_THRESHOLD:
+        grade = "MEDIUM"
+    else:
+        grade = "LOW"
+
+    warnings: List[str] = []
+    if grade == "LOW":
+        warnings.append(
+            "Fewer than 40% of core inputs are present; the composite is driven "
+            "mainly by sector and structural defaults, not by this company's data."
+        )
+    for key, label in (
+        ("eps", "earnings-based models"),
+        ("bvps", "book-value models"),
+        ("equity", "return and leverage models"),
+        ("revenue", "growth models"),
+    ):
+        if key in missing:
+            warnings.append(f"{key} is missing; {label} fall back to defaults.")
+
+    return {
+        "coverage_pct": round(coverage * 100, 1),
+        "grade": grade,
+        "inputs_present": present,
+        "inputs_missing": missing,
+        "core_input_count": len(CORE_VALUATION_INPUTS),
+        "warnings": warnings,
+    }
+
+
 def _require_price(symbol: str, fundamental_data: Dict[str, Any]) -> float:
     """Returns a usable market price or raises.
 
@@ -366,6 +438,8 @@ class ValuationMatrixResult:
     buffett_coupon_spread: Dict[str, Any] = field(default_factory=dict)
     quant_quality_filters: Dict[str, Any] = field(default_factory=dict)
     capital_allocation: Dict[str, Any] = field(default_factory=dict)
+    # How much of this valuation rests on real inputs vs defaults.
+    data_quality: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -2486,6 +2560,7 @@ class ValuationEngine:
         ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         return ValuationMatrixResult(
+            data_quality=assess_data_quality(fundamental_data),
             symbol=symbol,
             company_name=company_name,
             exchange=exchange,
