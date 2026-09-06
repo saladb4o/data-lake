@@ -973,22 +973,54 @@ class RiskFirewallEngine:
     ) -> RiskFirewallResult:
         """Runs full risk firewall diagnostic pipeline."""
         price = _require_price(str(fundamental_data.get("symbol") or "?"), fundamental_data)
-        shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
-        mcap = float(fundamental_data.get("market_cap") or (price * shares))
+
+        # Altman Z'' is a bankruptcy score built from the balance sheet. Its
+        # inputs used to fall back to fractions of market cap (liabilities 50%,
+        # equity 50%, EBIT 12%), which made the distress verdict a function of
+        # the share price: a company the market had already marked down scored
+        # as more distressed regardless of its accounts. The stand-ins remain
+        # for continuity of the numeric output, but the score is now labelled
+        # unreliable when it rests on them, and the firewall will not
+        # disqualify a company on an invented Z''.
+        res = InputResolver(fundamental_data)
+        shares = max(res.resolve("shares", ("shares_out", "shares"),
+                                 impute=lambda: 1e8, require_positive=True), 1.0)
+        mcap = res.resolve("market_cap", ("market_cap",),
+                           derive=(("shares",), lambda: price * shares),
+                           impute=lambda: price * shares, require_positive=True)
 
         bvps_val = float(fundamental_data.get("bvps") or 0.0)
         equity_from_bvps = bvps_val * shares if bvps_val > 0 else 0.0
 
-        total_liabilities = float(fundamental_data.get("total_liabilities") or fundamental_data.get("debt") or (mcap * 0.5))
-        book_equity = float(fundamental_data.get("book_equity") or fundamental_data.get("equity") or (equity_from_bvps if equity_from_bvps > 0 else max(mcap * 0.5, 1.0)))
-        total_assets = float(fundamental_data.get("total_assets") or fundamental_data.get("assets") or (book_equity + total_liabilities))
+        total_liabilities = res.resolve(
+            "total_liabilities", ("total_liabilities", "debt"), impute=lambda: mcap * 0.5)
+        book_equity = res.resolve(
+            "book_equity", ("book_equity", "equity"),
+            derive=(("shares",), lambda: equity_from_bvps) if equity_from_bvps > 0 else None,
+            impute=lambda: max(mcap * 0.5, 1.0))
+        total_assets = res.resolve(
+            "total_assets", ("total_assets", "assets"),
+            derive=(("book_equity", "total_liabilities"),
+                    lambda: book_equity + total_liabilities),
+            impute=lambda: book_equity + total_liabilities)
 
-        working_capital = float(fundamental_data.get("working_capital") or ((total_assets - total_liabilities) * 0.25))
-        retained_earnings = float(fundamental_data.get("retained_earnings") or ((total_assets - total_liabilities) * 0.20))
-        ebit = float(fundamental_data.get("ebit") or fundamental_data.get("operating_profit") or (mcap * 0.12))
-        roe_raw = fundamental_data.get("roe") or 15.0
-        roe = float(roe_raw) / 100.0 if float(roe_raw) > 1.0 else float(roe_raw)
-        de_ratio = float(fundamental_data.get("de_ratio") or safe_div(total_liabilities, book_equity, 0.5))
+        working_capital = res.resolve(
+            "working_capital", ("working_capital",),
+            impute=lambda: (total_assets - total_liabilities) * 0.25)
+        retained_earnings = res.resolve(
+            "retained_earnings", ("retained_earnings",),
+            impute=lambda: (total_assets - total_liabilities) * 0.20)
+        ebit = res.resolve("ebit", ("ebit", "operating_profit"), impute=lambda: mcap * 0.12)
+        roe = _as_rate(res.resolve("roe", ("roe",), impute=lambda: 15.0))
+        de_ratio = res.resolve(
+            "de_ratio", ("de_ratio",),
+            derive=(("total_liabilities", "book_equity"),
+                    lambda: safe_div(total_liabilities, book_equity, 0.5)),
+            impute=lambda: safe_div(total_liabilities, book_equity, 0.5))
+
+        altman_inputs = ("working_capital", "retained_earnings", "ebit",
+                         "book_equity", "total_assets", "total_liabilities")
+        altman_is_reliable = res.trustworthy(*altman_inputs)
 
         # 1. Altman Z''
         z_score, altman_zone = cls.calculate_altman_z_double_prime(
@@ -999,6 +1031,8 @@ class RiskFirewallEngine:
             total_assets=total_assets,
             total_liabilities=total_liabilities,
         )
+        if not altman_is_reliable:
+            altman_zone = "unknown"
 
         # 2. Beneish M
         dsri = float(fundamental_data.get("beneish_dsri") or 1.0)
@@ -1021,6 +1055,11 @@ class RiskFirewallEngine:
 
         # 3. 4-Quadrant Category
         quadrant = cls.evaluate_four_quadrants(z_score, m_score)
+        if not altman_is_reliable and quadrant in ("toxic_exclusion", "distressed_turnaround"):
+            # Both of those verdicts are driven by the Z'' threshold, which
+            # here came from market cap rather than the balance sheet. Fall
+            # back to the manipulation reading, which is independent of it.
+            quadrant = "forensic_trap" if beneish_status == "manipulator" else "unknown"
 
         # 4. Rhodes-Kropf
         rkv = cls.calculate_rhodes_kropf(
@@ -1088,6 +1127,8 @@ class RiskFirewallEngine:
             disqualification_reason=disqualification_reason,
             details={
                 "de_ratio": round(de_ratio, 2),
+                "altman_inputs_reliable": altman_is_reliable,
+                "imputed_inputs": res.imputed_fields,
                 "is_sector_trap": rkv["is_sector_trap"],
                 "liquidity_distress": distress_details,
                 "liquidity_distress_penalty": distress_penalty,
@@ -1946,6 +1987,11 @@ class ValuationModelsSuite:
 # MULTI-ALGO ADAPTIVE ERROR WEIGHTING ENGINE (IVW & METRICS)
 # =============================================================================
 
+# Populated by AdaptiveWeightingEngine.calculate_weights on every call, so a
+# caller can tell whether the weighting it asked for is the weighting it got.
+LAST_WEIGHTING_DIAGNOSTICS: Dict[str, Any] = {}
+
+
 class AdaptiveWeightingEngine:
     """
     Computes Inverse Variance Weighting (IVW), evaluates historical prediction
@@ -1962,12 +2008,21 @@ class AdaptiveWeightingEngine:
         if len(values) < 4:
             return values, list(range(len(values)))
 
-        sorted_pairs = sorted(enumerate(values), key=lambda x: x[1])
-        n = len(values)
-        q1_idx = int(n * 0.25)
-        q3_idx = int(n * 0.75)
-        q1 = sorted_pairs[q1_idx][1]
-        q3 = sorted_pairs[q3_idx][1]
+        # Nearest-rank quartiles (int(n * 0.25)) put Q3 on the largest value at
+        # n = 4 and drifted upward for small n, inflating the IQR until the
+        # fence stopped rejecting anything. Use linear interpolation between
+        # order statistics, the standard definition.
+        srt = sorted(values)
+        n = len(srt)
+
+        def _quantile(q: float) -> float:
+            pos = (n - 1) * q
+            lo = int(math.floor(pos))
+            hi = min(lo + 1, n - 1)
+            return srt[lo] + (srt[hi] - srt[lo]) * (pos - lo)
+
+        q1 = _quantile(0.25)
+        q3 = _quantile(0.75)
         iqr = q3 - q1
 
         lower_bound = q1 - 1.5 * iqr
@@ -2054,6 +2109,7 @@ class AdaptiveWeightingEngine:
           - 'rmsle': Root Mean Squared Log Error
           - 'ivw': Scale-Free Inverse Variance Weighting
         """
+        LAST_WEIGHTING_DIAGNOSTICS.clear()
         if not active_models:
             return {}, []
 
@@ -2072,13 +2128,25 @@ class AdaptiveWeightingEngine:
             # --- BLENDED VALUATION (Sector-Calibrated Structural Prior Weights) ---
             sector_prefix = sector_code[:5] if len(sector_code) >= 5 else sector_code
             priors = SECTOR_WEIGHT_PRIORS.get(sector_prefix, SECTOR_WEIGHT_PRIORS.get(sector_code, {}))
-            if priors and any(m in priors for m in surviving_models):
-                raw_priors = {m: priors.get(m, 0.10) for m in surviving_models}
-                total_p = sum(raw_priors.values())
-                weights = {m: raw_priors[m] / total_p for m in surviving_models}
+            named = [m for m in surviving_models if m in priors]
+            unpriored = [m for m in surviving_models if m not in priors]
+            if named:
+                # SECTOR_MODEL_MAP lists more models per sector than
+                # SECTOR_WEIGHT_PRIORS assigns weights to. Handing every
+                # unlisted model a flat 0.10 and renormalising diluted the
+                # stated calibration by however many of them happened to be
+                # active - VNBNK's "35% pb_rhodes_kropf" was really 29%, and
+                # moved whenever an unrelated model dropped in or out. The
+                # prior now means what it says: it is renormalised among the
+                # models it actually names, and the gap in the table is
+                # reported rather than silently filled.
+                total_p = sum(priors[m] for m in named)
+                weights = {m: priors[m] / total_p for m in named}
+                LAST_WEIGHTING_DIAGNOSTICS["unpriored_models"] = unpriored
             else:
                 k = len(surviving_models)
                 weights = {m: 1.0 / k for m in surviving_models}
+                LAST_WEIGHTING_DIAGNOSTICS["fallback"] = "no_sector_prior_equal_weight"
         else:
             # --- OMNIBUS MASTER ENGINE (Loss Metric Weighting) ---
             if historical_errors and len(historical_errors) > 0:
@@ -2113,34 +2181,32 @@ class AdaptiveWeightingEngine:
                     k = len(surviving_models)
                     weights = {m: 1.0 / k for m in surviving_models}
             else:
-                # Instantaneous loss metric error weighting from model valuations vs benchmark median
-                raw_weights = {}
-                p_ref = safe_div(sum(kept_vals), len(kept_vals), 10000.0)
-                for m, val in zip(surviving_models, kept_vals):
-                    clean_v = max(val, 1.0)
-                    clean_p = max(p_ref, 1.0)
-                    if metric == "smape":
-                        score = abs(clean_v - clean_p) / ((clean_v + clean_p) / 2.0) * 100.0
-                        raw_weights[m] = 1.0 / max(score, 1.0)
-                    elif metric == "male":
-                        score = abs(math.log(clean_v) - math.log(clean_p))
-                        raw_weights[m] = 1.0 / max(score, 0.02)
-                    elif metric == "wmape":
-                        score = abs(clean_v - clean_p) / clean_p * 100.0
-                        raw_weights[m] = 1.0 / max(score, 1.0)
-                    elif metric == "rmsle":
-                        score = math.sqrt((math.log(clean_v + 1.0) - math.log(clean_p + 1.0)) ** 2)
-                        raw_weights[m] = 1.0 / max(score, 0.02)
-                    else:  # ivw
-                        score = ((clean_v - clean_p) / clean_p) ** 2
-                        raw_weights[m] = 1.0 / max(score, 0.0025)
-
-                total_raw = sum(raw_weights.values())
-                if total_raw > 0:
-                    weights = {m: raw_weights[m] / total_raw for m in surviving_models}
+                # No measured errors, so there is nothing to weight by.
+                #
+                # This branch used to compute each model's distance from the
+                # mean of the other models and weight by its inverse. That is
+                # not a loss metric - it is herding: the model that disagrees
+                # most with the consensus is damped hardest, which is exactly
+                # the model carrying information. Running 22 models and then
+                # suppressing their disagreement leaves an expensive average.
+                # Worse, no production caller ever supplies historical_errors,
+                # so every "Omnibus - SMAPE" request on the API took this path
+                # while the UI told the user it was error-calibrated.
+                #
+                # Fall back to the sector prior (or equal weight) and record
+                # that the requested metric was not applied.
+                sector_prefix = sector_code[:5] if len(sector_code) >= 5 else sector_code
+                priors = SECTOR_WEIGHT_PRIORS.get(
+                    sector_prefix, SECTOR_WEIGHT_PRIORS.get(sector_code, {}))
+                named = [m for m in surviving_models if m in priors]
+                if named:
+                    total_p = sum(priors[m] for m in named)
+                    weights = {m: priors[m] / total_p for m in named}
                 else:
                     k = len(surviving_models)
                     weights = {m: 1.0 / k for m in surviving_models}
+                LAST_WEIGHTING_DIAGNOSTICS["fallback"] = "no_history_metric_not_applied"
+                LAST_WEIGHTING_DIAGNOSTICS["requested_metric"] = metric
 
         return {m: round(weights.get(m, 0.0), 4) for m in surviving_models}, rejected_models
 

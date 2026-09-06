@@ -21,10 +21,10 @@ import json
 import math
 import time
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, List, Any, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -38,6 +38,10 @@ from services.stock_service import (
     passes_survival_firewall,
     passes_tsmom_filter,
     passes_forensic_filter,
+)
+from services.point_in_time_fundamentals import (
+    FUNDAMENTALS_LAKE_FILE,
+    PointInTimeFundamentals,
 )
 from services.backtest_service import (
     STRATEGY_DEFINITIONS,
@@ -69,10 +73,146 @@ _fv_backtest_cache = SimpleCache()
 # STRATEGY ENUMS & DATA STRUCTURES
 # =============================================================================
 
+
+# How far ahead a fair value must be scored against. Four quarters is the
+# shortest horizon over which a valuation call can plausibly be judged; scoring
+# against the same quarter's price - which is what the code did before - just
+# measures how closely a model tracks the market.
+FORWARD_ERROR_HORIZON_QUARTERS = 4
+
+
+def _parse_iso_date(raw: Any) -> Optional[date]:
+    """Parses a QUARTERS_TIMELINE date string; None when unusable."""
+    if isinstance(raw, date):
+        return raw
+    if not isinstance(raw, str):
+        return None
+    try:
+        return datetime.strptime(raw.strip()[:10], "%Y-%m-%d").date()
+    except (ValueError, AttributeError):
+        return None
+
+
+def _quarter_ordinal(quarter_code: str) -> Optional[int]:
+    """Maps "2021-Q3" to a sortable integer so horizons can be measured."""
+    try:
+        year_text, quarter_text = quarter_code.split("-Q")
+        return int(year_text) * 4 + (int(quarter_text) - 1)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _score_model_history(
+    history: Dict[str, List[Tuple[float, str, float]]],
+    price_by_quarter: Dict[str, float],
+    horizon_quarters: int = FORWARD_ERROR_HORIZON_QUARTERS,
+) -> Dict[str, Dict[str, float]]:
+    """Scores each model's fair values against a LATER quarter's price.
+
+    ``history`` maps model id to (fair_value, quarter_code, price_then) tuples;
+    ``price_by_quarter`` holds every price observed for this symbol so far. A
+    fair value published in 2021-Q1 is compared with the 2022-Q1 price, so a
+    model is rewarded for being right about where the price went, not for
+    agreeing with where it already was.
+
+    Only pairs whose future price is already observed are scored, which keeps
+    the simulation free of lookahead: at quarter Q nothing later than Q exists
+    in ``price_by_quarter``.
+    """
+    scored: Dict[str, Dict[str, float]] = {}
+    for model_id, entries in history.items():
+        predicted: List[float] = []
+        realised: List[float] = []
+        for fair_value, quarter_code, _price_then in entries:
+            origin = _quarter_ordinal(quarter_code)
+            if origin is None:
+                continue
+            target = origin + horizon_quarters
+            target_code = f"{target // 4}-Q{(target % 4) + 1}"
+            future_price = price_by_quarter.get(target_code)
+            if future_price is None or future_price <= 0:
+                continue  # not yet observed; scoring it would be lookahead
+            predicted.append(fair_value)
+            realised.append(future_price)
+        if len(predicted) >= 2:
+            metrics = AdaptiveWeightingEngine.compute_error_metrics(predicted, realised)
+            metrics["n_obs"] = len(predicted)
+            scored[model_id] = metrics
+    return scored
+
+
+
+def _fundamentals_diagnostics(
+    fundamentals_mode: str,
+    provider: Optional[PointInTimeFundamentals],
+    used: int,
+    skipped: int,
+    unmatched_custom_symbols: Sequence[str],
+) -> Dict[str, Any]:
+    """States plainly where this run's fundamentals came from.
+
+    A backtest whose inputs were reconstructed from price is not comparable to
+    one built on filings, and the difference has to travel with the result -
+    otherwise the two render identically and only the second one is evidence.
+    """
+    info: Dict[str, Any] = {
+        "mode": fundamentals_mode,
+        "symbol_quarters_valued": used,
+        "symbol_quarters_skipped_no_filing": skipped,
+    }
+    if unmatched_custom_symbols:
+        info["unmatched_custom_symbols"] = list(unmatched_custom_symbols)
+        info["notes"] = [
+            "These symbols are not in the screener universe and were excluded. "
+            "They were previously replaced with an invented company (price "
+            "30,000, market cap 15,000bn, ROE 18%) and reported as real results."
+        ]
+
+    if fundamentals_mode == FundamentalsMode.SNAPSHOT_PROJECTED:
+        info["is_evidence_of_skill"] = False
+        info["warning"] = SNAPSHOT_PROJECTED_WARNING
+        return info
+
+    info["is_evidence_of_skill"] = True
+    info["lake_file"] = FUNDAMENTALS_LAKE_FILE
+    info["symbols_in_lake"] = provider.symbol_count if provider else 0
+    if provider is not None and provider.is_empty:
+        info["is_evidence_of_skill"] = False
+        info["warning"] = (
+            f"No point-in-time fundamentals are available ({'; '.join(provider.load_errors)}). "
+            f"Populate {FUNDAMENTALS_LAKE_FILE} with quarterly filings keyed by "
+            "symbol and quarter, each carrying a filing_date, or re-run with "
+            "fundamentals_mode=snapshot_projected to reproduce the previous "
+            "price-derived numbers - which are arithmetic, not a track record."
+        )
+    return info
+
+
 class BacktestMode:
     VALUATION_ONLY = "valuation_only"
     SCREENING_ONLY = "screening_only"
     HYBRID_FUNNEL = "hybrid_funnel"
+
+
+class FundamentalsMode:
+    """Where each simulated quarter's financial statements come from."""
+
+    #: Real filings, restricted to what was published by the rebalance date.
+    POINT_IN_TIME = "point_in_time"
+    #: Today's multiples projected onto the historical price. Produces fair
+    #: values that are fixed multiples of the entry price; kept only so the
+    #: legacy numbers remain reproducible, and always labelled as such.
+    SNAPSHOT_PROJECTED = "snapshot_projected"
+
+
+SNAPSHOT_PROJECTED_WARNING = (
+    "Fundamentals were reconstructed from the historical price using today's "
+    "P/E and P/B, so every valuation input is proportional to price and each "
+    "model returns a fixed multiple of the entry price. The universe is also "
+    "today's screener applied to past quarters, which is lookahead and "
+    "survivorship bias. These results describe the arithmetic, not predictive "
+    "skill - do not read them as a track record."
+)
 
 
 @dataclass
@@ -111,9 +251,11 @@ class BacktestMetrics:
     excess_cagr_pct: float
     max_drawdown_pct: float
     benchmark_max_drawdown_pct: float
-    sharpe_ratio: float
-    sortino_ratio: float
-    calmar_ratio: float
+    # None when the denominator (volatility, drawdown) is too small to
+    # divide by meaningfully; a ratio is withheld rather than inflated.
+    sharpe_ratio: Optional[float]
+    sortino_ratio: Optional[float]
+    calmar_ratio: Optional[float]
     win_rate_pct: float
     profit_factor: float
     total_trades: int
@@ -486,16 +628,32 @@ class FairValueBacktestService:
         composite_mode: str = "blended",
         omnibus_metric: str = "smape",
         custom_symbols: Optional[List[str]] = None,
+        fundamentals_mode: str = FundamentalsMode.POINT_IN_TIME,
     ) -> BacktestResultPayload:
         """
         Executes a deterministic, institutional-grade 3-Mode Backtest simulation using Real Data Lake.
+
+        ``fundamentals_mode`` decides where each quarter's financials come from:
+
+        ``point_in_time`` (default)
+            Real quarterly filings from the fundamentals lake, only those
+            published by the rebalance date. Symbols without a filing for a
+            quarter are skipped.
+
+        ``snapshot_projected``
+            The legacy path: today's P/E and P/B applied to the historical
+            price to back out an EPS and BVPS, with the rest of the statements
+            derived from those. Every input is then proportional to price, so
+            each model returns a fixed multiple of the entry price and the
+            simulation cannot detect mispricing. Results in this mode carry a
+            methodology warning and are not evidence of predictive skill.
         """
         cache_key = (
             f"fv_bt_v12_{mode}_{screening_strategy}_{valuation_model_id}_"
             f"{margin_of_safety_pct}_{exit_premium_pct}_{use_dynamic_beta_mos}_"
             f"{filter_z_score_safe}_{filter_rkv_value_trap}_{exchange}_{top_k}_{rebalance_cadence}_"
             f"{fill_mode}_{survival_filter}_{tsmom_filter}_{forensic_filter}_{holding_period_months}_{initial_capital}_{start_year}_{end_year}_"
-            f"{composite_mode}_{omnibus_metric}_{str(custom_symbols)}"
+            f"{composite_mode}_{omnibus_metric}_{str(custom_symbols)}_{fundamentals_mode}"
         )
         cached = _fv_backtest_cache.get(cache_key)
         if cached:
@@ -517,13 +675,18 @@ class FairValueBacktestService:
         if not quant_universe:
             quant_universe = [v for v in ALL_SYMBOLS_MAP.values() if isinstance(v, dict)] if ALL_SYMBOLS_MAP else []
 
+        unmatched_custom_symbols: List[str] = []
         if custom_symbols:
             c_set = set(custom_symbols)
             matched = [s for s in quant_universe if s.get("symbol") in c_set]
-            if matched:
-                quant_universe = matched
-            else:
-                quant_universe = [{"symbol": sym, "price": 30000.0, "market_cap": 15000e9, "roe": 18.0, "roic": 15.0} for sym in custom_symbols]
+            unmatched_custom_symbols = sorted(
+                c_set - {s.get("symbol") for s in matched}
+            )
+            # Symbols the screener does not know used to be replaced with an
+            # invented company - price 30,000, market cap 15,000bn, ROE 18%,
+            # ROIC 15% - and the resulting fiction was rendered exactly like a
+            # real result. They are now reported as unmatched instead.
+            quant_universe = matched
 
         # Find Strategy Display Name
         strat_meta = STRATEGY_DEFINITIONS.get(screening_strategy, {}) if screening_strategy else {}
@@ -574,14 +737,28 @@ class FairValueBacktestService:
         slippage_rate = 0.0010 if fill_mode == "strict" else 0.0
         total_roundtrip_friction = (commission_rate * 2.0) + tax_rate + (slippage_rate * 2.0)
 
-        # Rolling historical model error tracker for Omnibus Master Engine
-        rolling_model_history: Dict[str, Dict[str, List[Tuple[float, float]]]] = defaultdict(lambda: defaultdict(list))
+        # Rolling historical model error tracker for Omnibus Master Engine.
+        # Keyed (symbol, model) -> list of (fair_value, quarter_code, price_at
+        # that quarter). Realised prices are attached later from a LATER
+        # quarter, never the same one - see _score_model_history.
+        rolling_model_history: Dict[str, Dict[str, List[Tuple[float, str, float]]]] = defaultdict(lambda: defaultdict(list))
+
+        # --- Point-in-time fundamentals -------------------------------------
+        use_point_in_time = (fundamentals_mode == FundamentalsMode.POINT_IN_TIME)
+        pit_fundamentals = PointInTimeFundamentals.from_lake() if use_point_in_time else None
+        pit_used = 0
+        pit_skipped = 0
+        quarter_price_index: Dict[str, Dict[str, float]] = defaultdict(dict)
 
         # 3. Simulate Iterative Rebalance Rounds Across Real Timeline
         for q_idx, q_info in enumerate(active_rebalance_quarters):
             q_code = q_info["code"]  # e.g. "2021-Q1"
             curr_year = q_info["year"]
             date_str = q_info["date"]
+            quarter_end_date = _parse_iso_date(date_str)
+            # The simulation stands at quarter end and may only use filings
+            # published on or before that date.
+            rebalance_date = quarter_end_date
             entry_timeline_idx = timeline_quarters.index(q_info) if q_info in timeline_quarters else (q_idx * cadence_step)
 
             # --- STAGE 1: Screening Basket Selection ---
@@ -641,56 +818,77 @@ class FairValueBacktestService:
                 if p_in <= 0:
                     # Stock did not trade or was not listed in this quarter: strictly skip, NO fallback to synthetic prices
                     continue
+                # Observed prices accumulate as the simulation walks forward, so
+                # forward-horizon error scoring can only ever see the past.
+                quarter_price_index[sym][q_code] = p_in
 
                 # Format fundamental data for Valuation Engine
-                # We use snapshot fundamentals scaled only by shares, not by price ratios.
-                # The snapshot fundamentals are the best point-in-time data available.
-                fdata = dict(item)
-                fdata["symbol"] = sym
-                fdata["price"] = p_in
+                if use_point_in_time:
+                    filing = pit_fundamentals.get(
+                        sym, q_code, as_of=rebalance_date, quarter_end=quarter_end_date
+                    )
+                    if filing is None:
+                        # No filing published by this date. Skipping is the
+                        # only honest option: the alternative is to invent one.
+                        pit_skipped += 1
+                        continue
+                    fdata = dict(filing)
+                    fdata["symbol"] = sym
+                    fdata["price"] = p_in
+                    fdata["sector_code"] = item.get("sector_code") or filing.get("sector_code")
+                    shares_val = float(fdata.get("shares_out") or 0.0)
+                    if shares_val > 0:
+                        fdata["market_cap"] = p_in * shares_val
+                    pit_used += 1
+                else:
+                    # Legacy snapshot_projected path. Retained so the previous
+                    # numbers stay reproducible, but every value below is a
+                    # multiple of p_in - eps and bvps are literally price
+                    # divided by a multiple, and the whole statement set is
+                    # built from those two. That is why results in this mode
+                    # carry SNAPSHOT_PROJECTED_WARNING.
+                    fdata = dict(item)
+                    fdata["symbol"] = sym
+                    fdata["price"] = p_in
 
-                shares_val = float(item.get("shares_out") or 200e6)
-                fdata["shares_out"] = shares_val
-                fdata["market_cap"] = p_in * shares_val
+                    shares_val = float(item.get("shares_out") or 200e6)
+                    fdata["shares_out"] = shares_val
+                    fdata["market_cap"] = p_in * shares_val
 
-                # Derive per-share metrics from snapshot multiples using the historical price
-                base_pe = float(item.get("pe") or 12.0)
-                base_pb = float(item.get("pb") or 1.5)
+                    base_pe = float(item.get("pe") or 12.0)
+                    base_pb = float(item.get("pb") or 1.5)
 
-                # EPS is derived from historical price / snapshot P/E multiple
-                # This is unbiased: we're using the P/E multiple (fundamental ratio)
-                # and the actual historical price to back out a consistent EPS.
-                fdata["eps"] = max(safe_div(p_in, max(base_pe, 0.5), p_in / 12.0), 50.0)
-                fdata["bvps"] = max(safe_div(p_in, max(base_pb, 0.5), p_in / 1.5), 500.0)
-                fdata["tbvps"] = fdata["bvps"] * 0.9
+                    fdata["eps"] = max(safe_div(p_in, max(base_pe, 0.5), p_in / 12.0), 50.0)
+                    fdata["bvps"] = max(safe_div(p_in, max(base_pb, 0.5), p_in / 1.5), 500.0)
+                    fdata["tbvps"] = fdata["bvps"] * 0.9
 
-                # Proportional financial statements
-                fdata["net_income"] = fdata["eps"] * shares_val
-                net_margin = float(item.get("net_margin") or 0.10)
-                fdata["revenue"] = max(
-                    safe_div(fdata["net_income"], max(net_margin, 0.02), fdata["net_income"] * 10.0),
-                    p_in * shares_val * 0.5,
-                )
-                fdata["ebit"] = fdata["net_income"] / 0.80
-                fdata["ebitda"] = fdata["ebit"] * 1.25
-                fdata["debt"] = fdata["bvps"] * shares_val * float(item.get("de_ratio") or 0.50)
-                fdata["interest_bearing_debt"] = fdata["debt"] * 0.80
-                fdata["interest_expense"] = fdata["interest_bearing_debt"] * 0.07
-                fdata["cash"] = fdata["market_cap"] * 0.15
-                fdata["cfo"] = fdata["net_income"] * 1.10
-                fdata["fcf"] = fdata["cfo"] * 0.70
-                fdata["affo"] = fdata["net_income"] * 0.90
-                fdata["dividend_per_share"] = max(
-                    fdata["eps"] * float(item.get("dividend_yield") or 0.02), 0.0
-                )
-                fdata["roe"] = float(item.get("roe") or 16.0)
-                fdata["roic"] = float(item.get("roic") or 14.0)
-                fdata["beta"] = float(item.get("beta") or 1.0)
-                de_val = float(item.get("de_ratio") or 0.50)
-                fdata["book_equity"] = fdata["bvps"] * shares_val
-                fdata["total_liabilities"] = fdata["book_equity"] * de_val
-                fdata["total_assets"] = fdata["book_equity"] + fdata["total_liabilities"]
-                fdata["debt"] = fdata["total_liabilities"]
+                    fdata["net_income"] = fdata["eps"] * shares_val
+                    net_margin = float(item.get("net_margin") or 0.10)
+                    fdata["revenue"] = max(
+                        safe_div(fdata["net_income"], max(net_margin, 0.02), fdata["net_income"] * 10.0),
+                        p_in * shares_val * 0.5,
+                    )
+                    fdata["ebit"] = fdata["net_income"] / 0.80
+                    fdata["ebitda"] = fdata["ebit"] * 1.25
+                    fdata["interest_bearing_debt"] = (
+                        fdata["bvps"] * shares_val * float(item.get("de_ratio") or 0.50) * 0.80
+                    )
+                    fdata["interest_expense"] = fdata["interest_bearing_debt"] * 0.07
+                    fdata["cash"] = fdata["market_cap"] * 0.15
+                    fdata["cfo"] = fdata["net_income"] * 1.10
+                    fdata["fcf"] = fdata["cfo"] * 0.70
+                    fdata["affo"] = fdata["net_income"] * 0.90
+                    fdata["dividend_per_share"] = max(
+                        fdata["eps"] * float(item.get("dividend_yield") or 0.02), 0.0
+                    )
+                    fdata["roe"] = float(item.get("roe") or 16.0)
+                    fdata["roic"] = float(item.get("roic") or 14.0)
+                    fdata["beta"] = float(item.get("beta") or 1.0)
+                    de_val = float(item.get("de_ratio") or 0.50)
+                    fdata["book_equity"] = fdata["bvps"] * shares_val
+                    fdata["total_liabilities"] = fdata["book_equity"] * de_val
+                    fdata["total_assets"] = fdata["book_equity"] + fdata["total_liabilities"]
+                    fdata["debt"] = fdata["total_liabilities"]
 
                 # Target Fair Value & Risk Checks: Check Precomputed Lake first
                 val_cached_entry = val_records.get(f"{sym}:{q_code}")
@@ -728,15 +926,11 @@ class FairValueBacktestService:
                     rkv_growth_val = float(val_cached_entry.get("rkv_growth_vb", 1.0))
                 else:
                     # Fallback to exact dynamic Valuation Engine execution
-                    model_hist_errors = {}
-                    if sym in rolling_model_history:
-                        for m_id, hist_pairs in rolling_model_history[sym].items():
-                            if len(hist_pairs) >= 2:
-                                fv_s = [p[0] for p in hist_pairs]
-                                p_s = [p[1] for p in hist_pairs]
-                                err_m = AdaptiveWeightingEngine.compute_error_metrics(fv_s, p_s)
-                                err_m["n_obs"] = len(fv_s)
-                                model_hist_errors[m_id] = err_m
+                    model_hist_errors = _score_model_history(
+                        rolling_model_history.get(sym, {}),
+                        quarter_price_index.get(sym, {}),
+                        horizon_quarters=FORWARD_ERROR_HORIZON_QUARTERS,
+                    )
 
                     val_res: ValuationMatrixResult = self.valuation_engine.get_comprehensive_valuation(
                         symbol=sym,
@@ -746,11 +940,19 @@ class FairValueBacktestService:
                         history_errors=model_hist_errors if model_hist_errors else None,
                     )
 
-                    # Record current quarter model valuations for future rolling errors
+                    # Record this quarter's model valuations against the
+                    # quarter they were made in. The error is scored later
+                    # against a LATER quarter's price: the previous code paired
+                    # each fair value with the price of the very same quarter,
+                    # so a model was rewarded for agreeing with the market it
+                    # was supposed to be judging, and any model that correctly
+                    # identified a 40% mispricing was scored as 40% wrong.
                     if valuation_model_id in ["composite_fair_value", "all"]:
                         for m in val_res.models:
                             if m.fair_value > 0:
-                                rolling_model_history[sym][m.model_id].append((m.fair_value, p_in))
+                                rolling_model_history[sym][m.model_id].append(
+                                    (m.fair_value, q_code, p_in)
+                                )
 
                     # Toxic Firewall checks
                     is_toxic = val_res.risk_firewall.four_quadrant_category == "toxic_exclusion"
@@ -991,9 +1193,22 @@ class FairValueBacktestService:
             ann_std = float(np.std(all_rets)) if len(all_rets) > 1 else 15.0
             ann_downside_std = ann_std * 0.65
 
-        sharpe = round((cagr_strat - rf_annual_pct) / max(ann_std, 1.0), 2)
-        sortino = round((cagr_strat - rf_annual_pct) / max(ann_downside_std, 1.0), 2)
-        calmar = round(cagr_strat / max(max_dd, 1.0), 2)
+        # These denominators are percentages. Clamping them at 1.0 meant any
+        # strategy with volatility under 1% a year, or a drawdown under 1%,
+        # had its Sharpe and Calmar divided by 1.0 instead of by the real
+        # figure - inflating the ratio without bound and turning a flat equity
+        # curve into a spectacular one. A ratio with no meaningful denominator
+        # is reported as unavailable rather than as a large number.
+        MIN_MEANINGFUL_PCT = 0.01  # one basis point of annualised percentage
+
+        def _ratio(numerator: float, denominator: float) -> Optional[float]:
+            if denominator is None or denominator < MIN_MEANINGFUL_PCT:
+                return None
+            return round(numerator / denominator, 2)
+
+        sharpe = _ratio(cagr_strat - rf_annual_pct, ann_std)
+        sortino = _ratio(cagr_strat - rf_annual_pct, ann_downside_std)
+        calmar = _ratio(cagr_strat, max_dd)
 
         # FIX BUG-4: Beta via regression, Alpha via Jensen's formula
         eq_bm_vals = [pt["benchmark_equity"] for pt in equity_curve_data]
@@ -1109,6 +1324,13 @@ class FairValueBacktestService:
                 },
                 "total_universe_tested": len(quant_universe),
                 "total_trades_generated": len(sorted_trades),
+                "fundamentals": _fundamentals_diagnostics(
+                    fundamentals_mode=fundamentals_mode,
+                    provider=pit_fundamentals,
+                    used=pit_used,
+                    skipped=pit_skipped,
+                    unmatched_custom_symbols=unmatched_custom_symbols,
+                ),
             }
         )
 
@@ -1172,8 +1394,8 @@ class FairValueBacktestService:
                 cagr = float(np.clip(cagr, -50.0, 100.0))
 
                 # Sharpe: avg / std (per-trade, not annualised — directional signal only)
-                std_ret = float(np.std(matched_rets, ddof=1)) if n > 1 else max(abs(avg_ret), 1.0)
-                sharpe = round(avg_ret / max(std_ret, 0.1), 2)
+                std_ret = float(np.std(matched_rets, ddof=1)) if n > 1 else abs(avg_ret)
+                sharpe = round(avg_ret / std_ret, 2) if std_ret >= 0.01 else None
 
                 # Max drawdown proxy: worst single trade loss (conservative)
                 worst = min(matched_rets)

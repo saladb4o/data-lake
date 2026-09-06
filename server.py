@@ -1472,6 +1472,15 @@ def api_run_fair_value_backtest(
     end_year: int = Query(2026, description="End year"),
     composite_mode: str = Query("blended", description="blended or omnibus"),
     omnibus_metric: str = Query("smape", description="smape, male, wmape, rmsle, ivw"),
+    fundamentals_mode: str = Query(
+        "point_in_time",
+        description=(
+            "point_in_time (real quarterly filings, published by the rebalance "
+            "date; symbols without one are skipped) or snapshot_projected "
+            "(legacy: today's multiples projected onto historical prices, which "
+            "makes every fair value a fixed multiple of the entry price)"
+        ),
+    ),
 ):
     """
     Executes an Institutional 3-Mode Modular Fair Value Quant Backtest across the Vietnamese equity universe.
@@ -1499,6 +1508,7 @@ def api_run_fair_value_backtest(
             end_year=end_year,
             composite_mode=composite_mode,
             omnibus_metric=omnibus_metric,
+            fundamentals_mode=fundamentals_mode,
         )
         return JSONResponse(content={"status": "success", "data": res.to_dict()})
     except Exception as e:

@@ -295,9 +295,18 @@ class TestNumericMetricsSanity:
             "winning_trades", "losing_trades", "avg_trade_return_pct", "avg_holding_days",
             "alpha_pct", "beta"
         ]
+        # Sharpe, Sortino and Calmar are None when their denominator
+        # (volatility, drawdown) is below one basis point - there is no
+        # meaningful ratio to report, and the old code returned an inflated
+        # one by clamping the denominator at 1.0. None is an answer; NaN and
+        # Inf are still forbidden.
+        withholdable = {"sharpe_ratio", "sortino_ratio", "calmar_ratio"}
         for k in required_numeric_keys:
             assert k in m, f"Missing metric key: {k}"
             val = m[k]
+            if val is None:
+                assert k in withholdable, f"Metric {k} must not be None"
+                continue
             assert isinstance(val, (int, float)), f"Metric {k} is not numeric: {val} ({type(val)})"
             assert math.isfinite(val), f"Metric {k} is not finite: {val}"
 
@@ -311,9 +320,11 @@ class TestNumericMetricsSanity:
             custom_symbols=["HPG"],
         )
         m = res.metrics
-        assert math.isfinite(m["sharpe_ratio"])
-        assert math.isfinite(m["sortino_ratio"])
-        assert math.isfinite(m["calmar_ratio"])
+        # A single trade leaves nothing to compute a volatility from, so the
+        # risk-adjusted ratios are withheld rather than fabricated. Either a
+        # finite number or None is acceptable; NaN and Inf are not.
+        for key in ("sharpe_ratio", "sortino_ratio", "calmar_ratio"):
+            assert m[key] is None or math.isfinite(m[key]), f"{key} = {m[key]!r}"
         assert math.isfinite(m["profit_factor"])
         assert math.isfinite(m["beta"])
         assert math.isfinite(m["alpha_pct"])
