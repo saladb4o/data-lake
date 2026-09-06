@@ -7,26 +7,26 @@
 ## Feature Inventory & Test Mapping
 | # | Feature | Source (Requirement) | Tier 1 | Tier 2 | Tier 3 | Tier 4 |
 |---|---|---|:---:|:---:|:---:|:---:|
-| 1 | 5Y 3-Way Synchronized Forecasting | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
-| 2 | Strict Balance Sheet Closure ($|\text{TA} - (\text{TL}+\text{TE})| < 10^{-5}$) | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ (100% VN30) |
-| 3 | Statement Link 1 ($NPAT \to \text{Retained Profits}$) | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
-| 4 | Statement Link 2 ($\Delta \text{Cash} \to \text{Cash}$) | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
-| 5 | Direct Method CFS Reconciliation | ORIGINAL_REQUEST §R1 | 5 | 5 | ✓ | ✓ |
-| 6 | Working Capital Efficiency Ratios (DSO, DIO, DPO, CCC) | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
-| 7 | Mean-Reverting NWC Schedule | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ |
-| 8 | Negative CCC Retail Handling | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ (MWG) |
-| 9 | Financial Sector Isolation (Banks/Brokers/Insurers) | ORIGINAL_REQUEST §R2 | 5 | 5 | ✓ | ✓ (VCB, SSI) |
-| 10 | Debt Amortization & Roll-Forward | ORIGINAL_REQUEST §R4 | 5 | 5 | ✓ | ✓ |
-| 11 | Damodaran Synthetic Ratings & Spreads | ORIGINAL_REQUEST §R4 | 5 | 5 | ✓ | ✓ |
-| 12 | Fixed-Point Circularity Solver | ORIGINAL_REQUEST §R4 | 5 | 5 | ✓ | ✓ |
-| 13 | Solvency Dividend & Covenant Firewall | ORIGINAL_REQUEST §R4 | 5 | 5 | ✓ | ✓ |
-| 14 | Liquidity Distress Firewall & Risk Penalties | ORIGINAL_REQUEST §R3 | 5 | 5 | ✓ | ✓ |
-| 15 | Dynamic Margin of Safety Integration | ORIGINAL_REQUEST §R3 | 5 | 5 | ✓ | ✓ |
-| 16 | 7-Tab Modano Excel Workbook Generator | ORIGINAL_REQUEST §R5 | 5 | 5 | ✓ | ✓ |
-| 17 | Live Dynamic Excel Formulas (`SUM`, `IF`, cell links) | ORIGINAL_REQUEST §R5 | 5 | 5 | ✓ | ✓ |
-| 18 | 2D Valuation Sensitivity Matrix (5x5 WACC vs g) | ORIGINAL_REQUEST §R5 | 5 | 5 | ✓ | ✓ |
-| 19 | Balance Check Audit Badge & Formatting | ORIGINAL_REQUEST §R5 | 5 | 5 | ✓ | ✓ |
-| 20 | FastAPI REST Endpoints (`/3-way-forecast`, `/export-excel`) | ORIGINAL_REQUEST §R5 | 5 | 5 | ✓ | ✓ |
+| 1 | 5Y 3-Way Synchronized Forecasting | docs/ORIGINAL_REQUEST.md §R1 | 5 | 5 | ✓ | ✓ |
+| 2 | Strict Balance Sheet Closure ($|\text{TA} - (\text{TL}+\text{TE})| < 10^{-5}$) | docs/ORIGINAL_REQUEST.md §R1 | 5 | 5 | ✓ | ✓ (100% VN30) |
+| 3 | Statement Link 1 ($NPAT \to \text{Retained Profits}$) | docs/ORIGINAL_REQUEST.md §R1 | 5 | 5 | ✓ | ✓ |
+| 4 | Statement Link 2 ($\Delta \text{Cash} \to \text{Cash}$) | docs/ORIGINAL_REQUEST.md §R1 | 5 | 5 | ✓ | ✓ |
+| 5 | Direct Method CFS Reconciliation | docs/ORIGINAL_REQUEST.md §R1 | 5 | 5 | ✓ | ✓ |
+| 6 | Working Capital Efficiency Ratios (DSO, DIO, DPO, CCC) | docs/ORIGINAL_REQUEST.md §R2 | 5 | 5 | ✓ | ✓ |
+| 7 | Mean-Reverting NWC Schedule | docs/ORIGINAL_REQUEST.md §R2 | 5 | 5 | ✓ | ✓ |
+| 8 | Negative CCC Retail Handling | docs/ORIGINAL_REQUEST.md §R2 | 5 | 5 | ✓ | ✓ (MWG) |
+| 9 | Financial Sector Isolation (Banks/Brokers/Insurers) | docs/ORIGINAL_REQUEST.md §R2 | 5 | 5 | ✓ | ✓ (VCB, SSI) |
+| 10 | Debt Amortization & Roll-Forward | docs/ORIGINAL_REQUEST.md §R4 | 5 | 5 | ✓ | ✓ |
+| 11 | Damodaran Synthetic Ratings & Spreads | docs/ORIGINAL_REQUEST.md §R4 | 5 | 5 | ✓ | ✓ |
+| 12 | Fixed-Point Circularity Solver | docs/ORIGINAL_REQUEST.md §R4 | 5 | 5 | ✓ | ✓ |
+| 13 | Solvency Dividend & Covenant Firewall | docs/ORIGINAL_REQUEST.md §R4 | 5 | 5 | ✓ | ✓ |
+| 14 | Liquidity Distress Firewall & Risk Penalties | docs/ORIGINAL_REQUEST.md §R3 | 5 | 5 | ✓ | ✓ |
+| 15 | Dynamic Margin of Safety Integration | docs/ORIGINAL_REQUEST.md §R3 | 5 | 5 | ✓ | ✓ |
+| 16 | 7-Tab Modano Excel Workbook Generator | docs/ORIGINAL_REQUEST.md §R5 | 5 | 5 | ✓ | ✓ |
+| 17 | Live Dynamic Excel Formulas (`SUM`, `IF`, cell links) | docs/ORIGINAL_REQUEST.md §R5 | 5 | 5 | ✓ | ✓ |
+| 18 | 2D Valuation Sensitivity Matrix (5x5 WACC vs g) | docs/ORIGINAL_REQUEST.md §R5 | 5 | 5 | ✓ | ✓ |
+| 19 | Balance Check Audit Badge & Formatting | docs/ORIGINAL_REQUEST.md §R5 | 5 | 5 | ✓ | ✓ |
+| 20 | FastAPI REST Endpoints (`/3-way-forecast`, `/export-excel`) | docs/ORIGINAL_REQUEST.md §R5 | 5 | 5 | ✓ | ✓ |
 
 ## Test Architecture
 - **Test Runner**: `pytest -v tests/`
