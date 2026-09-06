@@ -22,7 +22,7 @@ from services.stock_service import VN30_SYMBOLS
 
 
 @pytest.fixture
-def temp_export_dir(tmp_path):
+def temp_export_dir(tmp_path, screener_snapshot):
     """Provides a temporary directory for test spreadsheet artifacts."""
     export_dir = tmp_path / "model_exports"
     export_dir.mkdir(parents=True, exist_ok=True)
@@ -30,19 +30,19 @@ def temp_export_dir(tmp_path):
 
 
 @pytest.fixture
-def fpt_forecast_result():
+def fpt_forecast_result(screener_snapshot):
     """Builds a verified 5-year forecast for FPT."""
     return ThreeStatementEngine.build_forecast_from_screener("FPT")
 
 
 @pytest.fixture
-def hpg_forecast_result():
+def hpg_forecast_result(screener_snapshot):
     """Builds a verified 5-year forecast for HPG."""
     return ThreeStatementEngine.build_forecast_from_screener("HPG")
 
 
 @pytest.fixture
-def vcb_forecast_result():
+def vcb_forecast_result(screener_snapshot):
     """Builds a verified 5-year forecast for VCB (Financial sector)."""
     return ThreeStatementEngine.build_forecast_from_screener("VCB")
 
@@ -54,7 +54,7 @@ def vcb_forecast_result():
 class TestTier1WorkbookGeneration:
     """Tier 1: Workbook creation, path resolution, and non-empty file validation."""
 
-    def test_export_generates_valid_file(self, fpt_forecast_result, temp_export_dir):
+    def test_export_generates_valid_file(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_3way_model.xlsx")
         saved_path = FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -62,7 +62,7 @@ class TestTier1WorkbookGeneration:
         assert os.path.getsize(saved_path) > 5000 # Non-trivial binary size (>5KB)
         assert saved_path.endswith(".xlsx")
 
-    def test_raw_unit_scale_export(self, hpg_forecast_result, temp_export_dir):
+    def test_raw_unit_scale_export(self, hpg_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "HPG_raw_model.xlsx")
         saved_path = FinancialModelExporter.export_to_excel(hpg_forecast_result, out_file, scale_unit="raw")
         assert os.path.exists(saved_path)
@@ -86,7 +86,7 @@ class TestTier2SheetArchitecture:
         "Valuation & Sensitivity",
     ]
 
-    def test_exact_7_tab_architecture(self, fpt_forecast_result, temp_export_dir):
+    def test_exact_7_tab_architecture(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_tabs_test.xlsx")
         FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -95,7 +95,7 @@ class TestTier2SheetArchitecture:
         for expected_name in self.EXPECTED_SHEETS:
             assert expected_name in wb.sheetnames, f"Missing sheet: {expected_name}"
 
-    def test_dashboard_is_active_sheet(self, fpt_forecast_result, temp_export_dir):
+    def test_dashboard_is_active_sheet(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_active_tab_test.xlsx")
         FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -110,7 +110,7 @@ class TestTier2SheetArchitecture:
 class TestTier3DynamicFormulas:
     """Tier 3: Verification of live Excel formulas and cross-sheet links."""
 
-    def test_income_statement_formulas(self, fpt_forecast_result, temp_export_dir):
+    def test_income_statement_formulas(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_is_formulas.xlsx")
         FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -132,7 +132,7 @@ class TestTier3DynamicFormulas:
         assert npat_formula.startswith("=")
         assert "C17" in npat_formula and "C18" in npat_formula
 
-    def test_balance_sheet_closure_formulas_and_checks(self, hpg_forecast_result, temp_export_dir):
+    def test_balance_sheet_closure_formulas_and_checks(self, hpg_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "HPG_bs_formulas.xlsx")
         FinancialModelExporter.export_to_excel(hpg_forecast_result, out_file)
         
@@ -153,7 +153,7 @@ class TestTier3DynamicFormulas:
         assert "IF(" in status_formula
         assert "BALANCED" in status_formula
 
-    def test_cash_flow_cross_sheet_links(self, fpt_forecast_result, temp_export_dir):
+    def test_cash_flow_cross_sheet_links(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_cfs_links.xlsx")
         FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -170,7 +170,7 @@ class TestTier3DynamicFormulas:
         assert end_cash_formula.startswith("=")
         assert "C25" in end_cash_formula and "C26" in end_cash_formula
 
-    def test_valuation_sensitivity_2d_matrix_formulas(self, fpt_forecast_result, temp_export_dir):
+    def test_valuation_sensitivity_2d_matrix_formulas(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_sensitivity_test.xlsx")
         FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -190,7 +190,7 @@ class TestTier3DynamicFormulas:
 class TestTier4FormattingAndStyling:
     """Tier 4: Verification of font colors, navy headers, and number formatting."""
 
-    def test_header_navy_styling(self, fpt_forecast_result, temp_export_dir):
+    def test_header_navy_styling(self, fpt_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "FPT_styles_test.xlsx")
         FinancialModelExporter.export_to_excel(fpt_forecast_result, out_file)
         
@@ -201,7 +201,7 @@ class TestTier4FormattingAndStyling:
         assert ws_dash["A1"].font.bold is True
         assert ws_dash["A1"].fill.start_color.rgb == f"00{COLOR_NAVY_HEADER}" or ws_dash["A1"].fill.start_color.rgb == COLOR_NAVY_HEADER
 
-    def test_number_formats_applied(self, hpg_forecast_result, temp_export_dir):
+    def test_number_formats_applied(self, hpg_forecast_result, temp_export_dir, screener_snapshot):
         out_file = os.path.join(temp_export_dir, "HPG_num_fmt_test.xlsx")
         FinancialModelExporter.export_to_excel(hpg_forecast_result, out_file)
         
@@ -226,7 +226,7 @@ class TestTier5VN30ExportSweep:
     """Tier 5: Validates that multiple diverse VN30 constituents export cleanly."""
 
     @pytest.mark.parametrize("sym", ["FPT", "HPG", "VCB", "MWG", "VIC"])
-    def test_vn30_sample_constituents_export_successfully(self, sym, temp_export_dir):
+    def test_vn30_sample_constituents_export_successfully(self, sym, temp_export_dir, screener_snapshot):
         res = ThreeStatementEngine.build_forecast_from_screener(sym)
         out_file = os.path.join(temp_export_dir, f"{sym}_model.xlsx")
         saved_path = FinancialModelExporter.export_to_excel(res, out_file)
@@ -238,7 +238,7 @@ class TestTier5VN30ExportSweep:
         assert len(wb.sheetnames) == 7
 
     @pytest.mark.parametrize("sym", ["HPG", "FPT", "MWG", "VCB"])
-    def test_zero_formula_errors_across_all_sheets(self, sym, temp_export_dir):
+    def test_zero_formula_errors_across_all_sheets(self, sym, temp_export_dir, screener_snapshot):
         """Validates that zero formula errors (#REF!, #NAME?, #VALUE!, #DIV/0!) exist across all 7 sheets."""
         res = ThreeStatementEngine.build_forecast_from_screener(sym)
         out_file = os.path.join(temp_export_dir, f"{sym}_formula_audit.xlsx")

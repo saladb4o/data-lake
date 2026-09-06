@@ -166,7 +166,20 @@ SECTOR_MODEL_MAP: Dict[str, List[str]] = {
     "2000":  ["industrial_apv", "ev_ebitda", "dcf_2stage_mckinsey", "buffett_owners_earnings", "blended_pe", "p_fcf"],
 }
 
-# Pre-calibrated Sector IVW Model Weight Priors (Tier 1 Fallback)
+# Sector model weight priors.
+#
+# These were labelled "Pre-calibrated ... IVW" but nothing in this repository
+# derives them from data, and no calibration run produced them: they are
+# judgement about which model suits which sector, which is a legitimate prior
+# but not a measurement. Naming them after inverse-variance weighting implied
+# they came from measured model variances, which they did not.
+#
+# To replace them with real numbers, run
+# ``scripts/calibrate_sector_weight_priors.py`` once the point-in-time
+# fundamentals lake exists; it measures each model's forward error by sector
+# and prints a drop-in table. Until then, treat these as opinions and read
+# LAST_WEIGHTING_DIAGNOSTICS["unpriored_models"] to see which sector-applicable
+# models the table does not cover.
 SECTOR_WEIGHT_PRIORS: Dict[str, Dict[str, float]] = {
     "VNFIN": {"pb_rhodes_kropf": 0.35, "bank_equity_cash_flow": 0.30, "rim_edwards_bell_ohlson": 0.20, "blended_pe": 0.15},
     "VNBNK": {"pb_rhodes_kropf": 0.35, "bank_equity_cash_flow": 0.30, "rim_edwards_bell_ohlson": 0.20, "blended_pe": 0.15},

@@ -81,32 +81,109 @@ while the UI told the user it was error-calibrated.
 | Metrics | Risk-adjusted ratios are withheld (`None`) rather than inflated when the denominator is below a basis point. |
 | Screener | Pillar weights renormalise over reported factors; the composite is shrunk toward the midpoint in proportion to missing data; `factor_coverage_pct` is published. |
 
-## 3. Open items
+## 3. Second pass: the rest of services/
+
+An audit of the remaining twenty-odd service modules found the same disease in
+four more places, plus three unrelated defects.
+
+### 3.1 Market data invented from the ticker's spelling
+
+`ALL_SYMBOLS_MAP` filled a missing reference price with
+`15.0 + crc32(symbol) % 85` and a missing market cap with
+`1500 + crc32(symbol) % 145000`. Both are stable across runs, so they read as
+observations rather than as a function of how a ticker is spelled - and this
+map feeds the screener, the peer engine and the backtest universe fallback.
+Fourteen downstream read sites then re-invented the same values
+(`.get("ref", 50.0)`, `.get("market_cap", 25000)`, `.get("eps", 3500.0)`).
+
+`compute_algorithmic_peers` invented every candidate's market cap, ROE, ROA,
+P/E and P/B from the same hash and ranked "similarity" over them, so for a
+thinly covered ticker the peer list was a ranking over the letters of the
+tickers. Its `change_pct` default used `abs(hash(sym))`, which is seeded per
+process, so the same peer showed a different daily move after every restart.
+
+### 3.2 A second valuation engine with the same circularity
+
+`get_company_earnings_engine` - the single-stock deep dive - computed
+`bvps = price / P/B` and `eps = price / P/E`, so its "Justified P/B" and
+"Forward P/E" scenarios reduced to the entry price times a ratio. Its fallback
+built a whole synthetic company (20% gross margin, 10% operating margin, D/E
+0.5, all four pillars at exactly 50) for any uncovered symbol and ran the full
+6-model x 3-scenario matrix on it.
+
+### 3.3 A fabricated institutional cost basis
+
+`smart_money_flow_engine` reported `foreign_vwap_30d = current_price * 0.97`
+and `foreign_vwap_90d = current_price * 0.94`, so "distance to foreign cost
+basis" was always exactly -3.09% (or +2.91% on the other branch) whatever
+foreign investors actually paid, and the support/resistance verdict derived
+from it never varied. Proprietary desk flow was likewise derived from turnover
+with fixed 3-7% coefficients.
+
+### 3.4 Three-statement forecasts from market cap
+
+`three_statement_engine` defaulted a missing market cap to 10,000, floored it
+at 100bn, and backed revenue out of it via a P/S multiple - and COGS, SG&A and
+EBIT are all fractions of revenue, so the whole projected income statement
+moved with the share price. It also read `data/screener_snapshot.json`
+directly, bypassing the shared resolver, so it could forecast from a different
+snapshot than the app was serving.
+
+### 3.5 Unrelated defects
+
+- The Sharpe/Calmar denominator clamp fixed in `fair_value_backtest_service`
+  was present in both sibling backtest services and had been missed.
+- The current year was written in as the literal `2026` at eighteen call
+  sites. Correct during 2026, silently wrong from 1 January 2027.
+- The `network` test marker was applied to whole modules: 283 of the 317 tests
+  it excluded run fine offline and had never run in CI. That hid a broken
+  `test_orchestrator_scoring` (its own docstring says it makes no network
+  calls) and five stale expectations in `test_adversarial_stress`. Tiering is
+  now per test; CI collection went from 735 to 1,009.
+
+### 3.6 What the export and forecast suites were actually testing
+
+`build_forecast_from_screener` reads a local snapshot file. Under test
+isolation that file is absent, so the export and forecast suites - 51 tests
+across `test_financial_model_exporter`, `test_adversarial_excel_universe_
+verification` and the VN30 balance checks - were building models for invented
+companies while appearing to test HPG, FPT and VCB. The VN30 test asserted the
+accounting identity balances, which invented figures always do. They now run
+against a `screener_snapshot` fixture with stated inputs.
+
+---
+
+## 4. Open items
 
 1. **The fundamentals lake is empty.** `point_in_time` is the default and has
    nothing to read until `data/historical_fundamentals.json` is built.
    `scripts/build_historical_fundamentals.py` fetches it from VNDIRECT Finfo;
-   it has unit-tested transformation logic but has **not** been run end to end
-   against the live API.
+   its transformation logic is unit-tested but it has **not** been run end to
+   end against the live API (this sandbox's proxy refuses that host).
 
 2. **Filing dates are estimated.** The VNDIRECT endpoint does not expose them,
    so the builder writes quarter end + 45 days and marks
    `filing_date_is_estimated`. Real filing dates would tighten the
-   point-in-time boundary and should replace the estimate when available.
+   point-in-time boundary.
 
-3. **`data/pdf_lake/extracted_bctc_lake.json` is 104 MB and 98.7% empty** -
-   1,769 records, 22 with non-empty `extracted_data`, 1,748 with `year: None`.
-   It is not a usable fundamentals source in its current state.
+3. **`data/pdf_lake/extracted_bctc_lake.json` is 99.7 MB and 0.4% usable.**
+   Measured by `scripts/audit_bctc_lake.py`: 1,769 records, 22 with any
+   extracted data, **7 with actual statement items, covering 4 symbols**.
+   1,748 have `year: None`; 13 of the 22 parsed documents are
+   `SCANNED_IMAGE`, which needs OCR. It is not a fundamentals source.
 
 4. **The fair-value backtest result panel has no markup.** `fvBtWinnerTitle`,
    `fvBtYearlyTableBody` and the rest are read by `static/js/app.js` but exist
    nowhere in `static/index.html`, so that render path writes into nothing.
+   The provenance banner helper creates its own element and no-ops when there
+   is no anchor, so it will work once the panel exists.
 
-5. **Sector weight priors are undocumented opinions.** `SECTOR_WEIGHT_PRIORS`
-   is labelled "Pre-calibrated" with no derivation anywhere in the repository.
-   The dilution bug is fixed, but the numbers themselves still need a stated
-   basis or an honest relabelling.
+5. **Sector weight priors are still opinions.** `SECTOR_WEIGHT_PRIORS` is now
+   labelled honestly rather than as "pre-calibrated IVW", and
+   `scripts/calibrate_sector_weight_priors.py` will derive real ones from
+   measured forward errors - but it needs the fundamentals lake from item 1.
 
-6. **Seven tests pass only in full-suite order.** Two in
-   `test_orchestrator_scoring.py` and five in `test_adversarial_stress.py` fail
-   when run in isolation, on unmodified code. Pre-existing; not investigated.
+6. **Proprietary desk flow and foreign VWAP need a real feed.** Both are now
+   reported as estimated or unavailable rather than fabricated, which is
+   correct but leaves the feature empty until per-session foreign volume is
+   available.

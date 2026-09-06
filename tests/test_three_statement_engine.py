@@ -337,7 +337,7 @@ class TestTier5VN30Constituents:
     """Tier 5: Automated validation across all 30 VN30 tickers."""
 
     @pytest.mark.parametrize("symbol", VN30_SYMBOLS)
-    def test_vn30_all_symbols_produce_balanced_statements(self, symbol):
+    def test_vn30_all_symbols_produce_balanced_statements(self, symbol, screener_snapshot):
         """Validates that 100% of VN30 constituent symbols produce mathematically balanced statements."""
         result = ThreeStatementEngine.build_forecast_from_screener(symbol=symbol)
         assert result.symbol == symbol

@@ -116,3 +116,66 @@ def _fail_on_repo_data_leak():
     after = {p.name for p in data_dir.glob("*.json")} if data_dir.is_dir() else set()
     leaked = sorted(after - before)
     assert not leaked, f"tests leaked lake files into the repo's data/: {leaked}"
+
+
+# ---------------------------------------------------------------------------
+# Screener snapshot for forecast and export tests
+# ---------------------------------------------------------------------------
+# ThreeStatementEngine.build_forecast_from_screener reads
+# data/screener_snapshot.json. Under the data-dir isolation above that file is
+# absent, and the engine used to paper over it: a missing market cap defaulted
+# to 10,000 (floored at 100bn) and revenue was backed out of it, so the export
+# and forecast suites were exercising invented companies while appearing to
+# test HPG, FPT and VCB. With that fabrication removed the engine refuses, so
+# the tests need real-shaped inputs - which is what they should always have
+# had, since none of them is testing where the numbers come from.
+#
+# Figures are plausible orders of magnitude in VND for each ticker; the point
+# is that the forecast is driven by stated inputs rather than by the engine's
+# imagination.
+_SNAPSHOT_FIXTURES = {
+    "HPG":  dict(revenue=1.40e14, market_cap=1.70e14, ps=1.21, gross_margin=13.0,
+                 op_margin=9.0, net_margin=8.5, roe=12.0, de_ratio=0.65),
+    "FPT":  dict(revenue=6.20e13, market_cap=1.90e14, ps=3.06, gross_margin=38.0,
+                 op_margin=19.0, net_margin=15.0, roe=28.0, de_ratio=0.55),
+    "VCB":  dict(revenue=6.80e13, market_cap=5.20e14, ps=7.65, gross_margin=55.0,
+                 op_margin=48.0, net_margin=38.0, roe=21.0, de_ratio=0.90,
+                 is_financial_sector=True),
+    "MWG":  dict(revenue=1.35e14, market_cap=8.60e13, ps=0.64, gross_margin=19.0,
+                 op_margin=3.0, net_margin=2.0, roe=9.0, de_ratio=1.10),
+    "NVL":  dict(revenue=1.10e13, market_cap=2.30e13, ps=2.09, gross_margin=28.0,
+                 op_margin=12.0, net_margin=5.0, roe=3.0, de_ratio=2.10),
+    "VIC":  dict(revenue=1.60e14, market_cap=1.60e14, ps=1.00, gross_margin=22.0,
+                 op_margin=8.0, net_margin=2.5, roe=4.0, de_ratio=1.80),
+    "VNM":  dict(revenue=6.10e13, market_cap=1.40e14, ps=2.30, gross_margin=41.0,
+                 op_margin=19.0, net_margin=16.0, roe=25.0, de_ratio=0.35),
+}
+
+#: Anything else in VN30 gets a neutral mid-cap profile, so the "all 30
+#: constituents balance" checks still exercise 30 distinct forecasts.
+_SNAPSHOT_DEFAULT = dict(revenue=3.00e13, market_cap=6.00e13, ps=2.00,
+                         gross_margin=25.0, op_margin=12.0, net_margin=9.0,
+                         roe=15.0, de_ratio=0.80)
+
+
+@pytest.fixture
+def screener_snapshot(tmp_path, monkeypatch):
+    """Writes a screener snapshot into the isolated data dir and returns it."""
+    import json
+    import os
+
+    from services.stock_service import VN30_SYMBOLS
+
+    stocks = {}
+    for symbol in set(list(_SNAPSHOT_FIXTURES) + list(VN30_SYMBOLS)):
+        payload = dict(_SNAPSHOT_FIXTURES.get(symbol, _SNAPSHOT_DEFAULT))
+        payload["symbol"] = symbol
+        payload.setdefault("name", f"CTCP {symbol}")
+        stocks[symbol] = payload
+
+    data_dir = os.environ.get("DATA_LOCAL_DIR") or str(tmp_path)
+    os.makedirs(data_dir, exist_ok=True)
+    path = os.path.join(data_dir, "screener_snapshot.json")
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump({"stocks": stocks}, handle)
+    return path

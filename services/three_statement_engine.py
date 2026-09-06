@@ -430,11 +430,13 @@ class ThreeStatementEngine:
 
         company_name = str(raw_data.get("name") or raw_data.get("company_name") or f"Công ty {clean_symbol}")
         
-        raw_mcap = sanitize_float(raw_data.get("market_cap") or raw_data.get("mcap"), 10_000.0)
-        market_cap = raw_mcap * 1e9 if 0 < raw_mcap < 1e9 else raw_mcap
-        market_cap = max(100e9, market_cap)
-        
+        # A missing market cap defaulted to 10,000 (then floored at 100bn), so
+        # a company with no reported size was modelled as a mid-cap.
+        raw_mcap = sanitize_float(raw_data.get("market_cap") or raw_data.get("mcap"), 0.0)
+        market_cap = raw_mcap * 1e9 if 0 < raw_mcap < 1e9 else max(0.0, raw_mcap)
+
         # 2. Extract and Sanitize Base Historical Metrics (Period t=0)
+        revenue_is_derived = False
         if "revenue" in raw_data or "net_sales" in raw_data or "rev" in raw_data:
             raw_rev_in = raw_data.get("revenue") if "revenue" in raw_data else (raw_data.get("net_sales") if "net_sales" in raw_data else raw_data.get("rev"))
             raw_rev = sanitize_float(raw_rev_in, 0.0)
@@ -442,12 +444,26 @@ class ThreeStatementEngine:
                 base_rev = raw_rev * 1e9
             else:
                 base_rev = max(0.0, raw_rev)
+        elif market_cap > 0:
+            # Revenue backed out of market cap and a P/S multiple makes every
+            # line of the projected income statement a function of the share
+            # price, since COGS, SG&A and EBIT are all fractions of revenue
+            # below. Kept for continuity where a real P/S is reported, but
+            # flagged, and no longer available when even the P/S is absent.
+            ps_ratio = sanitize_float(raw_data.get("ps"), 0.0)
+            if ps_ratio <= 0:
+                raise ValueError(
+                    f"{clean_symbol}: no revenue and no P/S multiple; a "
+                    "three-statement forecast cannot be built from market cap "
+                    "alone."
+                )
+            base_rev = market_cap / ps_ratio
+            revenue_is_derived = True
         else:
-            ps_ratio = sanitize_float(raw_data.get("ps"), 1.20)
-            if ps_ratio > 0:
-                base_rev = market_cap / ps_ratio
-            else:
-                base_rev = market_cap * 0.80
+            raise ValueError(
+                f"{clean_symbol}: no revenue and no market cap; there is "
+                "nothing to project a three-statement forecast from."
+            )
 
         # Base Gross Margin & COGS
         raw_gm = sanitize_float(raw_data.get("gross_margin"), 0.25)
@@ -1036,6 +1052,11 @@ class ThreeStatementEngine:
             "symbol": clean_symbol,
             "sector": sector,
             "is_financial_sector": is_financial,
+            # True when base revenue was backed out of market cap and a P/S
+            # multiple rather than reported. Every projected line below scales
+            # off base revenue, so the whole forecast then moves with the
+            # share price.
+            "base_revenue_is_derived_from_price": revenue_is_derived,
             "5y_cumulative_revenue": sum(is_revenue),
             "5y_cumulative_npat": sum(is_npat),
             "5y_cumulative_cfo": sum(cfs_net_cfo),
@@ -1097,13 +1118,19 @@ class ThreeStatementEngine:
         clean_sym = str(symbol).strip().upper()
         base_data: Dict[str, Any] = {}
 
-        # Resolve screener snapshot path
+        # Resolve screener snapshot path through the shared resolver. Reading
+        # <repo>/data directly ignored GOOGLE_DRIVE_DATA_DIR and
+        # DATA_LOCAL_DIR, so this engine could forecast from a different
+        # snapshot than the rest of the app was serving - the same divergence
+        # already fixed in valuation_engine.
         target_path = screener_path
         if not target_path or not os.path.exists(target_path):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            local_cand = os.path.join(base_dir, "data", "screener_snapshot.json")
-            if os.path.exists(local_cand):
-                target_path = local_cand
+            try:
+                from services.stock_service import resolve_data_file
+                target_path = resolve_data_file("screener_snapshot.json")
+            except Exception:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                target_path = os.path.join(base_dir, "data", "screener_snapshot.json")
 
         if target_path and os.path.exists(target_path):
             try:

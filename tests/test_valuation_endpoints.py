@@ -11,11 +11,11 @@ from server import app
 
 
 @pytest.fixture
-def client():
+def client(screener_snapshot):
     return TestClient(app)
 
 
-def test_api_get_comprehensive_valuation(client):
+def test_api_get_comprehensive_valuation(client, screener_snapshot):
     """Test comprehensive valuation API for HPG."""
     resp = client.get("/api/valuation/comprehensive/HPG")
     assert resp.status_code == 200
@@ -31,7 +31,7 @@ def test_api_get_comprehensive_valuation(client):
     assert len(val["scenarios"]["sensitivity_grid_5x5"]) == 5
 
 
-def test_api_get_fair_value_backtest_presets(client):
+def test_api_get_fair_value_backtest_presets(client, screener_snapshot):
     """Test retrieval of backtest presets and models."""
     resp = client.get("/api/backtest/fair_value/presets")
     assert resp.status_code == 200
@@ -43,7 +43,7 @@ def test_api_get_fair_value_backtest_presets(client):
     assert len(presets["valuation_models"]) >= 10
 
 
-def test_api_run_fair_value_backtest(client):
+def test_api_run_fair_value_backtest(client, screener_snapshot):
     """Test running 3-Mode Backtest via API endpoint."""
     payload = {
         "mode": "hybrid_funnel",
@@ -70,7 +70,7 @@ def test_api_run_fair_value_backtest(client):
 # 3-WAY INTEGRATED FORECAST & EXCEL EXPORT REST ENDPOINTS
 # =============================================================================
 
-def test_api_get_three_statement_forecast_hpg(client):
+def test_api_get_three_statement_forecast_hpg(client, screener_snapshot):
     """Test GET /api/valuation/3-way-forecast/HPG returns valid 5Y integrated model."""
     resp = client.get("/api/valuation/3-way-forecast/HPG")
     assert resp.status_code == 200
@@ -111,7 +111,7 @@ def test_api_get_three_statement_forecast_hpg(client):
     assert fc["liquidity_distress_check"]["summary_assessment"] in ("HEALTHY", "TIGHT", "DISTRESSED")
 
 
-def test_api_get_three_statement_forecast_with_parameters(client):
+def test_api_get_three_statement_forecast_with_parameters(client, screener_snapshot):
     """Test GET /api/valuation/3-way-forecast/{symbol} with query parameters."""
     resp = client.get("/api/valuation/3-way-forecast/FPT?start_year=2027&tax_rate=0.25")
     assert resp.status_code == 200
@@ -124,7 +124,7 @@ def test_api_get_three_statement_forecast_with_parameters(client):
     assert fc["all_years_balanced"] is True
 
 
-def test_api_get_three_statement_forecast_financial_sector(client):
+def test_api_get_three_statement_forecast_financial_sector(client, screener_snapshot):
     """Test GET /api/valuation/3-way-forecast/VCB for financial sector bank isolation."""
     resp = client.get("/api/valuation/3-way-forecast/VCB")
     assert resp.status_code == 200
@@ -135,7 +135,7 @@ def test_api_get_three_statement_forecast_financial_sector(client):
     assert fc["all_years_balanced"] is True
 
 
-def test_api_export_excel_endpoint_hpg(client):
+def test_api_export_excel_endpoint_hpg(client, screener_snapshot):
     """Test GET /api/valuation/export-excel/HPG streams a valid 7-tab openpyxl workbook."""
     import io
     import openpyxl
@@ -162,7 +162,7 @@ def test_api_export_excel_endpoint_hpg(client):
         assert name in wb.sheetnames
 
 
-def test_api_export_excel_endpoint_raw_scale_fpt(client):
+def test_api_export_excel_endpoint_raw_scale_fpt(client, screener_snapshot):
     """Test GET /api/valuation/export-excel/FPT with scale_unit=raw."""
     import io
     import openpyxl
@@ -177,7 +177,7 @@ def test_api_export_excel_endpoint_raw_scale_fpt(client):
 
 
 
-def test_error_response_maps_value_error_to_422():
+def test_error_response_maps_value_error_to_422(screener_snapshot):
     """A ValueError is a data gap the caller can act on, not a server fault."""
     from server import _error_response
 
