@@ -1,5 +1,6 @@
 import os
 import sys
+import atexit
 import re
 import time
 import json
@@ -60,6 +61,8 @@ else:
     except Exception:
         pass
 
+from services.rate_limiter import limit
+
 logger = logging.getLogger(__name__)
 
 # Import vnstock safely (non-blocking lazy auth)
@@ -68,12 +71,20 @@ try:
     from vnstock.core import setup_api_key
     
     def _init_api_key_async():
-        api_key = os.environ.get("VNSTOCK_API_KEY", "vnstock_23c9d8b4f3e6ae4683e96d516f02cf5e")
-        if api_key and setup_api_key:
+        # Env-only: a key committed to source is a leaked credential, and it
+        # silently overrides whatever the operator configured.
+        api_key = os.environ.get("VNSTOCK_API_KEY", "").strip()
+        if not api_key:
+            logger.warning(
+                "VNSTOCK_API_KEY is not set; vnstock runs on the anonymous tier. "
+                "Set it in .env to use your own quota."
+            )
+            return
+        if setup_api_key:
             try:
                 setup_api_key(api_key)
             except Exception:
-                pass
+                logger.warning("vnstock API key was rejected; continuing on the anonymous tier.")
 
     threading.Thread(target=_init_api_key_async, daemon=True, name="vnstock-auth").start()
 except Exception:
@@ -84,10 +95,47 @@ except Exception:
 executor = ThreadPoolExecutor(max_workers=24)
 
 class SimpleCache:
-    """Thread-safe in-memory cache supporting Stale-While-Revalidate (SWR)."""
-    def __init__(self):
+    """Thread-safe in-memory cache supporting Stale-While-Revalidate (SWR).
+
+    Bounded: entries were only ever dropped when a caller happened to read one
+    past its stale window, so a key never touched again lived forever. With
+    per-symbol keys across ~1600 symbols and long TTLs holding whole statement
+    payloads, the cache grew without limit. Eviction now prefers entries that
+    are already stale, falling back to the oldest.
+    """
+
+    DEFAULT_MAX_ENTRIES = 5000
+
+    def __init__(self, max_entries: Optional[int] = None):
         self._store: Dict[str, Tuple[Any, float, float]] = {}
         self._lock = threading.Lock()
+        if max_entries is None:
+            raw = os.environ.get("CACHE_MAX_ENTRIES", "").strip()
+            try:
+                max_entries = int(raw) if raw else self.DEFAULT_MAX_ENTRIES
+            except ValueError:
+                max_entries = self.DEFAULT_MAX_ENTRIES
+        self.max_entries = max(1, int(max_entries))
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._store)
+
+    def _evict_locked(self) -> None:
+        """Trims the store back to max_entries. Caller must hold the lock."""
+        overflow = len(self._store) - self.max_entries
+        if overflow <= 0:
+            return
+        now = time.time()
+        # Anything past its stale window is dead weight - drop that first.
+        for key in [k for k, (_, _, stale_until) in self._store.items() if now >= stale_until]:
+            del self._store[key]
+            overflow -= 1
+            if overflow <= 0:
+                return
+        # Still over: drop the entries closest to expiry.
+        for key, _ in sorted(self._store.items(), key=lambda kv: kv[1][1])[:overflow]:
+            del self._store[key]
 
     def get(self, key: str) -> Optional[Any]:
         with self._lock:
@@ -109,6 +157,7 @@ class SimpleCache:
         with self._lock:
             now = time.time()
             self._store[key] = (value, now + ttl_seconds, now + (ttl_seconds * stale_multiplier))
+            self._evict_locked()
 
     def invalidate(self, key: str) -> None:
         """Drop a cached entry (no-op if absent)."""
@@ -117,10 +166,23 @@ class SimpleCache:
 
 cache = SimpleCache()
 
-def resolve_data_file(filename: str) -> str:
-    """Resolves data lake files across Google Drive and local data/, automatically picking the richer/more complete file."""
+def local_data_dir() -> str:
+    """The local data directory.
+
+    Overridable via DATA_LOCAL_DIR so a test or a deployment can point the lake
+    somewhere other than the checkout. Without it, any process importing this
+    module writes into the repository's real data/ directory.
+    """
+    override = os.environ.get("DATA_LOCAL_DIR", "").strip()
+    if override:
+        return override
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    local_path = os.path.join(base_dir, "data", filename)
+    return os.path.join(base_dir, "data")
+
+
+def resolve_data_file(filename: str) -> str:
+    """Resolves data lake files across Google Drive and local data/, picking the freshest copy."""
+    local_path = os.path.join(local_data_dir(), filename)
     gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data")
     
     candidates = []
@@ -141,29 +203,43 @@ def resolve_data_file(filename: str) -> str:
     if not candidates:
         return local_path
         
-    # Sort by file size descending (prefer richer dataset), then by mtime descending
-    candidates.sort(key=lambda c: (c[1], c[2]), reverse=True)
+    # Freshness decides, size only breaks ties. Sorting by size first let a large
+    # stale copy beat a smaller current one, which for financial data is simply
+    # wrong: "bigger" and "more correct" are unrelated.
+    candidates.sort(key=lambda c: (c[2], c[1]), reverse=True)
     return candidates[0][0]
 
-QUANT_SNAPSHOT_FILE = resolve_data_file("screener_snapshot.json")
+def quant_snapshot_file() -> str:
+    """Resolved per call; as a constant this froze at import time."""
+    return resolve_data_file("screener_snapshot.json")
 
 class DiskDataLake:
     """Manages persistent L2 data lake across Google Drive and local data/ directories with thread-safe atomic caching and Stale-While-Revalidate support."""
     def __init__(self):
-        self._lock = threading.Lock()
+        # Reentrant: save_symbol_record() holds the lock and calls read_json(),
+        # which takes it again. A plain Lock self-deadlocks there, and because
+        # the writer dies holding it, every later reader blocks too.
+        self._lock = threading.RLock()
         self._cache_mem: Dict[str, Any] = {}
         self._last_loaded: Dict[str, float] = {}
+        # Filenames with in-memory changes not yet on disk. Reads must prefer
+        # memory for these, or a pending write would be read straight back out.
+        self._dirty: Set[str] = set()
+        self._flush_timer: Optional[threading.Timer] = None
 
     def get_data_dir(self) -> str:
         gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data")
         if gdrive_dir and os.path.isdir(gdrive_dir):
             return gdrive_dir
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        d = os.path.join(base_dir, "data")
+        d = local_data_dir()
         os.makedirs(d, exist_ok=True)
         return d
 
     def read_json(self, filename: str) -> Dict[str, Any]:
+        # Pending writes live only in memory until the next flush; reloading
+        # from disk here would silently drop them.
+        if filename in self._dirty:
+            return self._cache_mem.get(filename, {})
         target_path = resolve_data_file(filename)
         if not os.path.exists(target_path):
             return self._cache_mem.get(filename, {})
@@ -185,7 +261,20 @@ class DiskDataLake:
             return self._cache_mem.get(filename, {})
 
     def save_symbol_record(self, filename: str, symbol: str, record: Any) -> None:
-        """Atomically saves or updates a symbol's record into the persistent JSON data lake without blocking readers."""
+        """Records a symbol into the persistent JSON lake, coalescing disk writes.
+
+        The lake is one JSON document, so persisting a single symbol means
+        re-serialising the whole thing. Doing that per symbol is O(n^2) over a
+        crawl: measured on a realistic historical_prices.json, 1600 symbols is
+        a 155 MB file, 3.3s per rewrite and ~89 minutes of pure serialisation
+        for one pass - all of it inside this lock, which serialises the
+        24-worker executor down to one.
+
+        The update is applied to memory immediately (readers see it at once)
+        and the disk write is debounced by DATA_LAKE_FLUSH_INTERVAL_SECONDS, so
+        a burst of writes costs one rewrite instead of thousands. Set the
+        interval to 0 for write-through behaviour.
+        """
         symbol = str(symbol).upper().strip()
         if not symbol:
             return
@@ -194,22 +283,71 @@ class DiskDataLake:
                 lake = dict(self._cache_mem.get(filename) or self.read_json(filename))
                 lake[symbol] = record
                 self._cache_mem[filename] = lake
-                
-                # Save to primary data directory in background
-                target_dir = self.get_data_dir()
-                out_file = os.path.join(target_dir, filename)
-                temp_file = out_file + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
-                with open(temp_file, "w", encoding="utf-8") as f:
-                    json.dump(lake, f, ensure_ascii=False)
-                if os.path.exists(out_file):
-                    os.replace(temp_file, out_file)
+                self._dirty.add(filename)
+                interval = self._flush_interval()
+                if interval <= 0:
+                    self._flush_locked()
                 else:
-                    os.rename(temp_file, out_file)
-                self._last_loaded[filename] = os.path.getmtime(out_file)
+                    self._schedule_flush_locked(interval)
         except Exception as e:
             logger.debug("Error saving symbol %s to %s: %s", symbol, filename, e)
 
+    @staticmethod
+    def _flush_interval() -> float:
+        raw = os.environ.get("DATA_LAKE_FLUSH_INTERVAL_SECONDS", "").strip()
+        if raw:
+            try:
+                return max(0.0, float(raw))
+            except ValueError:
+                logger.warning("DATA_LAKE_FLUSH_INTERVAL_SECONDS=%r is not a number; using 2.0", raw)
+        return 2.0
+
+    def _schedule_flush_locked(self, interval: float) -> None:
+        """Starts the debounce timer if one is not already pending."""
+        if self._flush_timer is not None:
+            return
+        timer = threading.Timer(interval, self.flush)
+        timer.daemon = True
+        self._flush_timer = timer
+        timer.start()
+
+    def _write_file(self, filename: str, lake: Dict[str, Any]) -> None:
+        # Write back to the copy readers actually resolve to. Always writing to
+        # get_data_dir() forked a second, partial lake whenever the real one
+        # lived elsewhere.
+        out_file = resolve_data_file(filename)
+        if not os.path.exists(out_file):
+            out_file = os.path.join(self.get_data_dir(), filename)
+        os.makedirs(os.path.dirname(out_file), exist_ok=True)
+        temp_file = out_file + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
+        with open(temp_file, "w", encoding="utf-8") as f:
+            json.dump(lake, f, ensure_ascii=False)
+        os.replace(temp_file, out_file)
+        self._last_loaded[filename] = os.path.getmtime(out_file)
+
+    def _flush_locked(self) -> None:
+        for filename in sorted(self._dirty):
+            try:
+                self._write_file(filename, self._cache_mem.get(filename) or {})
+            except Exception as e:
+                logger.warning("Failed to persist data lake %s: %s", filename, e)
+                continue
+            self._dirty.discard(filename)
+
+    def flush(self) -> None:
+        """Persists every pending change. Safe to call at any time."""
+        with self._lock:
+            if self._flush_timer is not None:
+                self._flush_timer.cancel()
+                self._flush_timer = None
+            self._flush_locked()
+
+
 disk_lake = DiskDataLake()
+
+# Coalesced writes live in memory between flushes; make sure a clean shutdown
+# does not drop them.
+atexit.register(disk_lake.flush)
 
 # Master Index Constituents
 VN30_SYMBOLS = [
@@ -1541,7 +1679,8 @@ def _sync_single_stock_incremental(symbol: str, last_date: str, end_date: str):
         cache.set(check_key, True, ttl_seconds=900)
 
         q = Quote(symbol=symbol, source="VCI")
-        df_new = q.history(start=last_date, end=end_date, interval="1D")
+        with limit("vnstock"):
+            df_new = q.history(start=last_date, end=end_date, interval="1D")
         if df_new is None or getattr(df_new, "empty", True):
             return
 
@@ -1673,7 +1812,8 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                 for src in ["KBS", "VCI"]:
                     try:
                         q = Quote(symbol=symbol, source=src)
-                        df_raw = q.history(start=start_str, end=end_str, interval=interval)
+                        with limit("vnstock"):
+                            df_raw = q.history(start=start_str, end=end_str, interval=interval)
                         if df_raw is not None and not df_raw.empty and len(df_raw) >= 3:
                             return df_raw.copy()
                     except Exception:
@@ -2498,7 +2638,18 @@ def enrich_article_metadata(art: Dict[str, Any]) -> Dict[str, Any]:
     return enriched
 
 CENTRAL_NEWS_LAKE: Dict[str, Dict[str, Any]] = {}
-TICKER_INVERTED_INDEX: Dict[str, Set[str]] = {}
+
+# News-lake sector index: sector -> set of article links. Deliberately separate
+# from the module-level SECTOR_INVERTED_INDEX, which maps sector -> set of
+# *ticker symbols* and is consumed by sector_index_service as index
+# constituents. Sharing one dict for both let article URLs leak into sector
+# constituent lists.
+#
+# There is no ticker equivalent on purpose. One existed and was never read: the
+# news-by-ticker consumers match on a symbols tag OR a title regex OR the
+# company name OR a leader name, so an index over the tag alone cannot replace
+# their scan - it only added memory and a second thing to keep pruned.
+NEWS_SECTOR_INVERTED_INDEX: Dict[str, Set[str]] = {}
 _lake_lock = threading.Lock()
 MAX_LAKE_SIZE = 3000
 
@@ -2530,26 +2681,29 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
                     if k not in CENTRAL_NEWS_LAKE[link] or not CENTRAL_NEWS_LAKE[link][k]:
                         CENTRAL_NEWS_LAKE[link][k] = enriched[k]
 
-            # Update in-memory inverted index for tickers and sectors
-            for sym in enriched.get("symbols", []):
-                if sym not in TICKER_INVERTED_INDEX:
-                    TICKER_INVERTED_INDEX[sym] = set()
-                TICKER_INVERTED_INDEX[sym].add(link)
-
             sec_k = enriched.get("sector_key")
             if sec_k:
-                if sec_k not in SECTOR_INVERTED_INDEX:
-                    SECTOR_INVERTED_INDEX[sec_k] = set()
-                SECTOR_INVERTED_INDEX[sec_k].add(link)
+                if sec_k not in NEWS_SECTOR_INVERTED_INDEX:
+                    NEWS_SECTOR_INVERTED_INDEX[sec_k] = set()
+                NEWS_SECTOR_INVERTED_INDEX[sec_k].add(link)
 
-        # Bounded memory: Prune oldest articles if lake exceeds MAX_LAKE_SIZE
+        # Bounded memory: Prune oldest articles if lake exceeds MAX_LAKE_SIZE.
+        # The inverted indexes must be pruned with it, otherwise they grow
+        # without bound and keep pointing at evicted articles.
         if len(CENTRAL_NEWS_LAKE) > MAX_LAKE_SIZE + 500:
             sorted_links = sorted(CENTRAL_NEWS_LAKE.keys(), key=lambda l: CENTRAL_NEWS_LAKE[l].get('timestamp', 0))
             excess = len(sorted_links) - MAX_LAKE_SIZE
-            for old_link in sorted_links[:excess]:
+            evicted = set(sorted_links[:excess])
+            for old_link in evicted:
                 del CENTRAL_NEWS_LAKE[old_link]
+            for index in (NEWS_SECTOR_INVERTED_INDEX,):
+                for key in list(index.keys()):
+                    remaining = index[key] - evicted
+                    if remaining:
+                        index[key] = remaining
+                    else:
+                        del index[key]
 
-import threading
 _news_poller_thread = None
 
 def fetch_vietstock_doanhnghiep_news() -> List[Dict[str, Any]]:
@@ -3655,7 +3809,8 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
     if not events_list and Company:
         try:
             c = Company(symbol=symbol, source="KBS")
-            df_ev = c.events()
+            with limit("vnstock"):
+                df_ev = c.events()
             if df_ev is not None and not df_ev.empty:
                 for _, row in df_ev.head(15).iterrows():
                     name_vi = str(row.get("event_name_vi") or row.get("event_name") or "Sự kiện quyền")
@@ -4005,7 +4160,8 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
     if Company:
         try:
             c = Company(symbol=symbol, source="KBS")
-            df_off = c.officers()
+            with limit("vnstock"):
+                df_off = c.officers()
             if df_off is not None and not df_off.empty:
                 for _, row in df_off.iterrows():
                     name = str(row.get("name", "")).strip()
@@ -4018,7 +4174,8 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
                             "ratio": ""
                         })
 
-            df_sh = c.shareholders()
+            with limit("vnstock"):
+                df_sh = c.shareholders()
             if df_sh is not None and not df_sh.empty:
                 for _, row in df_sh.iterrows():
                     name = str(row.get("name", "")).strip()
@@ -4026,7 +4183,7 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
                     ratio = row.get("ownership_percentage", 0)
                     try:
                         shares_int = int(shares) if pd.notna(shares) else 0
-                    except:
+                    except Exception:
                         shares_int = 0
                     ratio_str = f"{float(ratio):.2f}%" if pd.notna(ratio) else ""
                     if name:
@@ -4177,7 +4334,6 @@ import xml.etree.ElementTree as ET
 import urllib.request
 import urllib.parse
 import ssl
-import re
 from email.utils import parsedate_to_datetime
 
 # TLS policy comes from services/tls_config.py (verify ON by default,
@@ -8146,7 +8302,7 @@ def _load_quant_snapshot_if_valid(max_age_hours: float) -> Optional[Dict[str, An
     Old-schema or corrupt snapshots are treated as stale -> None.
     Every rejection is logged with its reason (corrupt vs stale vs old schema).
     """
-    snapshot_path = QUANT_SNAPSHOT_FILE
+    snapshot_path = quant_snapshot_file()
     if not os.path.exists(snapshot_path):
         logger.debug("Quant snapshot absent at %s", snapshot_path)
         return None
@@ -8164,7 +8320,7 @@ def _load_quant_snapshot_if_valid(max_age_hours: float) -> Optional[Dict[str, An
         except (OSError, ValueError) as exc:
             logger.warning(
                 "Quant snapshot rejected: corrupt/unreadable JSON (%s: %s) at %s",
-                type(exc).__name__, exc, QUANT_SNAPSHOT_FILE,
+                type(exc).__name__, exc, snapshot_path,
             )
             return None
         stocks = snapshot_data.get("stocks") if isinstance(snapshot_data, dict) else None
@@ -8269,7 +8425,7 @@ def compute_quant_percentile_universe(force_recompute: bool = False, max_age_hou
             return snap
         raise RuntimeError(
             "Unified screener universe sync failed and no fresh, schema-valid "
-            f"snapshot exists at {QUANT_SNAPSHOT_FILE} "
+            f"snapshot exists at {quant_snapshot_file()} "
             f"(max_age_hours={max_age_hours}). Refusing to serve fabricated data."
         ) from exc
 

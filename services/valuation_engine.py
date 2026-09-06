@@ -216,6 +216,121 @@ _STRING_KEYS = frozenset({
 })
 
 
+# Inputs the 22 models actually read. Absence does not stop a valuation - the
+# engine substitutes sector or structural defaults - but it does change how much
+# the number is worth, which the caller has no other way to know.
+CORE_VALUATION_INPUTS: Tuple[str, ...] = (
+    "price", "eps", "bvps", "pe", "pb", "roe", "roic",
+    "revenue", "net_income", "pat", "ebit", "operating_profit",
+    "equity", "total_assets", "debt", "shares_out", "market_cap",
+    "rev_1y_growth", "pat_1y_growth", "sector_code",
+)
+
+# Below this share of core inputs the composite is structurally driven rather
+# than data driven, and should be presented that way.
+LOW_COVERAGE_THRESHOLD = 0.40
+HIGH_COVERAGE_THRESHOLD = 0.75
+
+
+def assess_data_quality(fundamental_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Reports how much of the valuation rests on real data.
+
+    Every missing input is silently replaced with a sector or structural
+    default somewhere in the model suite, so two valuations that look
+    identical can be backed by very different amounts of evidence. This makes
+    that difference explicit in the payload instead of leaving it implicit in
+    the code.
+
+    Coverage is measured over CORE_VALUATION_INPUTS; a field counts as present
+    only if it is non-null and, for numerics, finite.
+    """
+    present, missing = [], []
+    for key in CORE_VALUATION_INPUTS:
+        value = fundamental_data.get(key)
+        if value is None or value == "":
+            missing.append(key)
+            continue
+        if isinstance(value, (int, float)) and not math.isfinite(float(value)):
+            missing.append(key)
+            continue
+        present.append(key)
+
+    coverage = len(present) / len(CORE_VALUATION_INPUTS)
+    if coverage >= HIGH_COVERAGE_THRESHOLD:
+        grade = "HIGH"
+    elif coverage >= LOW_COVERAGE_THRESHOLD:
+        grade = "MEDIUM"
+    else:
+        grade = "LOW"
+
+    warnings: List[str] = []
+    if grade == "LOW":
+        warnings.append(
+            "Fewer than 40% of core inputs are present; the composite is driven "
+            "mainly by sector and structural defaults, not by this company's data."
+        )
+    for key, label in (
+        ("eps", "earnings-based models"),
+        ("bvps", "book-value models"),
+        ("equity", "return and leverage models"),
+        ("revenue", "growth models"),
+    ):
+        if key in missing:
+            warnings.append(f"{key} is missing; {label} fall back to defaults.")
+
+    return {
+        "coverage_pct": round(coverage * 100, 1),
+        "grade": grade,
+        "inputs_present": present,
+        "inputs_missing": missing,
+        "core_input_count": len(CORE_VALUATION_INPUTS),
+        "assumptions_applied": _assumptions_applied(fundamental_data),
+        "warnings": warnings,
+    }
+
+
+# Structural stand-ins the model suite uses when an input is absent. These are
+# deliberate modelling choices, not accidents - but they were invisible in the
+# output, so a number derived from an assumed 40% leverage looked exactly like
+# one derived from the company's real balance sheet.
+STRUCTURAL_ASSUMPTIONS = (
+    ("shares_out", "shares outstanding assumed at 1e8", ("shares_out", "shares")),
+    ("market_cap", "market cap derived from price x shares", ("market_cap",)),
+    ("debt", "debt assumed at 40% of market cap",
+     ("debt", "total_debt_fq", "interest_bearing_debt")),
+)
+
+
+def _assumptions_applied(fundamental_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Names the structural stand-ins that fired for this payload."""
+    applied: List[Dict[str, str]] = []
+    for field_name, description, sources in STRUCTURAL_ASSUMPTIONS:
+        if not any(fundamental_data.get(src) not in (None, "", 0) for src in sources):
+            applied.append({"field": field_name, "assumption": description})
+    return applied
+
+
+def _require_price(symbol: str, fundamental_data: Dict[str, Any]) -> float:
+    """Returns a usable market price or raises.
+
+    Price anchors every upside, margin-of-safety and risk-firewall figure, so a
+    fabricated one produces a confident-looking valuation built on nothing.
+    Consistent with the no-silent-fills policy already applied to a missing
+    fundamental_data payload, an unusable price is refused rather than defaulted.
+    """
+    raw = fundamental_data.get("price")
+    try:
+        price = float(raw)
+    except (TypeError, ValueError):
+        price = float("nan")
+    if not math.isfinite(price) or price <= 0:
+        raise ValueError(
+            f"A valid market price is required for quantitative valuation of {symbol} "
+            f"(got {raw!r}). Fallback to a default price is disabled."
+        )
+    return price
+
+
 def _sanitize_fundamental_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Sanitize fundamental_data dict: convert NaN, Inf, and unparseable string
@@ -345,6 +460,8 @@ class ValuationMatrixResult:
     buffett_coupon_spread: Dict[str, Any] = field(default_factory=dict)
     quant_quality_filters: Dict[str, Any] = field(default_factory=dict)
     capital_allocation: Dict[str, Any] = field(default_factory=dict)
+    # How much of this valuation rests on real inputs vs defaults.
+    data_quality: Dict[str, Any] = field(default_factory=dict)
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -725,7 +842,7 @@ class RiskFirewallEngine:
         market_returns: Optional[List[float]] = None,
     ) -> RiskFirewallResult:
         """Runs full risk firewall diagnostic pipeline."""
-        price = float(fundamental_data.get("price") or 10000.0)
+        price = _require_price(str(fundamental_data.get("symbol") or "?"), fundamental_data)
         shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
         mcap = float(fundamental_data.get("market_cap") or (price * shares))
 
@@ -2018,7 +2135,7 @@ class ValuationEngine:
         # Sanitize NaN / Inf / invalid string values → None for safe fallbacks
         fundamental_data = _sanitize_fundamental_data(fundamental_data)
 
-        price = max(float(fundamental_data.get("price") or 10000.0), 100.0)
+        price = _require_price(symbol, fundamental_data)
         shares = max(float(fundamental_data.get("shares_out") or fundamental_data.get("shares") or 1e8), 1.0)
         mcap = float(fundamental_data.get("market_cap") or (price * shares))
         debt = float(fundamental_data.get("debt") or fundamental_data.get("total_debt_fq") or fundamental_data.get("interest_bearing_debt") or (mcap * 0.4))
@@ -2337,8 +2454,15 @@ class ValuationEngine:
         """
         if fundamental_data is None:
             # Auto-resolve from data lake screener snapshot if available
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            local_cand = os.path.join(base_dir, "data", "screener_snapshot.json")
+            # Go through the shared resolver: reading data/ directly ignored
+            # GOOGLE_DRIVE_DATA_DIR and DATA_LOCAL_DIR, so the valuation engine
+            # could be reading a different snapshot from the rest of the app.
+            try:
+                from services.stock_service import resolve_data_file
+                local_cand = resolve_data_file("screener_snapshot.json")
+            except Exception:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                local_cand = os.path.join(base_dir, "data", "screener_snapshot.json")
             if os.path.exists(local_cand):
                 try:
                     with open(local_cand, "r", encoding="utf-8") as f:
@@ -2355,7 +2479,7 @@ class ValuationEngine:
         # Sanitize NaN / Inf / invalid string values → None for safe fallbacks
         fundamental_data = _sanitize_fundamental_data(fundamental_data)
 
-        price = max(float(fundamental_data.get("price") or 10000.0), 100.0)
+        price = _require_price(symbol, fundamental_data)
         company_name = str(fundamental_data.get("name") or fundamental_data.get("company_name") or symbol)
         exchange = str(fundamental_data.get("exchange") or "HOSE")
         sector_code = str(fundamental_data.get("sector_code") or "DEFAULT").upper()
@@ -2465,6 +2589,7 @@ class ValuationEngine:
         ts = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         return ValuationMatrixResult(
+            data_quality=assess_data_quality(fundamental_data),
             symbol=symbol,
             company_name=company_name,
             exchange=exchange,

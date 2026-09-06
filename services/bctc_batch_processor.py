@@ -46,10 +46,24 @@ BCTC_NEGATIVE_KEYWORDS = [
     "báo cáo tình hình quản trị", "bản cáo bạch"
 ]
 
-PDF_LAKE_DIR = os.path.join(os.path.dirname(resolve_data_file("screener_snapshot.json")), "pdf_lake")
-os.makedirs(PDF_LAKE_DIR, exist_ok=True)
-EXTRACTED_LAKE_FILE = os.path.join(PDF_LAKE_DIR, "extracted_bctc_lake.json")
-CORPORATE_ACTIONS_LAKE_FILE = os.path.join(PDF_LAKE_DIR, "extracted_corporate_actions.json")
+def pdf_lake_dir() -> str:
+    """Resolved per call, and created on demand.
+
+    As an import-time constant this froze the path before the environment could
+    be configured, and its os.makedirs ran as an import side effect - creating
+    directories in the checkout merely by importing the module.
+    """
+    path = os.path.join(os.path.dirname(resolve_data_file("screener_snapshot.json")), "pdf_lake")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def extracted_lake_file() -> str:
+    return os.path.join(pdf_lake_dir(), "extracted_bctc_lake.json")
+
+
+def corporate_actions_lake_file() -> str:
+    return os.path.join(pdf_lake_dir(), "extracted_corporate_actions.json")
 
 
 _lake_cache_mem: Dict[str, Any] = {}
@@ -63,7 +77,7 @@ def _resolve_lake_file(filename: str) -> str:
     candidate = resolve_data_file(os.path.join("pdf_lake", filename))
     if os.path.exists(candidate):
         return candidate
-    return os.path.join(PDF_LAKE_DIR, filename)
+    return os.path.join(pdf_lake_dir(), filename)
 
 
 def _merge_shards_if_present(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -72,8 +86,9 @@ def _merge_shards_if_present(data: Dict[str, Any]) -> Dict[str, Any]:
     gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data")
     if gdrive_dir and os.path.isdir(os.path.join(gdrive_dir, "pdf_lake")):
         search_dirs.append(os.path.join(gdrive_dir, "pdf_lake"))
-    if os.path.isdir(PDF_LAKE_DIR) and PDF_LAKE_DIR not in search_dirs:
-        search_dirs.append(PDF_LAKE_DIR)
+    lake_dir_path = pdf_lake_dir()
+    if os.path.isdir(lake_dir_path) and lake_dir_path not in search_dirs:
+        search_dirs.append(lake_dir_path)
         
     merged_count = 0
     for sdir in search_dirs:
@@ -130,14 +145,15 @@ def _save_lake_data(data: Dict[str, Any]) -> None:
     """Saves to L2 persistent extracted lake cache atomically."""
     global _lake_cache_mem, _lake_cache_mtime
     try:
-        tmp_file = EXTRACTED_LAKE_FILE + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
+        lake_file = extracted_lake_file()
+        tmp_file = lake_file + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_file, EXTRACTED_LAKE_FILE)
+        os.replace(tmp_file, lake_file)
         _lake_cache_mem = data
-        _lake_cache_mtime = os.path.getmtime(EXTRACTED_LAKE_FILE)
+        _lake_cache_mtime = os.path.getmtime(lake_file)
     except Exception as e:
         logger.error(f"Error saving BCTC lake data: {e}")
         try:
@@ -170,14 +186,15 @@ def _save_corporate_actions_lake(data: Dict[str, Any]) -> None:
     """Saves to L2 persistent corporate actions lake cache atomically."""
     global _corp_cache_mem, _corp_cache_mtime
     try:
-        tmp_file = CORPORATE_ACTIONS_LAKE_FILE + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
+        corp_file = corporate_actions_lake_file()
+        tmp_file = corp_file + f".tmp_{os.getpid()}_{int(time.time()*1000)}"
         with open(tmp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_file, CORPORATE_ACTIONS_LAKE_FILE)
+        os.replace(tmp_file, corp_file)
         _corp_cache_mem = data
-        _corp_cache_mtime = os.path.getmtime(CORPORATE_ACTIONS_LAKE_FILE)
+        _corp_cache_mtime = os.path.getmtime(corp_file)
     except Exception as e:
         logger.error(f"Error saving corporate actions lake data: {e}")
 
@@ -188,8 +205,8 @@ class BCTCBatchProcessor:
     BCTC filings without external LLM dependencies.
     """
 
-    def __init__(self, lake_dir: str = PDF_LAKE_DIR):
-        self.lake_dir = os.path.abspath(lake_dir)
+    def __init__(self, lake_dir: Optional[str] = None):
+        self.lake_dir = os.path.abspath(lake_dir or pdf_lake_dir())
         os.makedirs(self.lake_dir, exist_ok=True)
 
     def download_report_pdf(

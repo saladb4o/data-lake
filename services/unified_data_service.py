@@ -32,12 +32,24 @@ from services.quant_scoring import score_universe
 # BEFORE import opts out (and suppresses InsecureRequestWarning there).
 from services.tls_config import TLS_VERIFY, configure_urllib_warnings
 from services.stock_service import resolve_data_file
+from services.rate_limiter import limit
 
 configure_urllib_warnings()
 
-DATA_DIR = os.path.dirname(resolve_data_file("screener_snapshot.json"))
-SCREENER_SNAPSHOT_FILE = resolve_data_file("screener_snapshot.json")
-HISTORICAL_PRICES_FILE = resolve_data_file("historical_prices.json")
+# Resolved on each call, not at import. As module constants these froze before
+# anything could configure the environment: a Google Drive mount that appeared
+# after startup was never seen, and DATA_LOCAL_DIR could not redirect them,
+# which let test runs write into the real data/ directory.
+def data_dir() -> str:
+    return os.path.dirname(resolve_data_file("screener_snapshot.json"))
+
+
+def screener_snapshot_file() -> str:
+    return resolve_data_file("screener_snapshot.json")
+
+
+def historical_prices_file() -> str:
+    return resolve_data_file("historical_prices.json")
 
 # =============================================================================
 # 1. TRADINGVIEW BATCH SCANNER & FINANCIAL EXTRACTOR (TIER 1)
@@ -87,7 +99,8 @@ def _request_with_retry(
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            resp = _HTTP_SESSION.request(method, url, timeout=timeout, verify=TLS_VERIFY, **kwargs)
+            with limit("http"):
+                resp = _HTTP_SESSION.request(method, url, timeout=timeout, verify=TLS_VERIFY, **kwargs)
         except requests.RequestException as exc:
             if attempt >= max_attempts:
                 logger.warning("Request to %s failed after %d attempt(s): %s", url, max_attempts, exc)
@@ -1730,15 +1743,16 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
 
     # Atomic snapshot write (M5): dump to a .tmp sibling then os.replace()
     # so a crash mid-write can never corrupt the published cache file.
-    os.makedirs(DATA_DIR, exist_ok=True)
-    tmp_path = SCREENER_SNAPSHOT_FILE + ".tmp"
+    snapshot_file = screener_snapshot_file()
+    os.makedirs(os.path.dirname(snapshot_file), exist_ok=True)
+    tmp_path = snapshot_file + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp_path, SCREENER_SNAPSHOT_FILE)
+    os.replace(tmp_path, snapshot_file)
 
     elapsed = round(time.time() - start_t, 2)
-    print(f"✨ [UnifiedDataService] Successfully synced {len(unified_stocks)} stocks in {elapsed}s to {SCREENER_SNAPSHOT_FILE}")
+    print(f"✨ [UnifiedDataService] Successfully synced {len(unified_stocks)} stocks in {elapsed}s to {snapshot_file}")
     print(f"📊 Provenance Summary: {prov_counts}")
     return payload

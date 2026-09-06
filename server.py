@@ -248,6 +248,18 @@ async def lifespan(app: FastAPI):
         alerts_task.cancel()
 
 
+def _error_response(exc: Exception) -> JSONResponse:
+    """Maps an unhandled endpoint exception to a response.
+
+    A ValueError from the service layer means the inputs were missing or
+    unusable - no fundamentals, no price, an unparseable period - which is a
+    data gap the caller can act on, not a server fault. Everything else is a
+    genuine 500.
+    """
+    status = 422 if isinstance(exc, ValueError) else 500
+    return JSONResponse(status_code=status, content={"status": "error", "message": str(exc)})
+
+
 app = FastAPI(
     title="Vietnam Stock Trading Terminal Pro API",
     description="Backend API for Vietnamese Electronic Trading Board and Stock Analytics Terminal",
@@ -255,11 +267,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Enable CORS
+# Enable CORS.
+# Origins are configurable via the CORS_ALLOW_ORIGINS env var (comma-separated).
+# Defaults to localhost only: the app is normally served from the same origin as
+# its static frontend, so no cross-origin access is required.
+# Note: credentialed requests cannot use a wildcard origin, so allow_credentials
+# is only enabled when an explicit origin list is in effect.
+_cors_origins_env = os.environ.get("CORS_ALLOW_ORIGINS", "").strip()
+if _cors_origins_env:
+    CORS_ALLOW_ORIGINS = [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+else:
+    CORS_ALLOW_ORIGINS = [
+        f"http://{_h}:{_p}"
+        for _h in ("127.0.0.1", "localhost")
+        for _p in (8000, 8080, 8008, 8888, 5000, 5001, 8050)
+    ]
+
+_cors_wildcard = "*" in CORS_ALLOW_ORIGINS
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=not _cors_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -283,7 +312,7 @@ def api_trading_board(
         data = get_trading_board(group=group, custom_symbols=symbols, limit=limit, exchange=exchange)
         return JSONResponse(content={"status": "success", "data": data, "total": len(data)})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/indices-analytics")
 def api_indices_analytics():
@@ -292,7 +321,7 @@ def api_indices_analytics():
         data = get_indices_analytics()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market-treemap")
 def api_market_treemap():
@@ -302,7 +331,7 @@ def api_market_treemap():
         data = get_market_treemap_enriched()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/foreign-flow")
 def api_foreign_flow():
@@ -311,7 +340,7 @@ def api_foreign_flow():
         data = get_foreign_flow()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/quote/history")
 @app.get("/api/stock/history")
@@ -325,7 +354,7 @@ def api_quote_history(
         data = get_stock_history(symbol=symbol, interval=interval, timeframe=timeframe)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/overview")
 def api_company_overview(symbol: str = Query("FPT")):
@@ -334,7 +363,7 @@ def api_company_overview(symbol: str = Query("FPT")):
         data = get_company_overview(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/news")
 def api_company_news(symbol: str = Query("FPT"), deep_scan: bool = Query(False)):
@@ -343,7 +372,7 @@ def api_company_news(symbol: str = Query("FPT"), deep_scan: bool = Query(False))
         data = get_company_news(symbol=symbol, deep_scan=deep_scan)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/reports")
 def api_company_reports(
@@ -359,7 +388,7 @@ def api_company_reports(
         data = get_company_reports(symbol=symbol, report_type=report_type, fetch_pdf=fetch_pdf, page=page, page_size=page_size, year=year)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/financials")
 def api_company_financials(
@@ -373,7 +402,7 @@ def api_company_financials(
         data = get_company_financial_statements(symbol=symbol, statement_type=statement_type, period=period, periods_count=periods_count)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/health")
 def api_company_financial_health(symbol: str = Query("FPT", description="Stock ticker symbol")):
@@ -382,7 +411,7 @@ def api_company_financial_health(symbol: str = Query("FPT", description="Stock t
         data = get_company_financial_health(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/events")
 def api_company_events(symbol: str = Query("FPT")):
@@ -391,7 +420,7 @@ def api_company_events(symbol: str = Query("FPT")):
         data = get_company_events(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/leadership")
 def api_company_leadership(symbol: str = Query("FPT")):
@@ -400,7 +429,7 @@ def api_company_leadership(symbol: str = Query("FPT")):
         data = get_company_leadership(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/ecosystem")
 def api_company_ecosystem(
@@ -413,7 +442,7 @@ def api_company_ecosystem(
         data = get_company_ecosystem(symbol=symbol, depth=depth, min_ownership=min_ownership)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/commodity-spread")
 def api_company_commodity_spread(symbol: str = Query(..., description="Stock ticker symbol (e.g. HPG, DPM, DBC, BSR)")):
@@ -423,7 +452,7 @@ def api_company_commodity_spread(symbol: str = Query(..., description="Stock tic
         data = get_commodity_spread_analysis(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/forensics")
 def api_company_forensics(symbol: str = Query(..., description="Stock ticker symbol (e.g. HPG, VNM, FPT)")):
@@ -432,7 +461,7 @@ def api_company_forensics(symbol: str = Query(..., description="Stock ticker sym
         data = get_company_forensic_report(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/document-dossier")
 def api_company_document_dossier(
@@ -473,7 +502,7 @@ def api_company_document_dossier(
 
         return JSONResponse(content={"status": "success", "data": target_record})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/recommendations")
 def api_company_recommendations(symbol: str = Query("FPT", description="Stock ticker symbol")):
@@ -482,7 +511,7 @@ def api_company_recommendations(symbol: str = Query("FPT", description="Stock ti
         data = get_symbol_broker_recommendations(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/global-valuation")
 def api_company_global_valuation(symbol: str = Query("FPT", description="Stock ticker symbol")):
@@ -491,7 +520,7 @@ def api_company_global_valuation(symbol: str = Query("FPT", description="Stock t
         data = get_symbol_global_valuation(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/technical-consensus")
 def api_company_technical_consensus(symbol: str = Query("FPT", description="Stock ticker symbol")):
@@ -500,7 +529,7 @@ def api_company_technical_consensus(symbol: str = Query("FPT", description="Stoc
         data = get_symbol_technical_consensus(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market/macro-indicators")
 def api_market_macro_indicators():
@@ -509,7 +538,7 @@ def api_market_macro_indicators():
         data = get_macro_monetary_comprehensive_overview()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market/macro-board")
 def api_market_macro_board():
@@ -518,7 +547,7 @@ def api_market_macro_board():
         data = get_macro_board_summary()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market/macro-detail")
 def api_market_macro_detail(indicator: str = Query("USDVND", description="Macro indicator code (e.g. USDVND, VN10Y, SBV_OMO, CPI_VN, GDP_VN, PMI_VN, FDI_VN, DXY, BRENT)")):
@@ -527,7 +556,7 @@ def api_market_macro_detail(indicator: str = Query("USDVND", description="Macro 
         data = get_macro_indicator_detail(indicator_code=indicator)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market/macro-documents")
 def api_market_macro_documents(
@@ -540,7 +569,7 @@ def api_market_macro_documents(
         data = get_macro_research_documents(category=category, year=year, keyword=keyword)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/global/commodities")
 def api_global_commodities():
@@ -549,7 +578,7 @@ def api_global_commodities():
         data = get_global_commodities_overview()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/etf/rebalancing")
 def api_etf_rebalancing():
@@ -558,7 +587,7 @@ def api_etf_rebalancing():
         data = get_etf_rebalancing_overview()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market/events-calendar")
 def api_market_events_calendar(
@@ -581,7 +610,7 @@ def api_market_events_calendar(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market/upgrade-tracker")
 def api_market_upgrade_tracker():
@@ -590,7 +619,7 @@ def api_market_upgrade_tracker():
         data = get_market_upgrade_tracker()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/macro/monetary-policy")
 def api_macro_monetary_policy():
@@ -599,7 +628,7 @@ def api_macro_monetary_policy():
         data = get_macro_monetary_comprehensive_overview()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/market-news")
 def api_market_news():
@@ -608,7 +637,7 @@ def api_market_news():
         data = get_market_news()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/rss-news")
 def api_rss_news(
@@ -640,7 +669,7 @@ def api_rss_news(
             "has_more": data.get("has_more", False)
         })
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/top-movers")
 def api_top_movers():
@@ -649,7 +678,7 @@ def api_top_movers():
         data = get_top_movers()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/sectors/overview")
 def api_sectors_overview():
@@ -658,7 +687,7 @@ def api_sectors_overview():
         data = get_sector_indices_analytics()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/sectors/history")
 def api_sectors_history(
@@ -671,7 +700,7 @@ def api_sectors_history(
         data = get_sector_history(sector_code=sector, interval=interval, timeframe=timeframe)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/sectors/rrg")
 def api_sectors_rrg(
@@ -788,7 +817,7 @@ def api_sectors_rrg(
             pass
         return JSONResponse(content={"status": "success", "data": payload})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/peers")
 def api_company_peers(
@@ -801,7 +830,7 @@ def api_company_peers(
         data = get_company_peers(symbol=symbol, top_k=top_k, exchange=exchange)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/symbols/stats")
 def api_symbols_stats():
@@ -810,7 +839,7 @@ def api_symbols_stats():
         data = get_symbols_stats()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.post("/api/symbols/sync")
 def api_symbols_sync(force: bool = Query(False, description="Force re-fetch from all providers")):
@@ -819,7 +848,7 @@ def api_symbols_sync(force: bool = Query(False, description="Force re-fetch from
         data = sync_universe_from_vnstock(force=force)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/search")
 def api_search(q: str = Query("", description="Query symbol or name")):
@@ -863,7 +892,7 @@ def api_search(q: str = Query("", description="Query symbol or name")):
             data = matched_macro + data
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/article-content")
 def api_article_content(url: str = Query(..., description="Full URL of the article to extract")):
@@ -934,7 +963,7 @@ def api_quant_screener(
             pass
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/company/earnings-engine")
 def api_company_earnings_engine(symbol: str = Query("FPT", description="Stock ticker symbol")):
@@ -943,7 +972,7 @@ def api_company_earnings_engine(symbol: str = Query("FPT", description="Stock ti
         data = get_company_earnings_engine(symbol=symbol)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.post("/api/screener/quant-sync")
 def api_quant_sync(force: bool = Query(True, description="Force re-compute full universe snapshot")):
@@ -952,7 +981,7 @@ def api_quant_sync(force: bool = Query(True, description="Force re-compute full 
         data = compute_quant_percentile_universe(force_recompute=force)
         return JSONResponse(content={"status": "success", "total_symbols": data.get("total_symbols", 0), "updated_at": data.get("updated_at")})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 # ==============================================================================
 # VNSTOCK QUANT SCREENER HISTORICAL BACKTESTING API ENDPOINTS
@@ -965,7 +994,7 @@ def api_backtest_strategies():
         data = get_strategy_definitions()
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.post("/api/backtest/compare")
 def api_backtest_compare(
@@ -994,7 +1023,7 @@ def api_backtest_compare(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.post("/api/backtest/run")
 def api_backtest_run(
@@ -1025,7 +1054,7 @@ def api_backtest_run(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.api_route("/api/screener/quick-backtest", methods=["GET", "POST"])
 def api_screener_quick_backtest(
@@ -1102,7 +1131,7 @@ def api_screener_quick_backtest(
             }
         })
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 # ==============================================================================
 # INSTITUTIONAL-GRADE QUANT VALIDATION LAB API ENDPOINTS
@@ -1175,7 +1204,7 @@ def api_quant_institutional_run(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.api_route("/api/quant/institutional/sensitivity", methods=["GET", "POST"])
 def api_quant_institutional_sensitivity(
@@ -1206,7 +1235,7 @@ def api_quant_institutional_sensitivity(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.api_route("/api/quant/institutional/walk-forward", methods=["GET", "POST"])
 def api_quant_institutional_walk_forward(
@@ -1227,7 +1256,7 @@ def api_quant_institutional_walk_forward(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.api_route("/api/quant/institutional/monte-carlo", methods=["GET", "POST"])
 def api_quant_institutional_monte_carlo(
@@ -1275,7 +1304,7 @@ def api_quant_institutional_monte_carlo(
         )
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.get("/api/data-lake-status")
 def api_data_lake_status():
@@ -1289,7 +1318,7 @@ def api_data_lake_status():
         _cache.set("api_data_lake_status", data, ttl_seconds=300)
         return JSONResponse(content={"status": "success", "data": data})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 # ==============================================================================
 # 22-MODEL QUANTITATIVE VALUATION & 3-MODE MODULAR BACKTEST API ENDPOINTS
@@ -1325,8 +1354,13 @@ def api_get_comprehensive_valuation(
             omnibus_metric=metric,
         )
         return JSONResponse(content={"status": "success", "data": val_res.to_dict()})
+    except ValueError as e:
+        # Missing or unusable inputs (no fundamentals, no price): a data gap,
+        # not a server fault. Surfaced so the UI can say why rather than
+        # rendering a valuation built on defaults.
+        return JSONResponse(status_code=422, content={"status": "error", "message": str(e)})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 
 @app.get("/api/valuation/matrix")
@@ -1362,7 +1396,7 @@ def api_get_three_statement_forecast(
         )
         return JSONResponse(content={"status": "success", "data": forecast_res.to_dict()})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 
 @app.get("/api/valuation/export-excel/{symbol}")
@@ -1399,7 +1433,7 @@ def api_export_financial_model_excel(
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 
 @app.get("/api/backtest/fair_value/presets")
@@ -1468,7 +1502,7 @@ def api_run_fair_value_backtest(
         )
         return JSONResponse(content={"status": "success", "data": res.to_dict()})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 # ==============================================================================
 # PRICE ALERTS API ENDPOINTS
@@ -1503,7 +1537,7 @@ def api_create_alert(rule: AlertRuleCreate):
         _save_alert_rules()
         return JSONResponse(content={"status": "success", "data": item})
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 @app.delete("/api/alerts/{rule_id}")
 def api_delete_alert(rule_id: int):
@@ -1600,7 +1634,7 @@ def api_quant_screener_export_csv(
             headers={"Content-Disposition": "attachment; filename=quant_screener.csv"}
         )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
+        return _error_response(e)
 
 # Static files
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

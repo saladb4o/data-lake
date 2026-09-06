@@ -26,12 +26,14 @@ data/**/*.pdf
 data/exports/
 
 # Pytest & Coverage
+tests/output_*.txt
 .pytest_cache/
 .coverage
 htmlcov/
 
 # Temporary files & Scratch
 scratch/
+scratch_*
 temp_pdf_scratch/
 *.tmp
 *.tmp_*
@@ -43,3 +45,6 @@ all_shards/
 .vscode/
 .idea/
 *.swp
+
+# Agent working notes / scratch output
+.agents/

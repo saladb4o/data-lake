@@ -220,13 +220,22 @@ class TestValuationEngineComprehensiveNullSafety:
         return ValuationEngine()
 
     def test_valuation_with_none_fundamental_data(self, engine):
-        val = engine.get_comprehensive_valuation("TEST_NONE", fundamental_data=None)
-        assert isinstance(val, ValuationMatrixResult)
-        assert val.composite_fair_value > 0
-        assert len(val.models) == 22
+        # Mock-data fallback is deliberately disabled (see the no-silent-fills
+        # policy in test_gate3_no_silent_fills.py): with no fundamental data and
+        # no screener snapshot on disk, valuation must fail loudly rather than
+        # invent inputs.
+        with pytest.raises(ValueError, match="Fundamental data is required"):
+            engine.get_comprehensive_valuation("TEST_NONE", fundamental_data=None)
 
-    def test_valuation_with_empty_dict(self, engine):
-        val = engine.get_comprehensive_valuation("TEST_EMPTY", fundamental_data={})
+    def test_valuation_with_empty_dict_is_rejected(self, engine):
+        # No price means no anchor for upside or margin of safety, so the
+        # engine refuses rather than defaulting one.
+        with pytest.raises(ValueError, match="[Pp]rice"):
+            engine.get_comprehensive_valuation("TEST_EMPTY", fundamental_data={})
+
+    def test_valuation_with_only_a_price(self, engine):
+        """Null-safety proper: a real price, every other field absent."""
+        val = engine.get_comprehensive_valuation("TEST_EMPTY", fundamental_data={"price": 20000.0})
         assert isinstance(val, ValuationMatrixResult)
         assert val.composite_fair_value > 0
         assert len(val.models) == 22
@@ -237,6 +246,14 @@ class TestValuationEngineComprehensiveNullSafety:
     def test_valuation_with_all_keys_explicit_none(self, engine):
         none_dict = {k: None for k in ALL_POSSIBLE_FUNDAMENTAL_KEYS}
         none_dict["symbol"] = "TEST_ALL_NONE"
+
+        # Price is the one field that cannot be defaulted away.
+        with pytest.raises(ValueError, match="[Pp]rice"):
+            engine.get_comprehensive_valuation("TEST_ALL_NONE", fundamental_data=dict(none_dict))
+
+        # With a real price and everything else None, nothing may crash or
+        # produce NaN/Inf.
+        none_dict["price"] = 20000.0
         val = engine.get_comprehensive_valuation("TEST_ALL_NONE", fundamental_data=none_dict)
         assert isinstance(val, ValuationMatrixResult)
         assert val.composite_fair_value > 0
@@ -363,7 +380,7 @@ class TestValuationEngineComprehensiveNullSafety:
         assert not math.isinf(val.composite_fair_value)
 
     def test_serialization_to_dict(self, engine):
-        val = engine.get_comprehensive_valuation("TEST_SERIALIZE", fundamental_data={})
+        val = engine.get_comprehensive_valuation("TEST_SERIALIZE", fundamental_data={"price": 20000.0})
         d = val.to_dict()
         assert isinstance(d, dict)
         assert "symbol" in d

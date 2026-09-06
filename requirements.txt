@@ -1,14 +1,28 @@
+# Core runtime (web API + launcher)
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
 python-dotenv>=1.0.0
+
+# HTTP & scraping
 requests>=2.31.0
+urllib3>=2.0.0
 beautifulsoup4>=4.12.0
-pdfplumber>=0.11.0
-PyMuPDF>=1.24.0
-vnstock>=3.5.1
+
+# Data & analytics
 pandas>=2.0.0
 numpy>=1.24.0
-urllib3>=2.0.0
-tqdm>=4.66.0
-openpyxl>=3.1.0
+vnstock>=3.5.1
 yfinance>=0.2.0
+
+# PDF / OCR extraction pipeline (BCTC)
+pdfplumber>=0.11.0
+PyMuPDF>=1.24.0
 rapidocr-onnxruntime>=1.3.8
 onnxruntime>=1.16.0
+
+# Export
+openpyxl>=3.1.0
+
+# CLI
+tqdm>=4.66.0
