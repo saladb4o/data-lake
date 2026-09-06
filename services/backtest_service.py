@@ -1888,12 +1888,16 @@ def _filter_stocks_for_strategy(
             if len(codes) >= 4:
                 try:
                     rets = [float(quarters[k].get("return_pct", 0.0)) for k in codes]
-                    std = float(np.std(rets)) if len(rets) > 1 else 1.0
+                    std = float(np.std(rets, ddof=1)) if len(rets) > 1 else None
                 except Exception:
-                    std = 10.0
+                    std = None
             else:
-                std = 10.0
-            vol_adj = mom / max(1.0, std)
+                std = None
+            # Volatility-adjusted momentum needs a measured volatility. It used
+            # to divide by max(1.0, std) and substitute 10.0 when unmeasurable,
+            # so a symbol with no return history was ranked on an invented
+            # denominator. Without one, rank on raw momentum alone.
+            vol_adj = mom / std if (std is not None and std >= 0.01) else mom
             return (mom, vol_adj)
 
         passing = [c for c in candidates if _t12m_momentum(price_db, c.get("symbol")) > 0]

@@ -460,13 +460,20 @@ def compute_fundamental_law_active_management(
     if ic_values:
         empirical_ic = float(np.mean(ic_values))
         ic_mean = 0.60 * empirical_ic + 0.40 * base_ic
-        ic_std = float(np.std(ic_values, ddof=1)) if len(ic_values) > 1 else 0.08
+        ic_std = float(np.std(ic_values, ddof=1)) if len(ic_values) > 1 else None
     else:
         ic_mean = base_ic
-        ic_std = 0.08
+        ic_std = None
 
     ic_mean = round(float(np.clip(ic_mean, -0.05, 0.25)), 4)
-    ic_ir = round(ic_mean / max(0.001, ic_std), 2)
+    # The information ratio is IC divided by its own dispersion. With fewer
+    # than two IC observations there is no dispersion to divide by; a
+    # substituted 0.08 turned a single reading into a confident-looking ratio,
+    # and the max(0.001, ...) clamp let a near-zero one produce a huge value.
+    ic_ir = (
+        round(ic_mean / ic_std, 2)
+        if (ic_std is not None and ic_std >= 0.001) else None
+    )
     is_overfitted = bool(ic_mean > 0.15)
     ic_warning = "⚠️ Cảnh báo: IC > 0.15 là cực kỳ hiếm trong thực tế, cần kiểm tra nguy cơ Overfitting hoặc Look-ahead bias." if is_overfitted else ""
 
@@ -587,7 +594,7 @@ def compute_fundamental_law_active_management(
         "active_return_cagr_pct": round(active_return_cagr, 2),
         "tracking_error_pct": round(ann_tracking_error, 2),
         "information_coefficient": ic_mean,
-        "ic_std": round(ic_std, 4),
+        "ic_std": round(ic_std, 4) if ic_std is not None else None,
         "ic_ir": ic_ir,
         "is_overfitted": is_overfitted,
         "ic_warning": ic_warning,
@@ -1954,10 +1961,16 @@ def run_monte_carlo_stress_test(
             mdd = max(mdd, abs(dd))
             
         tot_ret = ((cap - initial_capital) / initial_capital) * 100.0
-        std_pnl = float(np.std(resampled_pnls)) if len(resampled_pnls) > 1 else 1.0
-        sh = (np.mean(resampled_pnls) / max(0.1, std_pnl)) * math.sqrt(n_trades / max(1, (n_trades / 12.0)))
-        
-        bootstrap_sharpes.append(sh)
+        # Same clamped-denominator defect as the headline ratios: dividing by
+        # max(0.1, std) inflates the bootstrap Sharpe whenever a resample has
+        # low dispersion, and substituting 1.0 invents it outright. A draw with
+        # no measurable dispersion contributes no Sharpe rather than a large one.
+        std_pnl = float(np.std(resampled_pnls, ddof=1)) if len(resampled_pnls) > 1 else None
+        if std_pnl is not None and std_pnl >= 0.01:
+            sh = (np.mean(resampled_pnls) / std_pnl) * math.sqrt(
+                n_trades / max(1, (n_trades / 12.0))
+            )
+            bootstrap_sharpes.append(sh)
         bootstrap_returns.append(tot_ret)
         bootstrap_max_dds.append(mdd * 100.0)
         
@@ -1975,18 +1988,27 @@ def run_monte_carlo_stress_test(
             p_mdd = max(p_mdd, abs(p_dd))
         permutation_max_dds.append(p_mdd * 100.0)
 
-    ci_sharpe = [round(float(np.percentile(bootstrap_sharpes, 2.5)), 2), round(float(np.percentile(bootstrap_sharpes, 97.5)), 2)]
+    # Draws with no measurable dispersion contribute no Sharpe, so this can be
+    # empty; an interval over nothing is None, not [0, 0].
+    ci_sharpe = (
+        [round(float(np.percentile(bootstrap_sharpes, 2.5)), 2),
+         round(float(np.percentile(bootstrap_sharpes, 97.5)), 2)]
+        if bootstrap_sharpes else None
+    )
     ci_return = [round(float(np.percentile(bootstrap_returns, 2.5)), 2), round(float(np.percentile(bootstrap_returns, 97.5)), 2)]
     ci_max_dd = [round(float(np.percentile(bootstrap_max_dds, 2.5)), 2), round(float(np.percentile(bootstrap_max_dds, 97.5)), 2)]
     
     perm_worst_dd = round(float(np.percentile(permutation_max_dds, 99.0)), 2)
     perm_median_dd = round(float(np.median(permutation_max_dds)), 2)
 
-    hist_sharpe, bin_edges = np.histogram(bootstrap_sharpes, bins=20)
-    sharpe_distribution = [
-        {"bin": round(float((bin_edges[k] + bin_edges[k+1]) / 2.0), 2), "count": int(hist_sharpe[k])}
-        for k in range(len(hist_sharpe))
-    ]
+    if bootstrap_sharpes:
+        hist_sharpe, bin_edges = np.histogram(bootstrap_sharpes, bins=20)
+        sharpe_distribution = [
+            {"bin": round(float((bin_edges[k] + bin_edges[k+1]) / 2.0), 2), "count": int(hist_sharpe[k])}
+            for k in range(len(hist_sharpe))
+        ]
+    else:
+        sharpe_distribution = []
 
     return {
         "status": "success",

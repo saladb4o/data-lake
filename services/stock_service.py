@@ -9535,11 +9535,35 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
 
     # Correction 2: Empirical Historical Z-Score Cyclical Mean Reversion
     is_cyclical = stock_quant.get("is_cyclical", False)
-    median_10y_opm = deep_m.get("hist_mean_opm", round(op_margin * (0.75 if is_cyclical else 0.92), 1))
-    std_10y_opm = deep_m.get("hist_std_opm", max(1.8, round(op_margin * (0.35 if is_cyclical else 0.15), 1)))
-    margin_zscore = round((op_margin - median_10y_opm) / max(0.5, std_10y_opm), 2)
+    # When the BCTC history is absent, the historical mean and standard
+    # deviation used to be derived from the CURRENT margin - mean =
+    # op_margin * 0.92, std = op_margin * 0.15 - which makes the z-score
+    # algebraically constant: (0.08 * m) / (0.15 * m) = 0.53 for any
+    # non-cyclical company, 0.71 for any cyclical one. Since the phase
+    # thresholds are +/-1.5, the cycle detector could never fire on that path;
+    # it always reported "expansion" while displaying a confident z-score
+    # labelled "Empirical Historical". Without real history there is no
+    # z-score to report.
+    median_10y_opm = _finite_or_none(deep_m.get("hist_mean_opm"))
+    std_10y_opm = _finite_or_none(deep_m.get("hist_std_opm"))
+    has_margin_history = (
+        median_10y_opm is not None and std_10y_opm is not None and std_10y_opm > 0
+    )
+    margin_zscore = (
+        round((op_margin - median_10y_opm) / std_10y_opm, 2)
+        if has_margin_history else None
+    )
 
-    if margin_zscore > 1.5:
+    if not has_margin_history:
+        cyclical_phase = "⚪ CHƯA XÁC ĐỊNH (Thiếu lịch sử biên LN)"
+        cyclical_badge = "badge-muted"
+        cyclical_desc = (
+            "Chưa có đủ lịch sử biên lợi nhuận từ BCTC để xác định pha chu kỳ. "
+            "Trước đây mục này suy trung bình và độ lệch chuẩn từ chính biên "
+            "hiện tại, nên Z-Score luôn ra ~0.53 với mọi doanh nghiệp."
+        )
+        cyclical_factor = 1.0
+    elif margin_zscore > 1.5:
         cyclical_phase = "🔴 ĐỈNH CHU KỲ (Peak Cycle)"
         cyclical_badge = "badge-danger"
         cyclical_desc = f"CẢNH BÁO BẪY P/E RẺ: Biên HĐKD ({op_margin:.1f}%) vượt trung bình lịch sử ({median_10y_opm:.1f}%) với Z-Score = {margin_zscore:+.2f} (Đỉnh chu kỳ). Thuật toán đã kích hoạt cơ chế kéo biên LN về trung vị để ngăn chặn rủi ro đu đỉnh."
@@ -9606,7 +9630,11 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     if is_one_off_distorted:
         base_conf -= 15
 
-    if margin_zscore > 1.5:
+    if margin_zscore is None:
+        # No cycle reading, so no cycle adjustment - and less confidence,
+        # because a driver is missing rather than favourable.
+        base_conf -= 10
+    elif margin_zscore > 1.5:
         base_conf -= 20
     elif margin_zscore < -1.5:
         base_conf += 10
@@ -9921,6 +9949,9 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
         "growth_attribution": growth_attribution,
         "corrections": {
             "reported_eps": f"{cur_eps:,.0f} đ" if has_eps else "Không có",
+            # True when BVPS was price / P/B rather than reported, which makes
+            # the P/B models a restatement of the price.
+            "bvps_is_derived_from_price": bvps_is_derived,
             "core_pat_ratio": f"{core_pat_ratio:.1f}%",
             "normalized_core_eps": f"{normalized_eps:,.0f} đ",
             "one_off_impact": f"{one_off_impact_pct:+.1f}%",
@@ -9928,8 +9959,9 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             "one_off_status": one_off_status,
             "one_off_badge": one_off_badge,
             "one_off_verdict": one_off_verdict,
-            "margin_zscore": f"{margin_zscore:+.2f}",
+            "margin_zscore": f"{margin_zscore:+.2f}" if margin_zscore is not None else "Không đủ dữ liệu",
             "margin_zscore_num": margin_zscore,
+            "margin_history_available": has_margin_history,
             "median_10y_opm": f"{median_10y_opm:.1f}%",
             "current_opm": f"{op_margin:.1f}%",
             "cyclical_phase": cyclical_phase,
