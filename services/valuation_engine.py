@@ -2492,8 +2492,11 @@ class ValuationEngine:
 
         shares = max(res.resolve("shares", ("shares_out", "shares"),
                                  impute=lambda: 1e8, require_positive=True), 1.0)
+        # "market_cap_vnd" first: the screener record publishes "market_cap"
+        # in billions for the UI, and reading that as VND would understate
+        # every enterprise-value model by a factor of 1e9 without erroring.
         mcap = res.resolve(
-            "market_cap", ("market_cap",),
+            "market_cap", ("market_cap_vnd", "market_cap"),
             derive=(("shares",), lambda: price * shares),
             impute=lambda: price * shares, require_positive=True,
         )

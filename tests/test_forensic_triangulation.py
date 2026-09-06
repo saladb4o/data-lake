@@ -30,7 +30,7 @@ from services.unified_data_service import (
     normalize_stock_data,
     load_source0_symbol_data
 )
-from tests.test_normalizer import GOLDEN_KEYS
+from tests.test_normalizer import GOLDEN_KEYS, OPTIONAL_LINE_KEYS
 
 
 # =============================================================================
@@ -321,9 +321,14 @@ def test_normalize_stock_data_source0_integration():
         source0_data=s0
     )
 
-    # 1. Exact top-level key preservation
-    assert set(rec.keys()) == GOLDEN_KEYS, (
-        f"Key drift: extra={set(rec.keys()) - GOLDEN_KEYS}, missing={GOLDEN_KEYS - set(rec.keys())}"
+    # 1. Top-level key preservation. The absolute statement lines are
+    # published only when the record has evidence for them, so they are
+    # allowed extras rather than part of the fixed contract - see
+    # tests/test_normalizer.py::OPTIONAL_LINE_KEYS.
+    keys = set(rec.keys())
+    assert GOLDEN_KEYS <= keys, f"top-level keys went missing: {GOLDEN_KEYS - keys}"
+    assert (keys - GOLDEN_KEYS) <= OPTIONAL_LINE_KEYS, (
+        f"Key drift: {keys - GOLDEN_KEYS - OPTIONAL_LINE_KEYS}"
     )
 
     # 2. Metadata contains Source 0 artifacts

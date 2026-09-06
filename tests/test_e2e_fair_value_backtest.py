@@ -49,9 +49,16 @@ _SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
 
 
 
-@pytest.fixture(scope="module")
-def api_client():
-    """FastAPI TestClient instance for opaque-box REST API assertions."""
+@pytest.fixture
+def api_client(screener_snapshot):
+    """FastAPI TestClient instance for opaque-box REST API assertions.
+
+    Depends on the screener snapshot fixture. Without it the valuation
+    endpoint finds no snapshot, falls through to a live multi-source sync,
+    and asserts against whatever the network returns - nothing at all when
+    there is no network. Function-scoped for the same reason: the snapshot
+    fixture is per-test.
+    """
     return TestClient(app)
 
 
