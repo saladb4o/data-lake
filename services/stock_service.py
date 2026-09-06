@@ -570,6 +570,75 @@ HNX_KNOWN = {"SHS", "MBS", "PVS", "IDC", "CEO", "HUT", "VCS", "TNG", "BVS", "PVC
 UPCOM_KNOWN = {"BSR", "MCH", "VGI", "ACV", "VEA", "QNS", "FOX", "C4G", "MSR", "OIL", "DRI", "TBD", "NAB"}
 
 ALL_SYMBOLS_MAP: Dict[str, Dict[str, Any]] = {}
+
+
+# ---------------------------------------------------------------------------
+# Reference price access
+# ---------------------------------------------------------------------------
+# ALL_SYMBOLS_MAP carries ``ref`` (reference price, in thousands of VND) and
+# ``market_cap`` as None when the exchange feed did not supply them. They used
+# to be invented - first from crc32(symbol) at map-build time, then again at
+# each read site via ``.get("ref", 50.0)``. A 50,000 VND price out of thin air
+# is indistinguishable from a real one once it reaches a chart or a valuation,
+# so these helpers make the absence explicit: callers either propagate None or
+# refuse, and never substitute a number.
+
+def _finite_or_none(raw: Any) -> Optional[float]:
+    """Returns a finite float, or None for anything unusable."""
+    if raw is None or raw == "":
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def master_ref_price(master_info: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Reference price in thousands of VND, or None when not quoted."""
+    if not isinstance(master_info, dict):
+        return None
+    raw = master_info.get("ref")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def master_price_vnd(master_info: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Reference price in VND, or None when not quoted."""
+    ref = master_ref_price(master_info)
+    return None if ref is None else ref * 1000.0
+
+
+def require_master_price_vnd(symbol: str, master_info: Optional[Dict[str, Any]]) -> float:
+    """Reference price in VND, or raises. Mirrors valuation_engine._require_price."""
+    price = master_price_vnd(master_info)
+    if price is None:
+        raise ValueError(
+            f"No reference price is available for {symbol}; analysis against a "
+            "default price is disabled."
+        )
+    return price
+
+
+def master_market_cap(master_info: Optional[Dict[str, Any]]) -> Optional[float]:
+    """Market cap as reported, or None when not supplied."""
+    if not isinstance(master_info, dict):
+        return None
+    raw = master_info.get("market_cap")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 TICKER_ENTITY_MAP: Dict[str, Dict[str, Any]] = {}
 NAME_TO_TICKER_MAP: Dict[str, str] = {}
 INDUSTRY_TO_TICKERS: Dict[str, Set[str]] = {}
@@ -945,20 +1014,27 @@ def load_master_universe():
                     if not industry_title:
                         industry_title = r.get("industry") or (SECTOR_ICB_REGISTRY.get(sec, {}).get("name", "Doanh nghiệp niêm yết"))
 
-                    ref = float(r.get("ref", 0.0))
-                    if ref <= 0:
-                        h_seed = deterministic_hash(sym)
-                        ref = round(15.0 + (h_seed % 85) + ((h_seed % 90) / 100.0), 2)
-                    
+                    # A missing reference price or market cap used to be
+                    # invented from crc32(symbol): ref became a number between
+                    # 15 and 100, market cap between 1,500 and 146,500bn. The
+                    # values were stable across runs, which made them look
+                    # like real observations rather than a function of how the
+                    # ticker is spelled - and ALL_SYMBOLS_MAP feeds the
+                    # screener, the peer engine and the backtest universe, so
+                    # the fabrication propagated everywhere downstream.
+                    # Absent quotes are now absent.
+                    ref_raw = float(r.get("ref", 0.0))
+                    ref = ref_raw if ref_raw > 0 else None
+
                     ceil = float(r.get("ceil", 0.0))
                     flor = float(r.get("floor", 0.0))
-                    if ceil <= 0 or flor <= 0:
+                    if (ceil <= 0 or flor <= 0) and ref is not None:
                         ceil, flor = get_price_limits(ex, ref)
+                    elif ref is None:
+                        ceil, flor = None, None
 
-                    cap = int(r.get("market_cap", 0))
-                    if cap <= 0:
-                        h_seed = deterministic_hash(sym)
-                        cap = int(1500 + (h_seed % 145000))
+                    cap_raw = int(r.get("market_cap", 0))
+                    cap = cap_raw if cap_raw > 0 else None
 
                     ALL_SYMBOLS_MAP[sym] = {
                         "symbol": sym,
@@ -1230,7 +1306,16 @@ def generate_order_book_depth(symbol: str) -> Dict[str, Any]:
 
     if ref is None or ceil_p is None or floor_p is None:
         info = ALL_SYMBOLS_MAP.get(symbol, {})
-        ref = ref or info.get("ref", 50.0)
+        ref = ref if ref is not None else master_ref_price(info)
+        if ref is None:
+            # An order book drawn around an invented reference price looks
+            # exactly like a real one. Report the absence instead.
+            return {
+                "symbol": symbol,
+                "status": "unavailable",
+                "reason": "no reference price for this symbol",
+                "bids": [], "asks": [],
+            }
         ceil_p, floor_p = get_price_limits(info.get("exchange", "HOSE"), ref)
 
     # Extract Bid 1, 2, 3
@@ -1337,7 +1422,9 @@ def get_trading_board_row(symbol: str, quote: Optional[Dict[str, Any]] = None) -
     """
     info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
     ex = info.get("exchange", "HOSE")
-    ref = info.get("ref", 20.0)
+    # None when the exchange feed carried no quote. Downstream renders it as
+    # "no data" rather than as a 20,000 VND stock that does not exist.
+    ref = master_ref_price(info)
     ceil_p = info.get("ceil", 0.0)
     floor_p = info.get("floor", 0.0)
     if ceil_p <= 0 or floor_p <= 0:
@@ -1770,9 +1857,9 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
     cached = cache.get(cache_key)
     if cached: return cached
 
-    master_info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE", "ref": 50.0})
-    ref = master_info.get("ref", 50.0)
-    ceil, flor = get_price_limits(master_info.get("exchange", "HOSE"), ref)
+    master_info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
+    ref = master_ref_price(master_info)
+    ceil, flor = get_price_limits(master_info.get("exchange", "HOSE"), ref) if ref is not None else (None, None)
 
     now_d = datetime.date.today()
     end_str = now_d.strftime("%Y-%m-%d")
@@ -2015,9 +2102,9 @@ def get_company_overview(symbol: str) -> Dict[str, Any]:
     cached = cache.get(cache_key)
     if cached: return cached
 
-    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE", "market_cap": 25000})
+    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
     sec_name = SECTOR_METADATA.get(info.get("sector", ""), {}).get("name", "Đang cập nhật")
-    ref = info.get("ref", 50.0)
+    ref = master_ref_price(info)
 
     # 1. Fast L2 lookup from screener_snapshot.json / company_profiles.json
     snap = disk_lake.read_json("screener_snapshot.json") or {}
@@ -4788,7 +4875,7 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
         snap = disk_lake.read_json("screener_snapshot.json") or {}
         curr_price = float(snap.get("stocks", {}).get(symbol, {}).get("price") or 0.0)
     if curr_price <= 0:
-        curr_price = float(ALL_SYMBOLS_MAP.get(symbol, {}).get("ref", 50.0))
+        curr_price = master_price_vnd(ALL_SYMBOLS_MAP.get(symbol)) or 0.0
 
     FIRM_NAME_MAP = {
         "VND": "VNDIRECT Research",
@@ -5149,8 +5236,10 @@ def get_symbol_global_valuation(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
-    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE", "ref": 50.0, "market_cap": 25000})
-    ref = float(info.get("ref", 50.0))
+    info = ALL_SYMBOLS_MAP.get(symbol, {"name": f"Công ty {symbol}", "exchange": "HOSE"})
+    # A valuation anchored to an invented price is worse than no valuation:
+    # the upside it reports is measured against a number nobody quoted.
+    ref = require_master_price_vnd(symbol, info) / 1000.0
 
     # Current live price
     curr_price = 0.0
@@ -5332,8 +5421,8 @@ def get_symbol_technical_consensus(symbol: str) -> Dict[str, Any]:
     if cached:
         return cached
 
-    info = ALL_SYMBOLS_MAP.get(symbol, {"ref": 50.0})
-    ref = float(info.get("ref", 50.0))
+    info = ALL_SYMBOLS_MAP.get(symbol, {})
+    ref = require_master_price_vnd(symbol, info) / 1000.0
 
     # Fetch daily history
     hist_data = get_stock_history(symbol, interval="1D", timeframe="1Y")
@@ -5861,7 +5950,7 @@ def get_company_financial_statements(symbol: str, statement_type: str = "income"
             val_lookup[c][fdate] = it.get('numericValue')
 
     master_info = ALL_SYMBOLS_MAP.get(symbol, {})
-    latest_market_price = master_info.get("ref", 50.0) * 1000.0 # Price in VNĐ
+    latest_market_price = master_price_vnd(master_info)  # None when unquoted
 
     # 5. Handle Ratio Mode vs Statement Mode
     rows = []
@@ -6176,7 +6265,7 @@ def get_company_financial_health(symbol: str) -> Dict[str, Any]:
         return 0.0
 
     # Key Fundamental Metrics
-    cur_price = master_info.get("ref", 50.0) * 1000.0  # VNĐ
+    cur_price = require_master_price_vnd(symbol, master_info)  # VNĐ
     mkt_cap = master_info.get("market_cap", 0.0)
     pe = _parse_val("Hệ số Giá / Lợi nhuận (P/E)") or master_info.get("pe", 12.0)
     pb = _parse_val("Hệ số Giá / Giá trị sổ sách (P/B)") or master_info.get("pb", 1.8)
@@ -6847,13 +6936,19 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
         target_sector = "VNIND"
 
     # Target financial features
-    cur_ref = float(master_info.get("ref", 50.0))
-    cur_cap = float(master_info.get("market_cap", 25000))
-    cur_pe = float(master_info.get("pe", 14.0))
-    cur_pb = float(master_info.get("pb", 2.0))
-    cur_roe = float(master_info.get("roe", 16.0))
-    cur_roa = float(master_info.get("roa", 8.0))
-    cur_eps = int(master_info.get("eps", int(cur_ref * 1000 / max(1.0, cur_pe))))
+    # Peer similarity is a distance over financial features. When a feature was
+    # absent it used to be invented from crc32(symbol) - market cap, ROE, ROA,
+    # P/E and P/B all had hash-derived defaults - so the "algorithmic peer
+    # ranking" for a thinly covered ticker was a ranking over the letters of
+    # the tickers. A feature that is missing now drops out of the distance
+    # instead, and the dimensions actually used are reported.
+    cur_ref = master_ref_price(master_info)
+    cur_cap = master_market_cap(master_info)
+    cur_pe = _finite_or_none(master_info.get("pe"))
+    cur_pb = _finite_or_none(master_info.get("pb"))
+    cur_roe = _finite_or_none(master_info.get("roe"))
+    cur_roa = _finite_or_none(master_info.get("roa"))
+    cur_eps = _finite_or_none(master_info.get("eps"))
 
     # Target record
     current_entry = {
@@ -6862,12 +6957,12 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
         "name": master_info.get("name") or master_info.get("organ_name") or f"CTCP {symbol}",
         "exchange": master_info.get("exchange", "HOSE"),
         "price": cur_ref,
-        "change_pct": round(float(master_info.get("change_pct", (deterministic_hash(symbol) % 40 - 20) / 10.0)), 2),
-        "market_cap": int(cur_cap),
-        "pe": round(cur_pe, 1),
-        "pb": round(cur_pb, 2),
-        "roe": round(cur_roe, 1),
-        "roa": round(cur_roa, 1),
+        "change_pct": _finite_or_none(master_info.get("change_pct")),
+        "market_cap": int(cur_cap) if cur_cap else None,
+        "pe": round(cur_pe, 1) if cur_pe is not None else None,
+        "pb": round(cur_pb, 2) if cur_pb is not None else None,
+        "roe": round(cur_roe, 1) if cur_roe is not None else None,
+        "roa": round(cur_roa, 1) if cur_roa is not None else None,
         "eps": cur_eps,
         "similarity_score": 100.0,
         "similarity_grade": "Tuyệt đối",
@@ -6876,7 +6971,7 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
 
     # 2. Algorithmic candidate pool screening across ALL_SYMBOLS_MAP
     candidates = []
-    log_target_cap = math.log10(max(10.0, cur_cap))
+    log_target_cap = math.log10(max(10.0, cur_cap)) if cur_cap else None
 
     for sym, c_info in ALL_SYMBOLS_MAP.items():
         if sym == symbol:
@@ -6913,37 +7008,52 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
             s_icb = max(s_icb, 0.88)
             match_tags.append("Cổ phiếu tiêu biểu ngành")
 
-        # Step B: Scale similarity (Log Market Cap Distance)
-        h_sym = deterministic_hash(sym)
-        cand_cap = float(c_info.get("market_cap", int(15000 + (h_sym % 120000))))
-        log_cand_cap = math.log10(max(10.0, cand_cap))
-        cap_diff = abs(log_target_cap - log_cand_cap)
-        s_scale = math.exp(- cap_diff / 1.15)
+        # Each dimension contributes only when BOTH sides report it. Weights
+        # are renormalised over the dimensions that survive, so a comparison
+        # made on industry alone is scored as such rather than being padded
+        # with invented profitability and valuation matches.
+        dims: List[Tuple[float, float]] = [(0.45, s_icb)]
 
-        if cap_diff < 0.35:
-            match_tags.append("Quy mô vốn hóa tương đồng")
+        # Step B: Scale similarity (Log Market Cap Distance)
+        cand_cap = master_market_cap(c_info)
+        cap_diff = None
+        if log_target_cap is not None and cand_cap:
+            cap_diff = abs(log_target_cap - math.log10(max(10.0, cand_cap)))
+            dims.append((0.25, math.exp(-cap_diff / 1.15)))
+            if cap_diff < 0.35:
+                match_tags.append("Quy mô vốn hóa tương đồng")
 
         # Step C: Profitability similarity (ROE & ROA)
-        cand_roe = float(c_info.get("roe", round(14.0 + (h_sym % 150) / 10, 1)))
-        cand_roa = float(c_info.get("roa", round(6.5 + (h_sym % 80) / 10, 1)))
-        d_roe = abs(cur_roe - cand_roe) / 20.0
-        d_roa = abs(cur_roa - cand_roa) / 10.0
-        s_profit = math.exp(- (0.6 * d_roe + 0.4 * d_roa))
+        cand_roe = _finite_or_none(c_info.get("roe"))
+        cand_roa = _finite_or_none(c_info.get("roa"))
+        prof_parts = []
+        if cur_roe is not None and cand_roe is not None:
+            prof_parts.append((0.6, abs(cur_roe - cand_roe) / 20.0))
+        if cur_roa is not None and cand_roa is not None:
+            prof_parts.append((0.4, abs(cur_roa - cand_roa) / 10.0))
+        if prof_parts:
+            w_sum = sum(w for w, _ in prof_parts)
+            dims.append((0.15, math.exp(-sum(w * d for w, d in prof_parts) / w_sum)))
 
         # Step D: Valuation similarity (P/E & P/B)
-        cand_pe = float(c_info.get("pe", round(12.0 + (h_sym % 140) / 10, 1)))
-        cand_pb = float(c_info.get("pb", round(1.2 + (h_sym % 30) / 10, 2)))
-        d_pe = abs(math.log(max(1.0, cur_pe)) - math.log(max(1.0, cand_pe))) / 0.8
-        d_pb = abs(math.log(max(0.2, cur_pb)) - math.log(max(0.2, cand_pb))) / 0.8
-        s_val = math.exp(- (0.5 * d_pe + 0.5 * d_pb))
+        cand_pe = _finite_or_none(c_info.get("pe"))
+        cand_pb = _finite_or_none(c_info.get("pb"))
+        val_parts = []
+        if cur_pe is not None and cand_pe is not None:
+            val_parts.append(abs(math.log(max(1.0, cur_pe)) - math.log(max(1.0, cand_pe))) / 0.8)
+        if cur_pb is not None and cand_pb is not None:
+            val_parts.append(abs(math.log(max(0.2, cur_pb)) - math.log(max(0.2, cand_pb))) / 0.8)
+        if val_parts:
+            dims.append((0.15, math.exp(-sum(val_parts) / len(val_parts))))
 
-        # Composite Multi-Dimensional Score
-        # Weights: Industry (45%), Scale (25%), Profitability (15%), Valuation (15%)
-        raw_score = (0.45 * s_icb + 0.25 * s_scale + 0.15 * s_profit + 0.15 * s_val) * 100.0
+        # Composite Multi-Dimensional Score over the dimensions available
+        total_w = sum(w for w, _ in dims)
+        raw_score = (sum(w * s for w, s in dims) / total_w) * 100.0
         score = round(min(98.8, max(35.0, raw_score)), 1)
+        dimensions_used = len(dims)
 
-        cand_ref = float(c_info.get("ref", 25.0))
-        cand_eps = int(c_info.get("eps", int(cand_ref * 1000 / max(1.0, cand_pe))))
+        cand_ref = master_ref_price(c_info)
+        cand_eps = _finite_or_none(c_info.get("eps"))
 
         if score >= 85.0:
             grade = "Rất cao"
@@ -6960,15 +7070,20 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
             "name": c_info.get("name") or c_info.get("organ_name") or f"CTCP {sym}",
             "exchange": c_info.get("exchange", "HOSE"),
             "price": cand_ref,
-            "change_pct": round(float(c_info.get("change_pct", (abs(hash(sym)) % 40 - 20) / 10.0)), 2),
-            "market_cap": int(cand_cap),
-            "pe": round(cand_pe, 1),
-            "pb": round(cand_pb, 2),
-            "roe": round(cand_roe, 1),
-            "roa": round(cand_roa, 1),
-            "eps": cand_eps,
+            # change_pct was defaulted to (abs(hash(sym)) % 40 - 20) / 10 -
+            # not merely invented but non-deterministic, since Python
+            # randomises str hashing per process, so the same peer showed a
+            # different daily move after every restart.
+            "change_pct": _finite_or_none(c_info.get("change_pct")),
+            "market_cap": int(cand_cap) if cand_cap else None,
+            "pe": round(cand_pe, 1) if cand_pe is not None else None,
+            "pb": round(cand_pb, 2) if cand_pb is not None else None,
+            "roe": round(cand_roe, 1) if cand_roe is not None else None,
+            "roa": round(cand_roa, 1) if cand_roa is not None else None,
+            "eps": int(cand_eps) if cand_eps is not None else None,
             "similarity_score": score,
             "similarity_grade": grade,
+            "similarity_dimensions_used": dimensions_used,
             "match_reason": " • ".join(match_tags) if match_tags else "Cùng nhóm ngành ICB"
         })
 
@@ -9196,9 +9311,18 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
         stock_quant = universe_data.get("stocks", {}).get(symbol)
         if not stock_quant:
             master = ALL_SYMBOLS_MAP.get(symbol, {})
-            ref_p = float(master.get("ref") or 50.0)
-            if ref_p < 500:
-                ref_p *= 1000.0
+            # This branch built a complete synthetic company for any symbol the
+            # screener did not cover - 20% gross margin, 10% operating margin,
+            # 8% net margin, 90% core PAT, D/E 0.5, current ratio 1.2, all four
+            # pillar percentiles at exactly 50 - and then ran the full
+            # 6-model x 3-scenario valuation on it. The output was
+            # indistinguishable from an analysis of a real company.
+            ref_p = master_price_vnd(master)
+            if ref_p is None:
+                raise ValueError(
+                    f"No market data is available for {symbol}; a deep-dive "
+                    "valuation cannot be produced from defaults."
+                )
             stock_quant = {
                 "symbol": symbol,
                 "name": master.get("name") or f"CTCP {symbol}",
@@ -9208,16 +9332,29 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
                 "sector_code": master.get("sector_code") or "VNMAT",
                 "sector_name": master.get("sector_name") or "Sản Xuất & Vật Liệu",
                 "pe": None, "pb": None, "roe": None, "roa": None, "peg": None, "eps": None,
-                "rev_5y_growth": 0.0, "rev_3y_cagr": 0.0, "pat_3y_cagr": 0.0, "eps_3y_cagr": 0.0,
-                "gross_margin": 20.0, "op_margin": 10.0, "net_margin": 8.0, "core_pat_ratio": 90.0,
-                "de_ratio": 0.5, "current_ratio": 1.2, "dilution_spread": 0.0,
-                "is_cyclical": False, "size_category": "Mid-Cap", "size_damper": 1.0,
-                "percentiles": {"growth": 50.0, "quality": 50.0, "health": 50.0, "valuation": 50.0, "composite": 50.0, "quintile": "Q3", "quintile_label": "Trung bình", "quintile_color": "#eab308", "quintile_badge": "badge-q3"},
-                "sector_rank": 1, "sector_total": 1, "sector_percentile": 50.0
+                "rev_5y_growth": None, "rev_3y_cagr": None, "pat_3y_cagr": None,
+                "eps_3y_cagr": None,
+                "gross_margin": None, "op_margin": None, "net_margin": None,
+                "core_pat_ratio": None,
+                "de_ratio": None, "current_ratio": None, "dilution_spread": None,
+                "is_cyclical": False, "size_category": None, "size_damper": 1.0,
+                "percentiles": {},
+                "sector_rank": None, "sector_total": None, "sector_percentile": None,
+                "is_uncovered": True,
             }
 
-    cur_price = stock_quant.get("price", 50000.0)
-    cur_eps = stock_quant.get("eps", int(cur_price / max(1.0, stock_quant.get("pe", 14.0))))
+    cur_price = _finite_or_none(stock_quant.get("price"))
+    if cur_price is None or cur_price <= 0:
+        raise ValueError(
+            f"No market price is available for {symbol}; the deep-dive "
+            "valuation will not be computed against a default price."
+        )
+    # EPS used to fall back to price / P/E. Since the P/B and P/E models below
+    # are then multiples of EPS and BVPS, deriving both from the price made
+    # every scenario a fixed multiple of the price being judged - the same
+    # circularity found in valuation_engine.py. EPS is now either reported or
+    # absent, and the models that need it stand down.
+    cur_eps = _finite_or_none(stock_quant.get("eps"))
     sec_code = stock_quant.get("sector_code", "VNMAT")
     sec_info = universe_data.get("sectors", {}).get(sec_code, {})
     sec_med_opm = sec_info.get("median_op_margin", 12.0)
@@ -9373,15 +9510,26 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     # 2. Automated Corrections Engine (Real BCTC Core PAT + Empirical Z-Score)
     # -------------------------------------------------------------
     # Correction 1: One-Off Normalizer (Lọc Lợi Nhuận Bất Thường 1 Lần)
-    normalized_eps = int(cur_eps * (core_pat_ratio / 100.0))
+    # 0 means "this company has no reported EPS", which the valuation matrix
+    # below already treats as a model standing down (it filters on v > 0).
+    has_eps = cur_eps is not None and cur_eps > 0
+    normalized_eps = int(cur_eps * (core_pat_ratio / 100.0)) if has_eps else 0
     one_off_impact_pct = round(100.0 - core_pat_ratio, 1)
     is_one_off_distorted = abs(one_off_impact_pct) >= 15.0
     if is_one_off_distorted:
-        one_off_verdict = f"⚠️ CẢNH BÁO LÃI ẢO: Bóc tách BCTC thực tế phát hiện {one_off_impact_pct:+.1f}% lợi nhuận bất thường ngoài HĐKD. Thuật toán đã gạt bỏ {cur_eps - normalized_eps:,.0f} đ/cp và dùng EPS cốt lõi {normalized_eps:,.0f} đ làm mốc định giá."
+        one_off_verdict = (
+            f"⚠️ CẢNH BÁO LÃI ẢO: Bóc tách BCTC thực tế phát hiện {one_off_impact_pct:+.1f}% lợi nhuận bất thường ngoài HĐKD. Thuật toán đã gạt bỏ {cur_eps - normalized_eps:,.0f} đ/cp và dùng EPS cốt lõi {normalized_eps:,.0f} đ làm mốc định giá."
+            if has_eps else
+            f"⚠️ Doanh nghiệp không có EPS công bố; không bóc tách được lợi nhuận bất thường ({one_off_impact_pct:+.1f}% theo BCTC)."
+        )
         one_off_status = "Lợi Nhuận Bị Nhiễu (>15%)"
         one_off_badge = "badge-danger"
     else:
-        one_off_verdict = f"✅ LỢI NHUẬN TRONG SẠCH: {core_pat_ratio:.1f}% lợi nhuận đến từ kinh doanh cốt lõi. Số liệu EPS báo cáo ({cur_eps:,.0f} đ) phản ánh đúng thực chất."
+        one_off_verdict = (
+            f"✅ LỢI NHUẬN TRONG SẠCH: {core_pat_ratio:.1f}% lợi nhuận đến từ kinh doanh cốt lõi. Số liệu EPS báo cáo ({cur_eps:,.0f} đ) phản ánh đúng thực chất."
+            if has_eps else
+            f"{core_pat_ratio:.1f}% lợi nhuận đến từ kinh doanh cốt lõi. Chưa có EPS công bố để đối chiếu."
+        )
         one_off_status = "Trong Sạch (Chuẩn Base Rate)"
         one_off_badge = "badge-success"
 
@@ -9502,39 +9650,59 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     # -------------------------------------------------------------
     # 3. 6-Model x 3-Scenario Valuation Engine (Expanded Ensemble Matrix)
     # -------------------------------------------------------------
-    cur_pb = float(stock_quant.get("pb", 1.8))
-    cur_roe = float(stock_quant.get("roe", 15.0))
-    bvps = cur_price / max(0.2, cur_pb) if cur_price > 0 else 25000.0
+    cur_pb = _finite_or_none(stock_quant.get("pb"))
+    cur_roe = _finite_or_none(stock_quant.get("roe"))
+    # BVPS was price / P/B, so the "Justified P/B" model below reduced to
+    # price x (target_pb / current_pb) - a restatement of the price, not a
+    # valuation of the book. Prefer a reported BVPS; derive it only when P/B
+    # is a real reported multiple, and record that it was derived.
+    bvps = _finite_or_none(stock_quant.get("bvps"))
+    bvps_is_derived = False
+    if bvps is None and cur_pb is not None and cur_pb > 0:
+        bvps = cur_price / cur_pb
+        bvps_is_derived = True
+
+    # A model with no driver returns 0, which drops it from the composite
+    # below. It used to be handed a substitute driver instead.
+    has_bvps = bvps is not None and bvps > 0
 
     # Model 1: Benjamin Graham (Graham Number & Graham Growth Formula)
-    val_graham_bear = int(math.sqrt(15.0 * max(100.0, normalized_eps) * max(1000.0, bvps))) if normalized_eps > 0 and bvps > 0 else int(normalized_eps * (7.0 + 1.2 * g_bear))
-    val_graham_base = int(math.sqrt(22.5 * max(100.0, normalized_eps) * max(1000.0, bvps))) if normalized_eps > 0 and bvps > 0 else int(normalized_eps * (8.5 + 2.0 * g_base))
-    val_graham_bull = int(max(100.0, cur_eps) * (8.5 + 2.5 * (g_bull / 2.0)))
+    if has_eps and has_bvps:
+        val_graham_bear = int(math.sqrt(15.0 * normalized_eps * bvps))
+        val_graham_base = int(math.sqrt(22.5 * normalized_eps * bvps))
+        val_graham_bull = int(cur_eps * (8.5 + 2.5 * (g_bull / 2.0)))
+    else:
+        val_graham_bear = val_graham_base = val_graham_bull = 0
 
     # Model 2: Peter Lynch Fair Value (GARP Framework)
-    val_lynch_bear = int(normalized_eps * max(6.0, g_bear))
-    val_lynch_base = int(normalized_eps * min(25.0, max(8.0, g_base)))
-    val_lynch_bull = int(cur_eps * min(35.0, max(12.0, g_bull)))
+    if has_eps:
+        val_lynch_bear = int(normalized_eps * max(6.0, g_bear))
+        val_lynch_base = int(normalized_eps * min(25.0, max(8.0, g_base)))
+        val_lynch_bull = int(cur_eps * min(35.0, max(12.0, g_bull)))
+    else:
+        val_lynch_bear = val_lynch_base = val_lynch_bull = 0
 
     # Model 3: Forward P/E (Multiple Ngành ICB)
     pe_bear = max(7.0, round(sec_med_pe * 0.75, 1))
-    val_pe_bear = int(normalized_eps * (1 + g_bear / 100.0) * pe_bear)
-
     pe_base = round(sec_med_pe, 1)
-    val_pe_base = int(normalized_eps * (1 + g_base / 100.0) * pe_base)
-
     pe_bull = round(sec_med_pe * 1.25, 1)
-    val_pe_bull = int(cur_eps * (1 + g_bull / 100.0) * pe_bull)
+    if has_eps:
+        val_pe_bear = int(normalized_eps * (1 + g_bear / 100.0) * pe_bear)
+        val_pe_base = int(normalized_eps * (1 + g_base / 100.0) * pe_base)
+        val_pe_bull = int(cur_eps * (1 + g_bull / 100.0) * pe_bull)
+    else:
+        val_pe_bear = val_pe_base = val_pe_bull = 0
 
     # Model 4: Justified P/B (Theo ROE & Giá Trị Sổ Sách BVPS)
-    pb_bear = max(0.6, round(cur_pb * 0.75, 2))
-    val_pb_bear = int(bvps * pb_bear)
-
-    pb_base = max(0.8, round(max(1.0, cur_roe / 10.0), 2))
-    val_pb_base = int(bvps * pb_base)
-
-    pb_bull = max(1.2, round(pb_base * 1.35, 2))
-    val_pb_bull = int(bvps * pb_bull)
+    pb_bear = max(0.6, round(cur_pb * 0.75, 2)) if cur_pb else 0.0
+    pb_base = max(0.8, round(max(1.0, cur_roe / 10.0), 2)) if cur_roe is not None else 0.0
+    pb_bull = max(1.2, round(pb_base * 1.35, 2)) if pb_base else 0.0
+    if has_bvps and pb_base > 0:
+        val_pb_bear = int(bvps * pb_bear) if pb_bear else 0
+        val_pb_base = int(bvps * pb_base)
+        val_pb_bull = int(bvps * pb_bull)
+    else:
+        val_pb_bear = val_pb_base = val_pb_bull = 0
 
     # Model 5: Simply Wall St 2-Stage Discounted Cash Flow (DCF)
     val_dcf_base = 0
@@ -9575,9 +9743,12 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
     base_models = [v for v in [val_graham_base, val_lynch_base, val_pe_base, val_pb_base, val_dcf_base, val_analyst_base] if v > 0]
     bull_models = [v for v in [val_graham_bull, val_lynch_bull, val_pe_bull, val_pb_bull, val_dcf_bull, val_analyst_bull] if v > 0]
 
-    val_bear = int(sum(bear_models) / len(bear_models)) if bear_models else val_pe_bear
-    val_base = int(sum(base_models) / len(base_models)) if base_models else val_pe_base
-    val_bull = int(sum(bull_models) / len(bull_models)) if bull_models else val_pe_bull
+    # With no model standing, there is no consensus. Reporting 0 lets the
+    # payload say so instead of echoing whichever single model was empty.
+    val_bear = int(sum(bear_models) / len(bear_models)) if bear_models else 0
+    val_base = int(sum(base_models) / len(base_models)) if base_models else 0
+    val_bull = int(sum(bull_models) / len(bull_models)) if bull_models else 0
+    models_contributing = len(base_models)
 
     # Calculate Upsides and Margin of Safety
     def _calc_upside(target_val: float) -> float:
@@ -9711,7 +9882,12 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             "school": f"Đồng thuận đa chiều từ {len(methods_list)} phương pháp định lượng & dòng tiền",
             "bear_val": f"{val_bear:,.0f} đ", "bear_upside": f"{upside_bear:+.1f}%", "bear_pos": upside_bear >= 0,
             "base_val": f"{val_base:,.0f} đ", "base_upside": f"{upside_base:+.1f}%", "base_pos": upside_base >= 0,
-            "bull_val": f"{val_bull:,.0f} đ", "bull_upside": f"{upside_bull:+.1f}%", "bull_pos": upside_bull >= 0
+            "bull_val": f"{val_bull:,.0f} đ", "bull_upside": f"{upside_bull:+.1f}%", "bull_pos": upside_bull >= 0,
+            # How many of the six models had the data to run. A consensus of
+            # one is not a consensus, and the payload used to look the same
+            # either way.
+            "models_contributing": models_contributing,
+            "is_reliable": models_contributing >= 2,
         }
     }
 
@@ -9744,7 +9920,7 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
         },
         "growth_attribution": growth_attribution,
         "corrections": {
-            "reported_eps": f"{cur_eps:,.0f} đ",
+            "reported_eps": f"{cur_eps:,.0f} đ" if has_eps else "Không có",
             "core_pat_ratio": f"{core_pat_ratio:.1f}%",
             "normalized_core_eps": f"{normalized_eps:,.0f} đ",
             "one_off_impact": f"{one_off_impact_pct:+.1f}%",
