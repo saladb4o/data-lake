@@ -172,11 +172,18 @@ against a `screener_snapshot` fixture with stated inputs.
    1,748 have `year: None`; 13 of the 22 parsed documents are
    `SCANNED_IMAGE`, which needs OCR. It is not a fundamentals source.
 
-4. **The fair-value backtest result panel has no markup.** `fvBtWinnerTitle`,
-   `fvBtYearlyTableBody` and the rest are read by `static/js/app.js` but exist
-   nowhere in `static/index.html`, so that render path writes into nothing.
-   The provenance banner helper creates its own element and no-ops when there
-   is no anchor, so it will work once the panel exists.
+4. ~~**The fair-value backtest result panel has no markup.**~~ *Fixed.* The
+   panel now exists as a third sub-tab of the backtest tab
+   (`btFairValueSection`), defining every id `app.js` writes to, plus a
+   `fundamentals_mode` selector wired through to the API parameter.
+   `tests/test_frontend_element_contract.py` fails the build if app.js ever
+   reads an element id the page does not define. That sweep also found five
+   other reads with no markup: four are harmless fallback alternates in
+   `a || b` lookup chains, but `healthOverviewContainer` is a genuinely dead
+   path - `fetchCompanyHealth` and `renderCompanyHealth` have no caller and no
+   container. It is recorded in the test's `KNOWN_ABSENT` map with that reason
+   rather than left invisible; it should be wired to the stock-detail panel or
+   deleted.
 
 5. **Sector weight priors are still opinions.** `SECTOR_WEIGHT_PRIORS` is now
    labelled honestly rather than as "pre-calibrated IVW", and
@@ -187,3 +194,41 @@ against a `screener_snapshot` fixture with stated inputs.
    reported as estimated or unavailable rather than fabricated, which is
    correct but leaves the feature empty until per-session foreign volume is
    available.
+
+
+## 5. Third pass: silent failures and unstable identity
+
+### 5.1 89 exception handlers that logged nothing
+
+`except Exception: pass` appeared 91 times across `services/`, 57 of them in
+`stock_service.py`. Every one made a broken parser, a dead endpoint or a
+swallowed `TypeError` indistinguishable from a symbol that legitimately has no
+data. All are now `logger.debug(..., exc_info=True)`: the control flow is
+unchanged - the handler still swallows - but the failure is recoverable from a
+log instead of being gone. Two remain deliberately silent, marked `silent-ok:`
+with a reason, because they run before the module's logger exists.
+
+De-silencing them immediately surfaced a real defect. `stock_service` re-asserted
+TLS verification by reaching into `services.unified_data_service` inside such a
+handler; that import is circular from there, so the assignment never ran. It was
+harmless - `tls_config` already derives `TLS_VERIFY` from the same environment
+variable and defaults to verifying, and `unified_data_service` imports that value
+directly - so the block was redundant as well as dead, and has been removed with
+tls_config left as the single source of truth. But it had been invisible for as
+long as it existed.
+
+### 5.2 Record ids that changed on every restart
+
+17 record identifiers were built from `abs(hash(text))` - article links,
+press-release urls, disclosure titles, BCTC document keys, subsidiary and family
+cluster ids. CPython salts str hashing per process, so the same article got a new
+id every time the server came up and every store keyed on those ids stopped
+deduplicating, accumulating the same record repeatedly.
+
+All now use `services/stable_identity.stable_hash` (crc32: not cryptographic, and
+not meant to be - it just has to be identical in every process). The old
+`stock_service.deterministic_hash` is kept as a delegating alias.
+`tests/test_no_silent_failures_or_unstable_ids.py` bans the builtin `hash()`
+across `services/`, and verifies the property directly by running `stable_hash`
+under three different `PYTHONHASHSEED` values in subprocesses - and, so the rule
+does not quietly become moot, checks that builtin `hash()` really does still vary.

@@ -21,8 +21,13 @@ from bs4 import BeautifulSoup
 from email.utils import parsedate_to_datetime
 
 def deterministic_hash(key: Any) -> int:
-    """Returns a completely deterministic, process-independent integer hash."""
-    return zlib.crc32(str(key).encode("utf-8"))
+    """Deprecated alias for :func:`services.stable_identity.stable_hash`.
+
+    Kept so existing callers keep working; new code should import stable_hash.
+    """
+    from services.stable_identity import stable_hash as _stable_hash
+
+    return _stable_hash(key)
 
 # Ensure UTF-8 output on Windows
 if sys.platform == "win32":
@@ -30,6 +35,8 @@ if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8")
         sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
+        # silent-ok: runs before `import logging`; a console that will not
+        # switch to UTF-8 is cosmetic and must not stop the import.
         pass
 
 # TLS honesty (M5): never monkeypatch requests/urllib3 process-wide.
@@ -48,20 +55,23 @@ if _EXPLICIT_INSECURE:
     try:
         requests.Session.verify = False
     except Exception:
-        pass
-else:
-    try:
-        import services.tls_config as _tc
-        _tc._INSECURE_TLS = False
-        _tc.TLS_VERIFY = True
-        import services.unified_data_service as _uds
-        _uds.TLS_VERIFY = True
-        if hasattr(_uds, "_HTTP_SESSION"):
-            _uds._HTTP_SESSION.verify = True
-    except Exception:
-        pass
+        # Failing to apply the opt-out leaves verification ON, which is the
+        # safe direction - but say so rather than leaving it a mystery.
+        logging.getLogger(__name__).warning(
+            "VNSTOCK_INSECURE_TLS=1 was set but could not be applied; "
+            "certificate verification stays enabled.",
+            exc_info=True,
+        )
+# No `else` branch re-asserting verification on other modules. It used to reach
+# into services.tls_config and services.unified_data_service to force the flags
+# back on, wrapped in `except Exception: pass` - which hid the fact that the
+# unified_data_service import is circular from here and the assignment never
+# ran. It is also redundant: tls_config derives TLS_VERIFY from the same
+# environment variable and defaults to verifying, and unified_data_service
+# imports that value directly. tls_config is the single source of truth.
 
 from services.rate_limiter import limit
+from services.stable_identity import stable_hash
 
 logger = logging.getLogger(__name__)
 
@@ -192,13 +202,13 @@ def resolve_data_file(filename: str) -> str:
             try:
                 candidates.append((gpath, os.path.getsize(gpath), os.path.getmtime(gpath)))
             except Exception:
-                pass
+                logger.debug("resolve_data_file: swallowed Exception", exc_info=True)
             
     if os.path.exists(local_path):
         try:
             candidates.append((local_path, os.path.getsize(local_path), os.path.getmtime(local_path)))
         except Exception:
-            pass
+            logger.debug("resolve_data_file: swallowed Exception", exc_info=True)
         
     if not candidates:
         return local_path
@@ -941,7 +951,7 @@ def load_master_universe():
                 if isinstance(inf_k, dict) and inf_k.get("exchange"):
                     master_exchanges[sym_k.upper()] = inf_k["exchange"].upper()
         except Exception:
-            pass
+            logger.debug("load_master_universe: swallowed Exception", exc_info=True)
 
     local_syms_file = os.path.join(base_data_dir, "all_symbols.json")
     if os.path.exists(local_syms_file):
@@ -956,7 +966,7 @@ def load_master_universe():
                         if lsym not in master_exchanges:
                             master_exchanges[lsym] = lex
         except Exception:
-            pass
+            logger.debug("load_master_universe: swallowed Exception", exc_info=True)
 
     if os.path.exists(syms_path):
         try:
@@ -1921,7 +1931,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
             if last_bar_date < end_str:
                 executor.submit(_sync_single_stock_incremental, symbol, last_bar_date, end_str)
         except Exception:
-            pass
+            logger.debug("get_stock_history: swallowed Exception", exc_info=True)
 
     # Step 2: Tier 1 Live Feed - Fetch from TradingView WebSocket (fast, high fidelity, 1200+ bars)
     if interval == "1D" and (df_real is None or df_real.empty or len(df_real) < 3):
@@ -1958,7 +1968,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                         if df_raw is not None and not df_raw.empty and len(df_raw) >= 3:
                             return df_raw.copy()
                     except Exception:
-                        pass
+                        logger.debug("get_stock_history: swallowed Exception", exc_info=True)
                 return None
 
             for _attempt in range(2):
@@ -1969,7 +1979,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                         if df_real is not None and not df_real.empty and len(df_real) >= 3:
                             break
                 except Exception:
-                    pass
+                    logger.debug("get_stock_history: swallowed Exception", exc_info=True)
 
     # Step 4: Tier 3 Fallback - Use historical price lake candles if live sources are unavailable
     if (df_real is None or df_real.empty or len(df_real) < 3) and lake_candles and len(lake_candles) >= 3:
@@ -2004,7 +2014,7 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                 })
             executor.submit(disk_lake.save_symbol_record, "historical_prices.json", symbol, persisted_bars)
         except Exception:
-            pass
+            logger.debug("get_stock_history: swallowed Exception", exc_info=True)
 
     if df_real is not None and not df_real.empty and len(df_real) >= 3:
         try:
@@ -2208,7 +2218,7 @@ def get_company_overview(symbol: str) -> Dict[str, Any]:
                 high_52w_str = f"{max(b_highs):.2f}"
                 low_52w_str = f"{min(b_lows):.2f}"
     except Exception:
-        pass
+        logger.debug("get_company_overview: swallowed Exception", exc_info=True)
 
     # Non-blocking foreign room
     f_room_str = "--"
@@ -2221,7 +2231,7 @@ def get_company_overview(symbol: str) -> Dict[str, Any]:
                 if f_room_val >= 0:
                     f_room_str = f"{f_room_val:,} CP"
             except (TypeError, ValueError):
-                pass
+                logger.debug("get_company_overview: swallowed (TypeError, ValueError)", exc_info=True)
 
     result = {
         "symbol": symbol,
@@ -2810,7 +2820,7 @@ def ingest_into_news_lake(articles: List[Dict[str, Any]]) -> None:
             enriched = enrich_article_metadata(art)
             
             if link not in CENTRAL_NEWS_LAKE:
-                enriched["id"] = art.get("id") or f"lake_{abs(hash(link))}"
+                enriched["id"] = art.get("id") or f"lake_{stable_hash(link)}"
                 CENTRAL_NEWS_LAKE[link] = enriched
             else:
                 existing_syms = set(CENTRAL_NEWS_LAKE[link].get("symbols", []))
@@ -2881,7 +2891,7 @@ def fetch_vietstock_doanhnghiep_news() -> List[Dict[str, Any]]:
                         }
                         articles.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_vietstock_doanhnghiep_news: swallowed Exception", exc_info=True)
     return articles
 
 def fetch_hnx_official_disclosures() -> List[Dict[str, Any]]:
@@ -2908,7 +2918,7 @@ def fetch_hnx_official_disclosures() -> List[Dict[str, Any]]:
                     title_txt = tds[3].get_text().strip()
                     a_tag = tds[3].find('a')
                     href = a_tag.get('href', '') if a_tag else ''
-                    link = 'https://hnx.vn' + href if href.startswith('/') else (href or f"https://hnx.vn/vi-vn/thong-tin-cong-bo-ny-hnx.html#{code_txt}_{abs(hash(title_txt))}")
+                    link = 'https://hnx.vn' + href if href.startswith('/') else (href or f"https://hnx.vn/vi-vn/thong-tin-cong-bo-ny-hnx.html#{code_txt}_{stable_hash(title_txt)}")
                     if code_txt and title_txt and len(code_txt) <= 5:
                         ts, d_str = parse_pubdate(date_txt)
                         raw_art = {
@@ -2926,7 +2936,7 @@ def fetch_hnx_official_disclosures() -> List[Dict[str, Any]]:
                         }
                         items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_hnx_official_disclosures: swallowed Exception", exc_info=True)
     return items
 
 def fetch_hose_official_disclosures() -> List[Dict[str, Any]]:
@@ -2968,7 +2978,7 @@ def fetch_hose_official_disclosures() -> List[Dict[str, Any]]:
                     }
                     items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_hose_official_disclosures: swallowed Exception", exc_info=True)
     return items
 
 def fetch_ssc_official_disclosures() -> List[Dict[str, Any]]:
@@ -3009,7 +3019,7 @@ def fetch_ssc_official_disclosures() -> List[Dict[str, Any]]:
                     }
                     items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_ssc_official_disclosures: swallowed Exception", exc_info=True)
     return items
 
 def _background_news_worker():
@@ -3030,7 +3040,7 @@ def _background_news_worker():
             if ssc_arts:
                 ingest_into_news_lake(ssc_arts)
         except Exception:
-            pass
+            logger.debug("_background_news_worker: swallowed Exception", exc_info=True)
         time.sleep(240) # Every 4 minutes
 
 def start_background_news_poller():
@@ -3114,7 +3124,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
 
                     if title and link:
                         found.append({
-                            "id": f"press_{abs(hash(link))}",
+                            "id": f"press_{stable_hash(link)}",
                             "title": title,
                             "date": formatted_date if formatted_date else d_str,
                             "timestamp": ts,
@@ -3125,7 +3135,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                             "symbol": symbol
                         })
         except Exception:
-            pass
+            logger.debug("fetch_symbol_press_news: swallowed Exception", exc_info=True)
         return found
 
     def scrape_tnck_single(query_str):
@@ -3159,7 +3169,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                     if symbol.lower() in full_t or (clean_comp and clean_comp.lower() in full_t):
                         if title and link:
                             found.append({
-                                "id": f"press_{abs(hash(link))}",
+                                "id": f"press_{stable_hash(link)}",
                                 "title": title,
                                 "date": formatted_date if formatted_date else d_str,
                                 "timestamp": ts,
@@ -3170,7 +3180,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                                 "symbol": symbol
                             })
         except Exception:
-            pass
+            logger.debug("fetch_symbol_press_news: swallowed Exception", exc_info=True)
         return found
 
     def scrape_cafef_events_news(sym_code):
@@ -3193,7 +3203,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                         d_str = span.get_text().strip() if span else ""
                         ts, formatted_date = parse_pubdate(d_str)
                         found.append({
-                            "id": f"press_{abs(hash(detail_url))}",
+                            "id": f"press_{stable_hash(detail_url)}",
                             "title": t,
                             "date": formatted_date if formatted_date else d_str,
                             "timestamp": ts,
@@ -3204,7 +3214,7 @@ def fetch_symbol_press_news(symbol: str, company_name: str = "", leader_names: L
                             "symbol": symbol
                         })
             except Exception:
-                pass
+                logger.debug("fetch_symbol_press_news: swallowed Exception", exc_info=True)
         return found
 
     queries = [symbol, f"cổ phiếu {symbol}"]
@@ -3308,7 +3318,7 @@ def fetch_single_detail_pdf(detail_url: str) -> str:
                 if 'download' in href.lower() and 'mediacdn.vn' in href.lower():
                     return href
     except Exception:
-        pass
+        logger.debug("fetch_single_detail_pdf: swallowed Exception", exc_info=True)
     return ""
 
 def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]:
@@ -3359,7 +3369,7 @@ def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]
                 is_explanation = any(w in t_lower for w in ['giải trình', 'chênh lệch lợi nhuận', 'biến động lnst'])
                 
                 parsed.append({
-                    "id": f"rep_{abs(hash(detail_url))}",
+                    "id": f"rep_{stable_hash(detail_url)}",
                     "symbol": symbol,
                     "title": title,
                     "clean_title": clean_title,
@@ -3378,7 +3388,7 @@ def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]
                     "has_pdf": False
                 })
     except Exception:
-        pass
+        logger.debug("_fetch_cafef_single_page_raw: swallowed Exception", exc_info=True)
     return parsed
 
 def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
@@ -3414,7 +3424,7 @@ def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
                 audit_badge = "Kiểm toán" if "kiểm toán" in t_lower else None
                 opinion_badge = "✅ Toàn phần" if "toàn phần" in t_lower else ("⚠️ Ngoại trừ" if "ngoại trừ" in t_lower else None)
 
-                rep_id = doc_id if doc_id else f"rep_{abs(hash(title + date_str))}"
+                rep_id = doc_id if doc_id else f"rep_{stable_hash(title + date_str)}"
                 if rep_id not in seen_ids:
                     seen_ids.add(rep_id)
                     reports.append({
@@ -3478,7 +3488,7 @@ def _get_local_lake_reports(symbol: str) -> List[Dict[str, Any]]:
                 is_audited = bool(doc.get("is_audited"))
                 audit_badge = "Kiểm toán" if (is_audited or "kiểm toán" in t_lower) else None
 
-                rep_id = doc_id if doc_id else f"rep_bctc_{abs(hash(title + y_str))}"
+                rep_id = doc_id if doc_id else f"rep_bctc_{stable_hash(title + y_str)}"
                 if rep_id not in seen_ids:
                     seen_ids.add(rep_id)
                     reports.append({
@@ -3594,7 +3604,7 @@ def get_company_reports(symbol: str, report_type: str = "all", fetch_pdf: bool =
                                 y_str = year_m.group(1) if year_m else "2026"
                                 
                                 raw_reports.append({
-                                    "id": f"rep_{abs(hash(detail_url))}",
+                                    "id": f"rep_{stable_hash(detail_url)}",
                                     "symbol": symbol,
                                     "title": title,
                                     "clean_title": clean_title,
@@ -3613,7 +3623,7 @@ def get_company_reports(symbol: str, report_type: str = "all", fetch_pdf: bool =
                                     "has_pdf": False
                                 })
                 except Exception:
-                    pass
+                    logger.debug("get_company_reports: swallowed Exception", exc_info=True)
 
         # Extract PDF links concurrently for top 25 disclosures
         if fetch_pdf and raw_reports:
@@ -3750,7 +3760,7 @@ def get_company_news(symbol: str, deep_scan: bool = False) -> Dict[str, Any]:
                 }
                 matching_articles.append(art_item)
     except Exception:
-        pass
+        logger.debug("get_company_news: swallowed Exception", exc_info=True)
 
     # Sort strictly by timestamp descending
     matching_articles = sorted(matching_articles, key=lambda x: x.get('timestamp', 0), reverse=True)
@@ -3930,7 +3940,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                     ratio_str = pair_m.group(1) if pair_m else ""
 
                 events_list.append({
-                    "id": f"ev_{abs(hash(detail_url))}",
+                    "id": f"ev_{stable_hash(detail_url)}",
                     "symbol": symbol,
                     "event_name": cat_name,
                     "title": clean_title,
@@ -3944,7 +3954,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                     "tag_class": badge_cls
                 })
     except Exception:
-        pass
+        logger.debug("get_company_events: swallowed Exception", exc_info=True)
 
     # 2. Secondary fallback: vnstock KBS if Type=1 is empty
     if not events_list and Company:
@@ -3961,7 +3971,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                     ratio_str = f"{float(ratio) * 100:.1f}%" if pd.notna(ratio) and isinstance(ratio, (int, float)) else ""
 
                     events_list.append({
-                        "id": f"ev_{abs(hash(title_vi + pdate))}",
+                        "id": f"ev_{stable_hash(title_vi + pdate)}",
                         "symbol": symbol,
                         "event_name": name_vi,
                         "title": title_vi,
@@ -3975,7 +3985,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                         "tag_class": "tag-dividend"
                     })
         except Exception:
-            pass
+            logger.debug("get_company_events: swallowed Exception", exc_info=True)
 
     # 3. Tertiary fallback: Extract from Company Reports stream (Type=2)
     if not events_list:
@@ -4001,7 +4011,7 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
                         "tag_class": "tag-dividend" if r["type_code"] == "dividend" else "tag-governance"
                     })
         except Exception:
-            pass
+            logger.debug("get_company_events: swallowed Exception", exc_info=True)
 
     cache.set(cache_key, events_list, ttl_seconds=600)
     return events_list
@@ -4177,7 +4187,7 @@ def _parse_cafef_banlanhdao_full(symbol: str) -> tuple:
                             if name and len(name) > 2:
                                 shareholders.append({"name": name, "shares": shares, "ratio": ratio})
     except Exception:
-        pass
+        logger.debug("_parse_cafef_banlanhdao_full: swallowed Exception", exc_info=True)
     return officers, shareholders
 
 def compute_free_float_from_shareholders(symbol: str, shareholders: List[Dict[str, Any]], officers: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -4217,7 +4227,7 @@ def compute_free_float_from_shareholders(symbol: str, shareholders: List[Dict[st
                 try:
                     return float(m.group(1))
                 except Exception:
-                    pass
+                    logger.debug("compute_free_float_from_shareholders: swallowed Exception", exc_info=True)
         return 0.0
 
     for sh in (shareholders or []):
@@ -4334,7 +4344,7 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
                             "ratio": ratio_str
                         })
         except Exception:
-            pass
+            logger.debug("get_company_leadership: swallowed Exception", exc_info=True)
 
     # 2. Fetch CafeF full leadership and shareholder tables
     cf_officers, cf_shareholders = _parse_cafef_banlanhdao_full(symbol)
@@ -4424,7 +4434,7 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
         family_network = dossier.get("family_network", [])
         insider_transactions = dossier.get("insider_transactions", [])
     except Exception:
-        pass
+        logger.debug("get_company_leadership: swallowed Exception", exc_info=True)
 
     # Calculate authoritative True Free-Float Structure from actual major shareholders and board
     free_float_structure = compute_free_float_from_shareholders(symbol, final_shareholders, final_officers)
@@ -4544,7 +4554,7 @@ def parse_pubdate(pub_str: str) -> tuple[int, str]:
     try:
         return _finalize(parsedate_to_datetime(clean_str))
     except Exception:
-        pass
+        logger.debug("parse_pubdate: swallowed Exception", exc_info=True)
 
     # 2. ISO & dashed formats BEFORE any dash-stripping normalization
     iso_str = clean_str[:-1] + '+00:00' if clean_str.endswith(('Z', 'z')) else clean_str
@@ -4556,7 +4566,7 @@ def parse_pubdate(pub_str: str) -> tuple[int, str]:
         try:
             return _finalize(datetime.datetime.strptime(iso_str, fmt))
         except Exception:
-            pass
+            logger.debug("parse_pubdate: swallowed Exception", exc_info=True)
 
     # 3. Space-separated formats (after stripping dashes)
     clean_norm = re.sub(r'\s*-\s*', ' ', clean_str)
@@ -4568,7 +4578,7 @@ def parse_pubdate(pub_str: str) -> tuple[int, str]:
         try:
             return _finalize(datetime.datetime.strptime(clean_norm, fmt))
         except Exception:
-            pass
+            logger.debug("parse_pubdate: swallowed Exception", exc_info=True)
 
     # 4. Year extraction if full date parsing fails (prevents putting old articles at top)
     ym = re.search(r'\b(20\d{2})\b', clean_str)
@@ -4638,7 +4648,7 @@ def fetch_single_rss(feed: Dict[str, Any]) -> List[Dict[str, Any]]:
                         }
                         items.append(enrich_article_metadata(raw_art))
     except Exception:
-        pass
+        logger.debug("fetch_single_rss: swallowed Exception", exc_info=True)
     return items
 
 def _normalize_source_name(name: str) -> str:
@@ -4736,10 +4746,10 @@ def get_rss_news(
                                 if src not in by_source: by_source[src] = []
                                 by_source[src].append(art)
                     except Exception:
-                        pass
+                        logger.debug("get_rss_news: swallowed Exception", exc_info=True)
             except Exception:
                 # Timeout reached for slower feeds, proceed with all collected articles
-                pass
+                logger.debug("get_rss_news: swallowed Exception", exc_info=True)
 
             # Balanced interleave across sources
             interleaved = []
@@ -4870,7 +4880,7 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
         if hist and hist.get("latest_price"):
             curr_price = float(hist["latest_price"])
     except Exception:
-        pass
+        logger.debug("get_symbol_broker_recommendations: swallowed Exception", exc_info=True)
     if curr_price <= 0:
         snap = disk_lake.read_json("screener_snapshot.json") or {}
         curr_price = float(snap.get("stocks", {}).get(symbol, {}).get("price") or 0.0)
@@ -5052,7 +5062,7 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
                 if latest_rep_date is None or d > latest_rep_date:
                     latest_rep_date = d
             except Exception:
-                pass
+                logger.debug("get_symbol_broker_recommendations: swallowed Exception", exc_info=True)
 
     anchor_date = today
     if latest_rep_date and (today - latest_rep_date).days > 90:
@@ -5127,7 +5137,7 @@ def get_symbol_broker_recommendations(symbol: str) -> Dict[str, Any]:
                 rep_d = datetime.datetime.strptime(rep_d_str, "%Y-%m-%d").date()
                 days_ago = (anchor_date - rep_d).days
             except Exception:
-                pass
+                logger.debug("get_symbol_broker_recommendations: swallowed Exception", exc_info=True)
         if days_ago <= 180 or i < 8:
             recent_revisions.append(r)
 
@@ -5248,7 +5258,7 @@ def get_symbol_global_valuation(symbol: str) -> Dict[str, Any]:
         if hist and hist.get("latest_price"):
             curr_price = float(hist["latest_price"])
     except Exception:
-        pass
+        logger.debug("get_symbol_global_valuation: swallowed Exception", exc_info=True)
     if curr_price <= 0:
         curr_price = ref
 
@@ -5372,7 +5382,7 @@ def get_symbol_global_valuation(symbol: str) -> Dict[str, Any]:
             if tw_price > 0 and tw_up is not None:
                 bullets.append(f"Đồng thuận CTCK: Giá MT trọng số thời gian đạt {tw_price:,.2f}k đ ({tw_up:+.1f}% kỳ vọng) - {rev_label} ({disp_label}).")
     except Exception:
-        pass
+        logger.debug("get_symbol_global_valuation: swallowed Exception", exc_info=True)
 
     res = {
         "symbol": symbol,
@@ -5677,7 +5687,7 @@ def get_macroeconomic_overview() -> Dict[str, Any]:
                             "cpi_pct": round(float(row.get("value")), 2)
                         })
     except Exception:
-        pass
+        logger.debug("get_macroeconomic_overview: swallowed Exception", exc_info=True)
 
     # 2. Fetch GDP Growth
     try:
@@ -5693,7 +5703,7 @@ def get_macroeconomic_overview() -> Dict[str, Any]:
                             "gdp_growth_pct": round(float(row.get("value")), 2)
                         })
     except Exception:
-        pass
+        logger.debug("get_macroeconomic_overview: swallowed Exception", exc_info=True)
 
     res = {
         "status": "success",
@@ -6607,7 +6617,7 @@ def get_sector_indices_analytics() -> List[Dict[str, Any]]:
         try:
             current_point = float(snapshot.get("latest") or (candles[-1]["close"] if candles else base))
         except (TypeError, ValueError, KeyError, IndexError):
-            pass
+            logger.debug("get_sector_indices_analytics: swallowed (TypeError, ValueError, KeyError, IndexError)", exc_info=True)
 
         if len(candles) >= 2:
             try:
@@ -7070,7 +7080,7 @@ def compute_algorithmic_peers(symbol: str, top_k: int = 10, exchange: Optional[s
             "name": c_info.get("name") or c_info.get("organ_name") or f"CTCP {sym}",
             "exchange": c_info.get("exchange", "HOSE"),
             "price": cand_ref,
-            # change_pct was defaulted to (abs(hash(sym)) % 40 - 20) / 10 -
+            # change_pct was defaulted to (stable_hash(sym, 40) - 20) / 10 -
             # not merely invented but non-deterministic, since Python
             # randomises str hashing per process, so the same peer showed a
             # different daily move after every restart.
@@ -7657,8 +7667,10 @@ def _parse_ownership_num(val_any: Any, text_fallback: str = "") -> float:
     if text_fallback:
         m = re.search(r'(\d+(\.\d+)?)%', str(text_fallback))
         if m:
-            try: return float(m.group(1))
-            except Exception: pass
+            try:
+                return float(m.group(1))
+            except (TypeError, ValueError):
+                logger.debug("unparseable ownership percentage %r", m.group(1))
         if "100%" in text_fallback or "holding core" in text_fallback.lower():
             return 100.0
     return 0.0
@@ -8150,7 +8162,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
                     existing_sub_names.add(b_name.lower())
 
                     # Add node to graph
-                    sub_id = f"sub_{abs(hash(b_name)) % 100000}"
+                    sub_id = f"sub_{stable_hash(b_name, 100000)}"
                     nodes.append({
                         "id": sub_id,
                         "label": b_name[:20],
@@ -8238,7 +8250,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
         if depth >= 2 and ubo_family_group:
             for fam in ubo_family_group.get("family_members", [])[:3]:
                 fam_name = fam.get("name", "")
-                fam_id = f"fam_{abs(hash(fam_name)) % 100000}"
+                fam_id = f"fam_{stable_hash(fam_name, 100000)}"
                 f_own = fam.get("ownership_pct", 0.0)
                 if fam_name and fam_id not in node_ids_set:
                     nodes.append({
@@ -8312,7 +8324,7 @@ def get_company_ecosystem(symbol: str, depth: int = 2, min_ownership: float = 0.
         from services.insider_flow_engine import fetch_realtime_insider_deals
         recent_insider_events = fetch_realtime_insider_deals(symbol, lookback_pages=1)[:5]
     except Exception:
-        pass
+        logger.debug("get_company_ecosystem: swallowed Exception", exc_info=True)
 
     result = {
         "symbol": symbol,
@@ -8689,7 +8701,7 @@ def passes_tsmom_filter(s: Dict[str, Any], price_db: Optional[Dict[str, Any]] = 
                     t12m = sum(float(quarters[c].get("return_pct", 0.0)) for c in codes)
                     return t12m > 0
                 except Exception:
-                    pass
+                    logger.debug("passes_tsmom_filter: swallowed Exception", exc_info=True)
 
     chg_1y = s.get("price_change_1y")
     if chg_1y is not None and isinstance(chg_1y, (int, float)):
@@ -9019,7 +9031,7 @@ def evaluate_stock_strategies(s: Dict[str, Any], guru_ctx: Optional[Dict[str, An
             from services.quant_scoring import evaluate_guru_matches
             strategies.extend(evaluate_guru_matches(s, guru_ctx))
         except Exception:
-            pass
+            logger.debug("evaluate_stock_strategies: swallowed Exception", exc_info=True)
 
     q_tag = s.get("percentiles", {}).get("quintile")
     if q_tag in ("Q1", "Q2", "Q3", "Q4", "Q5"):
@@ -9227,7 +9239,7 @@ def _extract_deep_financial_metrics(symbol: str, sec_code: str = "VNMAT") -> Dic
                                 if clean_v and clean_v != "--":
                                     vals.append(float(clean_v))
                             except Exception:
-                                pass
+                                logger.debug("_extract_deep_financial_metrics: swallowed Exception", exc_info=True)
                         if vals:
                             return vals
                 return []
@@ -9748,7 +9760,7 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             val_dcf_bear = int(dcf_val_vnd * 0.80)
             val_dcf_bull = int(dcf_val_vnd * 1.25)
     except Exception:
-        pass
+        logger.debug("get_company_earnings_engine: swallowed Exception", exc_info=True)
 
     # Model 6: Broker Analyst Consensus Target Price
     val_analyst_base = 0
@@ -9764,7 +9776,7 @@ def get_company_earnings_engine(symbol: str) -> Dict[str, Any]:
             val_analyst_bear = int(tp_vnd * 0.85)
             val_analyst_bull = int(tp_vnd * 1.20)
     except Exception:
-        pass
+        logger.debug("get_company_earnings_engine: swallowed Exception", exc_info=True)
 
     # Calculate Consensus Ensemble Values across all valid available models
     bear_models = [v for v in [val_graham_bear, val_lynch_bear, val_pe_bear, val_pb_bear, val_dcf_bear, val_analyst_bear] if v > 0]
@@ -10066,7 +10078,7 @@ def get_data_lake_status() -> Dict[str, Any]:
                             if isinstance(item, dict) and "symbol" in item:
                                 merged[item["symbol"]] = item
                 except Exception:
-                    pass
+                    logger.debug("get_data_lake_status: swallowed Exception", exc_info=True)
         return merged
 
     screener_stocks = _load_merged_json("screener_snapshot.json")
@@ -10114,12 +10126,12 @@ def get_data_lake_status() -> Dict[str, Any]:
         try:
             pdf_total_mb += os.path.getsize(pdf_bctc_path) / (1024 * 1024)
         except Exception:
-            pass
+            logger.debug("get_data_lake_status: swallowed Exception", exc_info=True)
     if os.path.exists(pdf_corp_path):
         try:
             pdf_total_mb += os.path.getsize(pdf_corp_path) / (1024 * 1024)
         except Exception:
-            pass
+            logger.debug("get_data_lake_status: swallowed Exception", exc_info=True)
 
     return {
         "status": "online",
@@ -10202,7 +10214,7 @@ def get_market_wide_events_calendar(
                     if len(parts) == 3:
                         return datetime.datetime(int(parts[0]), int(parts[1]), int(parts[2])).timestamp()
             except Exception:
-                pass
+                logger.debug("get_market_wide_events_calendar: swallowed Exception", exc_info=True)
             return 0
 
         aggregated.sort(key=_parse_ev_dt, reverse=True)

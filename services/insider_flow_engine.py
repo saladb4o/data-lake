@@ -25,6 +25,7 @@ from typing import Dict, List, Any, Optional, Tuple
 
 from services.stock_service import _fetch_cafef_single_page_raw
 from services.bctc_pdf_parser import strip_accents
+from services.stable_identity import stable_hash
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ def fetch_realtime_insider_deals(symbol: str, lookback_pages: int = 2) -> List[D
             parsed = parse_insider_disclosure_title(title, date_str=date_str, detail_url=detail_url)
             if parsed:
                 parsed["symbol"] = symbol_clean
-                parsed["id"] = item.get("id") or f"deal_{abs(hash(title))}"
+                parsed["id"] = item.get("id") or f"deal_{stable_hash(title)}"
                 deals.append(parsed)
 
     except Exception as e:

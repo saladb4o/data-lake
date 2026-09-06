@@ -169,9 +169,17 @@ try:
             try:
                 setup_api_key(_api_key)
             except Exception:
-                pass
+                logger.warning(
+                    "VNSTOCK_API_KEY is set but could not be registered; "
+                    "requests fall back to the anonymous tier.",
+                    exc_info=True,
+                )
     except Exception:
-        pass
+        logger.warning(
+            "vnstock could not be initialised; sector index data will be "
+            "unavailable from this module.",
+            exc_info=True,
+        )
     _vnstock_ok = True
 except Exception:
     Quote = None
@@ -273,7 +281,7 @@ def get_sector_constituents(sector_code: str) -> List[str]:
                 if (inf.get("sector_code") == sector_code or inf.get("sector") == sector_code) and inf.get("type", "STOCK") == "STOCK":
                     tickers.add(s)
         except Exception:
-            pass
+            logger.debug("get_sector_constituents: swallowed Exception", exc_info=True)
 
     # 4. From screener_snapshot.json (fallback)
     if not tickers:
@@ -817,7 +825,7 @@ def get_sector_snapshot(sector_code: str) -> Dict[str, Any]:
             if cap > 0:
                 total_market_cap += cap
         except (TypeError, ValueError):
-            pass
+            logger.debug("get_sector_snapshot: swallowed (TypeError, ValueError)", exc_info=True)
         for attr in ("pe", "pb", "roe"):
             try:
                 val = float(info.get(attr) or 0)

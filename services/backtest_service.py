@@ -27,6 +27,9 @@ import numpy as np
 from typing import Dict, List, Any, Optional
 
 from services.stock_service import ALL_SYMBOLS_MAP, get_quant_screener, SimpleCache, resolve_data_file
+import logging
+
+logger = logging.getLogger(__name__)
 
 # TTL cache for full multi-strategy comparison runs. One run executes 26
 # sequential backtests (~30s cold), so identical parameter sets are served
@@ -501,7 +504,7 @@ def _load_real_price_database() -> Dict[str, Any]:
                 if m > max_mtime:
                     max_mtime = m
             except Exception:
-                pass
+                logger.debug("_load_real_price_database: swallowed Exception", exc_info=True)
 
     if _REAL_PRICES_CACHE is not None and max_mtime > 0 and max_mtime <= _REAL_PRICES_MTIME:
         return _REAL_PRICES_CACHE
@@ -522,7 +525,7 @@ def _load_real_price_database() -> Dict[str, Any]:
                         if sym not in merged_symbols or len(val["quarters"]) > len(merged_symbols[sym].get("quarters", {})):
                             merged_symbols[sym] = val
         except Exception:
-            pass
+            logger.debug("_load_real_price_database: swallowed Exception", exc_info=True)
 
     _REAL_PRICES_CACHE = merged_symbols
     _REAL_PRICES_MTIME = max_mtime if max_mtime > 0 else 1.0
@@ -2489,7 +2492,7 @@ def compare_all_screener_strategies(
                         _compare_cache.set(cache_key, precalc, ttl_seconds=3600)
                         return precalc
             except Exception:
-                pass
+                logger.debug("compare_all_screener_strategies: swallowed Exception", exc_info=True)
 
     # Pin ONE universe snapshot and ONE price database for the whole comparison so
     # every strategy is reconciled on exactly the same data, regardless of how many

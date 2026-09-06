@@ -1249,6 +1249,9 @@
           <button class="board-tab-btn" id="btnSubtabBtInstitutional" onclick="app.switchBacktestSubtab('institutional')" style="color:#38bdf8; font-weight:800; background:rgba(56,189,248,0.08); border:1px solid rgba(56,189,248,0.3);">
             🔬 TẦNG 2: PHÒNG THÍ NGHIỆM ĐỊNH LƯỢNG & ĐỊNH GIÁ NỘI TẠI (INSTITUTIONAL QUANT & FAIR VALUE LAB)
           </button>
+          <button class="board-tab-btn" id="btnSubtabBtFairValue" onclick="app.switchBacktestSubtab('fair_value')" style="color:#facc15; font-weight:800; background:rgba(250,204,21,0.08); border:1px solid rgba(250,204,21,0.3);">
+            ⚖️ TẦNG 3: ĐỐI SOÁT ĐỊNH GIÁ MODULAR (MODULAR FAIR VALUE BACKTEST)
+          </button>
         </div>
 
         <!-- TIER 1 CONTAINER: PORTFOLIO & FACTOR BACKTEST STUDIO -->
@@ -2138,6 +2141,365 @@
             </div>
           </div>
         </div> <!-- END btInstitutionalSection -->
+
+        <!-- TIER 3 CONTAINER: MODULAR FAIR VALUE BACKTEST -->
+        <div id="btFairValueSection" style="display:none; flex-direction:column; gap:14px;">
+
+          <!-- 1. Header -->
+          <div style="background:var(--bg-card); padding:16px 20px; border-radius:10px; border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:14px; box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+            <div>
+              <div style="font-size:16px; font-weight:800; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+                <span>&#9878;</span> ĐỐI SOÁT ĐỊNH GIÁ MODULAR (MODULAR FAIR VALUE BACKTEST)
+                <span class="badge-tag" style="background:rgba(250,204,21,0.18); color:#facc15; font-size:10.5px; padding:3px 8px; border-radius:4px; font-weight:800; border:1px solid rgba(250,204,21,0.4);">
+                  22 MÔ HÌNH • POINT-IN-TIME • SAI SỐ T+4 QUÝ
+                </span>
+              </div>
+              <div style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">
+                Kiểm định biên an toàn (MoS) trên giá trị nội tại: chỉ dùng BCTC đã công bố trước ngày tái cơ cấu, chấm sai số mô hình bằng giá 4 quý sau.
+              </div>
+            </div>
+            <div style="display:flex; align-items:center; flex-wrap:wrap; gap:8px;">
+              <button class="btn-sm" id="btnRunFairValueBacktest" onclick="app.runFairValueBacktest()" style="cursor:pointer; display:flex; align-items:center; gap:6px; font-size:12px; padding:7px 16px; background:linear-gradient(135deg, #ca8a04, #facc15); color:#0f172a; border:none; border-radius:8px; font-weight:800; box-shadow:0 0 14px rgba(250,204,21,0.4);">
+                <span>&#9654;</span> Chạy Backtest Định Giá Modular
+              </button>
+            </div>
+          </div>
+
+          <!-- 2a. Engine Control Strip -->
+          <div style="background:#0b1120; padding:10px 18px; border-radius:8px; border:1px solid rgba(56,189,248,0.25); display:flex; align-items:center; flex-wrap:wrap; gap:14px;">
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#38bdf8; font-weight:800;">Chế Độ:</label>
+              <select id="fvBtModeSelect" class="quant-select-ctrl" style="min-width:230px; color:#38bdf8; font-weight:700;">
+                <option value="hybrid_funnel" selected>🔀 Phễu 2 Tầng (Lọc Factor → Định Giá)</option>
+                <option value="valuation_only">⚖️ Chỉ Định Giá (Pure Valuation)</option>
+                <option value="screening_only">🎯 Chỉ Lọc Factor (Pure Screening)</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#38bdf8; font-weight:800;">Bộ Lọc Factor:</label>
+              <select id="fvBtScreenerSelect" class="quant-select-ctrl" style="min-width:220px; color:#38bdf8; font-weight:700;">
+                <option value="peter_lynch_garp" selected>🎯 GARP (Peter Lynch)</option>
+                <option value="value_buffett">🏰 Moat & Value (Warren Buffett)</option>
+                <option value="buffetts_alpha">🏛️ Buffett's Alpha (Quality & Value)</option>
+                <option value="deep_value_klarman">💎 Deep Value (Seth Klarman)</option>
+                <option value="guru_magic_formula_greenblatt">🪄 Magic Formula (Joel Greenblatt)</option>
+                <option value="guru_piotroski_fscore">📋 F-Score 9 Điểm (Piotroski)</option>
+                <option value="novy_marx_quality_value">🏛️ Gross Profitability (Novy-Marx)</option>
+                <option value="gray_quantitative_value_qval">🛡️ Quantitative Value (Q-VAL)</option>
+                <option value="quant_q1">⭐ Quant Q1: Tinh Hoa (P80-P100)</option>
+                <option value="quant_q2">🔷 Quant Q2: Tốt (P60-P80)</option>
+                <option value="hello_balanced_risk_mod">⚖️ Hello Mod: Cân Bằng (GARP)</option>
+                <option value="ps_focus_fisher">📊 P/S Focus (Ken Fisher)</option>
+                <option value="growth_philip_fisher">🚀 Growth (Philip Fisher)</option>
+                <option value="contrarian_dreman">🔄 Contrarian (David Dreman)</option>
+                <option value="defensive_graham">🛡️ Defensive (Benjamin Graham)</option>
+                <option value="guru_zweig_conservative_growth">📈 Conservative Growth (Zweig)</option>
+                <option value="guru_cornerstone_growth_oshaughnessy">🏛️ Cornerstone Growth (O'Shaughnessy)</option>
+                <option value="guru_cornerstone_value_oshaughnessy">🏦 Cornerstone Value (O'Shaughnessy)</option>
+                <option value="guru_neff_total_return">💵 Total Return Low-P/E (Neff)</option>
+                <option value="tsmom_moskowitz">⚡ Time Series Momentum (Moskowitz)</option>
+                <option value="guru_consensus_multi_model">🤝 Multi-Strategy Consensus</option>
+                <option value="universal_survival_sector_moat">🛡️ Universal Survival Moat</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#facc15; font-weight:800;">Mô Hình Định Giá:</label>
+              <select id="fvBtValModelSelect" class="quant-select-ctrl" style="min-width:260px; color:#facc15; font-weight:700;">
+                <option value="composite_fair_value" selected>⭐ Composite Tổng Hợp (22 Mô Hình Định Giá)</option>
+                <option value="blended_pe">🔬 Blended P/E (TTM + Forward + CAPE)</option>
+                <option value="ps_margin_adj">🔬 P/S Điều Chỉnh Biên LN (Ken Fisher)</option>
+                <option value="p_fcf">🔬 Price-to-FCF Yield Dòng Tiền Tự Do</option>
+                <option value="pb_rhodes_kropf">🔬 P/B với Bộ Lọc Rhodes-Kropf (RKV)</option>
+                <option value="p_tbv">🔬 Price-to-Tangible Book (P/TBV)</option>
+                <option value="ev_ebitda">🔬 Blended EV/EBITDA Doanh Nghiệp</option>
+                <option value="p_cf">🔬 Price-to-Operating Cash Flow (P/CF)</option>
+                <option value="p_affo">🔬 Price-to-AFFO Multiple (P/AFFO)</option>
+                <option value="dcf_2stage_mckinsey">🔬 Extended 2-Stage McKinsey DCF (ROIC)</option>
+                <option value="rim_edwards_bell_ohlson">🔬 Residual Income Model (RIM / EBO)</option>
+                <option value="greenwald_epv">🔬 Greenwald Earnings Power Value (EPV)</option>
+                <option value="graham_growth">🔬 Modern Graham Growth Formula</option>
+                <option value="rule_of_40_growth">🔬 Rule of 40 / Rule of 65 Super-Stock</option>
+                <option value="acquirers_multiple_ev_ebit">🔬 Acquirer's Multiple (EV/EBIT Carlisle)</option>
+                <option value="buffett_owners_earnings">🔬 Warren Buffett Owner's Earnings DCF</option>
+                <option value="bank_equity_cash_flow">🔬 Banking Equity Cash Flow (Ngân Hàng)</option>
+                <option value="reit_affo_dcf">🔬 REIT & Quỹ Đất RNAV (Bất Động Sản)</option>
+                <option value="industrial_apv">🔬 Industrial Adjusted Present Value APV</option>
+                <option value="consumer_eva_mva">🔬 Consumer EVA/MVA (Bán Lẻ/Tiêu Dùng)</option>
+                <option value="utilities_3stage_ddm">🔬 3-Stage DDM Chiết Khấu Cổ Tức (Điện/Nước)</option>
+                <option value="pharma_rnpv">🔬 Pharma Risk-Adjusted NPV (Dược Phẩm)</option>
+                <option value="telecom_unbundled_sotp">🔬 Telecom Unbundled SOTP & RAB (Viễn Thông)</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="Nguồn số liệu cơ bản dùng để định giá tại mỗi kỳ tái cơ cấu">
+              <label style="font-size:11px; color:#34d399; font-weight:800;">Nguồn BCTC:</label>
+              <select id="fvBtFundamentalsModeSelect" class="quant-select-ctrl" style="min-width:250px; color:#34d399; font-weight:700;">
+                <option value="point_in_time" selected>✅ Point-in-time (BCTC đã công bố)</option>
+                <option value="snapshot_projected">⚠️ Suy từ giá (không phải bằng chứng)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 2b. Valuation Control Strip -->
+          <div style="background:#090e17; padding:10px 18px; border-radius:8px; border:1px solid rgba(250,204,21,0.25); display:flex; align-items:center; flex-wrap:wrap; gap:14px;">
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#34d399; font-weight:700;">Biên An Toàn:</label>
+              <select id="fvBtMosSelect" class="quant-select-ctrl" style="min-width:90px; color:#34d399; font-weight:700; border-color:rgba(52,211,153,0.3);">
+                <option value="0">0%</option>
+                <option value="10">10%</option>
+                <option value="15" selected>15%</option>
+                <option value="25">25%</option>
+                <option value="35">35%</option>
+                <option value="50">50%</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#f87171; font-weight:700;">Chốt Lời:</label>
+              <select id="fvBtExitSelect" class="quant-select-ctrl" style="min-width:90px; color:#f87171; font-weight:700;">
+                <option value="0">Giữ tới hết kỳ</option>
+                <option value="10">+10%</option>
+                <option value="20" selected>+20%</option>
+                <option value="35">+35%</option>
+                <option value="50">+50%</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#facc15; font-weight:700;">Tổng Hợp:</label>
+              <select id="fvBtCompositeModeSelect" class="quant-select-ctrl" style="min-width:180px; color:#facc15; font-weight:700;" onchange="app.toggleOmnibusMetricSelect()">
+                <option value="blended" selected>⭐ Blended (Trọng số ngành)</option>
+                <option value="omnibus">🧪 Omnibus (Theo sai số lịch sử)</option>
+              </select>
+            </div>
+
+            <div id="fvBtOmnibusMetricGroup" class="quant-filter-field" style="display:none; align-items:center; gap:6px;">
+              <label style="font-size:11px; color:#c084fc; font-weight:700;">Hàm Sai Số:</label>
+              <select id="fvBtOmnibusMetricSelect" class="quant-select-ctrl" style="min-width:150px; color:#c084fc; font-weight:700;">
+                <option value="smape" selected>SMAPE</option>
+                <option value="male">MALE</option>
+                <option value="wmape">WMAPE</option>
+                <option value="rmsle">RMSLE</option>
+                <option value="ivw">Inverse-Variance (IVW)</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Khung:</label>
+              <select id="fvBtHorizonSelect" class="quant-select-ctrl" style="min-width:105px;">
+                <option value="1">1 Năm</option>
+                <option value="2">2 Năm</option>
+                <option value="3">3 Năm</option>
+                <option value="5" selected>5 Năm</option>
+                <option value="10">10 Năm</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Sàn / Rổ:</label>
+              <select id="fvBtExchangeSelect" class="quant-select-ctrl" style="min-width:110px;">
+                <option value="ALL" selected>Toàn Bộ</option>
+                <option value="VN30">VN30</option>
+                <option value="VN70">VN70</option>
+                <option value="VNMID">VNMID</option>
+                <option value="HOSE">HOSE</option>
+                <option value="HNX">HNX</option>
+                <option value="UPCOM">UPCOM</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Chu Kỳ Đảo:</label>
+              <select id="fvBtCadenceSelect" class="quant-select-ctrl" style="min-width:115px;">
+                <option value="quarterly" selected>📅 Hàng Quý</option>
+                <option value="semi_annual">📅 Bán Niên</option>
+                <option value="annual">📅 Hàng Năm</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Số CP (Top K):</label>
+              <select id="fvBtTopKSelect" class="quant-select-ctrl" style="min-width:85px;">
+                <option value="5">5 Mã</option>
+                <option value="10" selected>10 Mã</option>
+                <option value="15">15 Mã</option>
+                <option value="20">20 Mã</option>
+              </select>
+            </div>
+
+            <div class="quant-filter-field" style="display:flex; align-items:center; gap:6px;" title="strict tính phí, thuế và trượt giá; ideal khớp ở giá lý thuyết">
+              <label style="font-size:11.5px; color:#94a3b8; font-weight:700;">Khớp Lệnh:</label>
+              <select id="fvBtFillModeSelect" class="quant-select-ctrl" style="min-width:110px;">
+                <option value="strict" selected>Thực tế (phí/thuế)</option>
+                <option value="ideal">Lý tưởng</option>
+              </select>
+            </div>
+
+            <div style="display:flex; align-items:center; gap:6px;" title="Giãn biên an toàn theo Downside Beta của từng mã">
+              <label style="font-size:11px; color:#facc15; font-weight:700; cursor:pointer;" for="fvBtDynamicMosToggle">📐 MoS Động:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="fvBtDynamicMosToggle" checked style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;" title="Áp dụng bộ lọc Sinh Tồn (ROA, Current Ratio, Quick Ratio, ICR)">
+              <label style="font-size:11px; color:#f59e0b; font-weight:700; cursor:pointer;" for="fvBtSurvivalToggle">🛡️ Firewall:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="fvBtSurvivalToggle" checked style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;" title="Áp dụng bộ lọc Xu hướng Động lượng 12 Tháng (R_12M &gt; 0)">
+              <label style="font-size:11px; color:#06b6d4; font-weight:700; cursor:pointer;" for="fvBtTsmomToggle">⚡ TSMOM:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="fvBtTsmomToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;" title="Áp dụng bộ lọc Pháp Y Tài Chính (Piotroski F-Score &amp; Beneish M-Score)">
+              <label style="font-size:11px; color:#ec4899; font-weight:700; cursor:pointer;" for="fvBtForensicToggle">🔍 Forensic:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="fvBtForensicToggle" style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;" title="Loại cổ phiếu nằm trong vùng nguy hiểm của Altman Z-Score">
+              <label style="font-size:11px; color:#34d399; font-weight:700; cursor:pointer;" for="fvBtZSafeToggle">🧮 Z-Safe:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="fvBtZSafeToggle" checked style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px;" title="Loại bẫy giá trị theo phân rã Rhodes-Kropf">
+              <label style="font-size:11px; color:#c084fc; font-weight:700; cursor:pointer;" for="fvBtRkvToggle">💎 RKV:</label>
+              <label class="toggle-switch" style="position:relative; display:inline-block; width:34px; height:18px;">
+                <input type="checkbox" id="fvBtRkvToggle" checked style="opacity:0; width:0; height:0;">
+                <span class="toggle-slider" style="position:absolute; cursor:pointer; top:0; left:0; right:0; bottom:0; background:#334155; border-radius:20px; transition:.3s;"></span>
+              </label>
+            </div>
+          </div>
+
+          <!-- 3. Result Banner + KPI Grid -->
+          <div style="background:var(--bg-card); padding:16px 20px; border-radius:10px; border:1px solid var(--border-subtle); display:flex; flex-direction:column; gap:12px;">
+            <div id="fvBtProvenanceBanner"></div>
+            <div>
+              <div id="fvBtWinnerTitle" style="font-size:15px; font-weight:900; color:#facc15;">KẾT QUẢ ĐỐI SOÁT: Chưa chạy</div>
+              <div id="fvBtWinnerDesc" style="font-size:11.5px; color:var(--text-secondary); margin-top:3px;">Chọn tham số phía trên rồi bấm nút Chạy Backtest Định Giá Modular.</div>
+            </div>
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap:10px;" id="fvBtKpiGrid">
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #10b981; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">🚀 LÃI KÉP NĂM (CAGR)</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#34d399; margin-top:2px;" id="fvBtMetricCagr">--</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #38bdf8; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">💰 TỔNG LỢI NHUẬN</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#38bdf8; margin-top:2px;" id="fvBtMetricTotal">--</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #f43f5e; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">📉 SỤT GIẢM TỐI ĐA</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#f87171; margin-top:2px;" id="fvBtMetricMaxDd">--</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #eab308; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">📊 SHARPE / SORTINO</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#facc15; margin-top:2px;" id="fvBtMetricSharpe">--</div>
+            </div>
+            <div style="background:rgba(15, 23, 42, 0.85); border-left:3px solid #a855f7; border-radius:6px; padding:10px 12px; border:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:10.5px; color:var(--text-muted); font-weight:700;">🎯 TỶ LỆ THẮNG</div>
+              <div style="font-size:18px; font-weight:900; font-family:var(--font-mono); color:#c084fc; margin-top:2px;" id="fvBtMetricWinRate">--</div>
+            </div>
+            </div>
+          </div>
+
+          <!-- 4. Equity Curve -->
+          <div style="background:var(--bg-card); padding:14px 18px; border-radius:10px; border:1px solid var(--border-subtle);">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+              <span style="font-size:14px; font-weight:800; color:var(--text-primary);">📈 ĐƯỜNG CONG TĂNG TRƯỞNG VỐN (NAV) SO VỚI VN-INDEX</span>
+              <div style="display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-secondary);">
+                <span style="display:inline-block; width:10px; height:10px; background:#facc15; border-radius:2px;"></span> NAV Chiến Lược
+                <span style="display:inline-block; width:10px; height:10px; background:#94a3b8; border-radius:2px; margin-left:8px;"></span> VN-Index
+              </div>
+            </div>
+            <div style="position:relative; height:340px; width:100%; background:#090e17; border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.06);">
+              <canvas id="fvBtEquityCanvas" style="width:100%; height:100%; display:block;"></canvas>
+            </div>
+          </div>
+
+          <!-- 5. Yearly Matrix + Model Tournament -->
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap:14px;">
+            <div style="background:var(--bg-card); padding:14px 18px; border-radius:10px; border:1px solid var(--border-subtle);">
+              <div style="font-size:14px; font-weight:800; color:var(--text-primary); margin-bottom:10px;">🗓️ HIỆU SUẤT THEO TỪNG NĂM</div>
+              <div style="overflow-x:auto;">
+                <table class="data-table" style="width:100%; font-size:12px;">
+                  <thead>
+                    <tr>
+                      <th style="text-align:left;">Năm</th>
+                      <th style="text-align:right;">Chiến Lược</th>
+                      <th style="text-align:right;">VN-Index</th>
+                      <th style="text-align:right;">Chênh Lệch</th>
+                      <th>Số Lệnh</th>
+                      <th style="text-align:right;">Thắng</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fvBtYearlyTableBody">
+                    <tr><td colspan="6" style="padding:16px; color:var(--text-muted);">Chưa chạy đối soát.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div style="background:var(--bg-card); padding:14px 18px; border-radius:10px; border:1px solid var(--border-subtle);">
+              <div style="font-size:14px; font-weight:800; color:var(--text-primary); margin-bottom:10px;">🏆 BẢNG ĐẤU 22 MÔ HÌNH ĐỊNH GIÁ</div>
+              <div style="overflow-x:auto; max-height:360px; overflow-y:auto;">
+                <table class="data-table" style="width:100%; font-size:12px;">
+                  <thead>
+                    <tr>
+                      <th style="text-align:left;">Mô Hình</th>
+                      <th style="text-align:right;">CAGR</th>
+                      <th style="text-align:right;">Sharpe</th>
+                      <th style="text-align:right;">Thắng</th>
+                      <th style="text-align:right;">Max DD</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fvBtTournamentTableBody">
+                    <tr><td colspan="5" style="padding:16px; color:var(--text-muted);">Chưa chạy đối soát.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 6. Trade Log -->
+          <div style="background:var(--bg-card); padding:14px 18px; border-radius:10px; border:1px solid var(--border-subtle);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <span style="font-size:14px; font-weight:800; color:var(--text-primary);">🧾 NHẬT KÝ LỆNH CHI TIẾT</span>
+              <span id="fvBtTradesCountBadge" style="font-size:11px; color:var(--text-muted); font-weight:700;">-- lệnh</span>
+            </div>
+            <div style="overflow-x:auto; max-height:460px; overflow-y:auto;">
+              <table class="data-table" style="width:100%; font-size:12px;">
+                <thead>
+                  <tr>
+                    <th style="width:40px;">#</th>
+                    <th style="width:70px;">Mã CP</th>
+                    <th style="width:95px;">Ngày Mua</th>
+                    <th style="width:90px; text-align:right;">Giá Mua</th>
+                    <th style="width:100px; text-align:right;">Giá Trị Nội Tại</th>
+                    <th style="width:80px;">MoS</th>
+                    <th style="width:95px;">Ngày Bán</th>
+                    <th style="width:90px; text-align:right;">Giá Bán</th>
+                    <th style="text-align:left;">Lý Do Thoát Lệnh</th>
+                    <th style="width:80px; text-align:right;">% PnL</th>
+                    <th style="width:75px;">Z-Score</th>
+                  </tr>
+                </thead>
+                <tbody id="fvBtTradesTableBody">
+                  <tr><td colspan="11" style="padding:20px; color:var(--text-muted);">Chưa chạy đối soát.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div> <!-- END btFairValueSection -->
 
       </div>
     </div>

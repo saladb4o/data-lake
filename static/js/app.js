@@ -4,6 +4,10 @@
  * ==========================================================================
  */
 
+// Earliest year the price/fundamentals lake covers. Mirrors
+// services/market_calendar.EARLIEST_DATA_YEAR; keep the two in step.
+const EARLIEST_MARKET_DATA_YEAR = 2016;
+
 function escapeHTML(str) {
   if (str === null || str === undefined) return '';
   return String(str)
@@ -10040,25 +10044,25 @@ class VnstockApp {
   }
 
   switchBacktestSubtab(subtab) {
-    const btnPortfolio = document.getElementById('btnSubtabBtPortfolio');
-    const btnInst = document.getElementById('btnSubtabBtInstitutional');
-    const secPortfolio = document.getElementById('btPortfolioSection');
-    const secInst = document.getElementById('btInstitutionalSection');
+    // Three independent labs share this tab. 'fair_value' used to alias to the
+    // institutional section because its own panel did not exist; it does now.
+    const panes = {
+      portfolio: ['btnSubtabBtPortfolio', 'btPortfolioSection'],
+      institutional: ['btnSubtabBtInstitutional', 'btInstitutionalSection'],
+      fair_value: ['btnSubtabBtFairValue', 'btFairValueSection'],
+    };
+    if (!panes[subtab]) subtab = 'portfolio';
 
-    if (subtab === 'portfolio') {
-      if (btnPortfolio) btnPortfolio.classList.add('active');
-      if (btnInst) btnInst.classList.remove('active');
-      if (secPortfolio) secPortfolio.style.display = 'flex';
-      if (secInst) secInst.style.display = 'none';
-    } else if (subtab === 'institutional' || subtab === 'fair_value') {
-      if (btnPortfolio) btnPortfolio.classList.remove('active');
-      if (btnInst) btnInst.classList.add('active');
-      if (secPortfolio) secPortfolio.style.display = 'none';
-      if (secInst) secInst.style.display = 'flex';
+    Object.entries(panes).forEach(([key, [btnId, secId]]) => {
+      const btn = document.getElementById(btnId);
+      const sec = document.getElementById(secId);
+      const on = key === subtab;
+      if (btn) btn.classList.toggle('active', on);
+      if (sec) sec.style.display = on ? 'flex' : 'none';
+    });
 
-      if (!this.hasRunInstitutionalBt) {
-        this.runInstitutionalBacktest();
-      }
+    if (subtab === 'institutional' && !this.hasRunInstitutionalBt) {
+      this.runInstitutionalBacktest();
     }
   }
 
@@ -10936,9 +10940,10 @@ class VnstockApp {
     const compositeMode = document.getElementById('fvBtCompositeModeSelect')?.value || 'blended';
     const omnibusMetric = document.getElementById('fvBtOmnibusMetricSelect')?.value || 'smape';
     const horizon = parseInt(document.getElementById('fvBtHorizonSelect')?.value || '5');
-    const endYear = 2026;
-    let startYear = endYear - horizon;
-    if (horizon === 10) startYear = 2016;
+    // The backtest window ends at the real current year. Hardcoding it meant the
+    // range silently went stale — and stayed wrong for a whole year at a time.
+    const endYear = new Date().getFullYear();
+    const startYear = Math.max(EARLIEST_MARKET_DATA_YEAR, endYear - horizon);
 
     const mos = parseFloat(document.getElementById('fvBtMosSelect')?.value || '15');
     const exit = parseFloat(document.getElementById('fvBtExitSelect')?.value || '20');
@@ -10952,9 +10957,10 @@ class VnstockApp {
     const forensic = Boolean(document.getElementById('fvBtForensicToggle')?.checked);
     const zSafe = Boolean(document.getElementById('fvBtZSafeToggle')?.checked ?? true);
     const rkv = Boolean(document.getElementById('fvBtRkvToggle')?.checked);
+    const fundamentalsMode = document.getElementById('fvBtFundamentalsModeSelect')?.value || 'point_in_time';
 
     try {
-      const url = `/api/backtest/fair_value/run?mode=${encodeURIComponent(mode)}&screening_strategy=${encodeURIComponent(screener)}&valuation_model_id=${encodeURIComponent(valModel)}&composite_mode=${encodeURIComponent(compositeMode)}&omnibus_metric=${encodeURIComponent(omnibusMetric)}&margin_of_safety_pct=${mos}&exit_premium_pct=${exit}&exchange=${encodeURIComponent(exchange)}&top_k=${topK}&rebalance_cadence=${encodeURIComponent(cadence)}&fill_mode=${encodeURIComponent(fillMode)}&survival_filter=${survival}&tsmom_filter=${tsmom}&forensic_filter=${forensic}&use_dynamic_beta_mos=${dynamicMos}&filter_z_score_safe=${zSafe}&filter_rkv_value_trap=${rkv}&start_year=${startYear}&end_year=${endYear}`;
+      const url = `/api/backtest/fair_value/run?mode=${encodeURIComponent(mode)}&screening_strategy=${encodeURIComponent(screener)}&valuation_model_id=${encodeURIComponent(valModel)}&composite_mode=${encodeURIComponent(compositeMode)}&omnibus_metric=${encodeURIComponent(omnibusMetric)}&margin_of_safety_pct=${mos}&exit_premium_pct=${exit}&exchange=${encodeURIComponent(exchange)}&top_k=${topK}&rebalance_cadence=${encodeURIComponent(cadence)}&fill_mode=${encodeURIComponent(fillMode)}&survival_filter=${survival}&tsmom_filter=${tsmom}&forensic_filter=${forensic}&use_dynamic_beta_mos=${dynamicMos}&filter_z_score_safe=${zSafe}&filter_rkv_value_trap=${rkv}&start_year=${startYear}&end_year=${endYear}&fundamentals_mode=${encodeURIComponent(fundamentalsMode)}`;
 
       const res = await fetch(url, { method: 'POST' });
       const json = await res.json();

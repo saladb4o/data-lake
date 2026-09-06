@@ -33,6 +33,9 @@ from services.fair_value_backtest_service import (
     BacktestMode,
     VALUATION_MODELS_CATALOG
 )
+import logging
+
+logger = logging.getLogger(__name__)
 
 VALUATION_STRATEGY_CATALOG: Dict[str, Dict[str, Any]] = {
     "val_composite_fair_value": {
@@ -443,7 +446,7 @@ def compute_fundamental_law_active_management(
                     if not math.isnan(corr):
                         ic_values.append(corr)
                 except Exception:
-                    pass
+                    logger.debug("compute_fundamental_law_active_management: swallowed Exception", exc_info=True)
 
     # Baseline Bayesian Prior for Vietnam Quant Factor Model
     base_ic = 0.048
