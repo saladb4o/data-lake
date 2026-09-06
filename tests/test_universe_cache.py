@@ -73,7 +73,7 @@ def quant_env(monkeypatch, tmp_path):
     - in-memory cache saved/restored around each test
     """
     snap_path = tmp_path / "screener_snapshot.json"
-    monkeypatch.setattr(ss, "QUANT_SNAPSHOT_FILE", str(snap_path))
+    monkeypatch.setattr(ss, "quant_snapshot_file", lambda: str(snap_path))
     monkeypatch.setattr(
         ss,
         "ALL_SYMBOLS_MAP",
@@ -408,7 +408,7 @@ def test_atomic_write_target_preserved_when_dump_crashes(
 ):
     target = tmp_path / "screener_snapshot.json"
     target.write_text('{"sentinel": true}', encoding="utf-8")
-    monkeypatch.setattr(uds, "SCREENER_SNAPSHOT_FILE", str(target))
+    monkeypatch.setattr(uds, "screener_snapshot_file", lambda: str(target))
     monkeypatch.setattr(uds, "json", _JsonShim(json))
 
     with pytest.raises(OSError):
@@ -420,7 +420,7 @@ def test_atomic_write_target_preserved_when_dump_crashes(
 
 def test_atomic_write_publishes_via_replace(monkeypatch, tmp_path, offline_sync_env):
     target = tmp_path / "screener_snapshot.json"
-    monkeypatch.setattr(uds, "SCREENER_SNAPSHOT_FILE", str(target))
+    monkeypatch.setattr(uds, "screener_snapshot_file", lambda: str(target))
 
     uds.sync_unified_screener_universe(dict(MASTER_MINIMAL))
 

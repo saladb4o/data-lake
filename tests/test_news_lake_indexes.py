@@ -16,7 +16,6 @@ import services.stock_service as ss
 
 def _reset():
     ss.CENTRAL_NEWS_LAKE.clear()
-    ss.TICKER_INVERTED_INDEX.clear()
     ss.NEWS_SECTOR_INVERTED_INDEX.clear()
 
 
@@ -57,7 +56,7 @@ def test_pruning_evicts_links_from_inverted_indexes():
     assert len(ss.CENTRAL_NEWS_LAKE) == ss.MAX_LAKE_SIZE, "lake should be pruned"
 
     live = set(ss.CENTRAL_NEWS_LAKE)
-    for index_name in ("TICKER_INVERTED_INDEX", "NEWS_SECTOR_INVERTED_INDEX"):
+    for index_name in ("NEWS_SECTOR_INVERTED_INDEX",):
         index = getattr(ss, index_name)
         indexed = {link for links in index.values() for link in links}
         assert indexed <= live, f"{index_name} references {len(indexed - live)} evicted articles"

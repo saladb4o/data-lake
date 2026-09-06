@@ -284,8 +284,30 @@ def assess_data_quality(fundamental_data: Dict[str, Any]) -> Dict[str, Any]:
         "inputs_present": present,
         "inputs_missing": missing,
         "core_input_count": len(CORE_VALUATION_INPUTS),
+        "assumptions_applied": _assumptions_applied(fundamental_data),
         "warnings": warnings,
     }
+
+
+# Structural stand-ins the model suite uses when an input is absent. These are
+# deliberate modelling choices, not accidents - but they were invisible in the
+# output, so a number derived from an assumed 40% leverage looked exactly like
+# one derived from the company's real balance sheet.
+STRUCTURAL_ASSUMPTIONS = (
+    ("shares_out", "shares outstanding assumed at 1e8", ("shares_out", "shares")),
+    ("market_cap", "market cap derived from price x shares", ("market_cap",)),
+    ("debt", "debt assumed at 40% of market cap",
+     ("debt", "total_debt_fq", "interest_bearing_debt")),
+)
+
+
+def _assumptions_applied(fundamental_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Names the structural stand-ins that fired for this payload."""
+    applied: List[Dict[str, str]] = []
+    for field_name, description, sources in STRUCTURAL_ASSUMPTIONS:
+        if not any(fundamental_data.get(src) not in (None, "", 0) for src in sources):
+            applied.append({"field": field_name, "assumption": description})
+    return applied
 
 
 def _require_price(symbol: str, fundamental_data: Dict[str, Any]) -> float:
@@ -2432,8 +2454,15 @@ class ValuationEngine:
         """
         if fundamental_data is None:
             # Auto-resolve from data lake screener snapshot if available
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            local_cand = os.path.join(base_dir, "data", "screener_snapshot.json")
+            # Go through the shared resolver: reading data/ directly ignored
+            # GOOGLE_DRIVE_DATA_DIR and DATA_LOCAL_DIR, so the valuation engine
+            # could be reading a different snapshot from the rest of the app.
+            try:
+                from services.stock_service import resolve_data_file
+                local_cand = resolve_data_file("screener_snapshot.json")
+            except Exception:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                local_cand = os.path.join(base_dir, "data", "screener_snapshot.json")
             if os.path.exists(local_cand):
                 try:
                     with open(local_cand, "r", encoding="utf-8") as f:
