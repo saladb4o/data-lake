@@ -166,10 +166,23 @@ class SimpleCache:
 
 cache = SimpleCache()
 
-def resolve_data_file(filename: str) -> str:
-    """Resolves data lake files across Google Drive and local data/, automatically picking the richer/more complete file."""
+def local_data_dir() -> str:
+    """The local data directory.
+
+    Overridable via DATA_LOCAL_DIR so a test or a deployment can point the lake
+    somewhere other than the checkout. Without it, any process importing this
+    module writes into the repository's real data/ directory.
+    """
+    override = os.environ.get("DATA_LOCAL_DIR", "").strip()
+    if override:
+        return override
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    local_path = os.path.join(base_dir, "data", filename)
+    return os.path.join(base_dir, "data")
+
+
+def resolve_data_file(filename: str) -> str:
+    """Resolves data lake files across Google Drive and local data/, picking the freshest copy."""
+    local_path = os.path.join(local_data_dir(), filename)
     gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data")
     
     candidates = []
@@ -216,8 +229,7 @@ class DiskDataLake:
         gdrive_dir = os.getenv("GOOGLE_DRIVE_DATA_DIR", "G:/My Drive/vnstock_data")
         if gdrive_dir and os.path.isdir(gdrive_dir):
             return gdrive_dir
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        d = os.path.join(base_dir, "data")
+        d = local_data_dir()
         os.makedirs(d, exist_ok=True)
         return d
 
