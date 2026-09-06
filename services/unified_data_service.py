@@ -823,7 +823,7 @@ def reconstruct_financial_triangles(
         field_provenance["da"] = 2
     elif cfo_raw is not None and net_income > 0:
         calc_da = max(0.0, cfo_raw - net_income)
-        field_provenance["da"] = 2
+        _prop("da", 2, field_provenance["net_income"])
     elif revenue > 0:
         calc_da = revenue * 0.04
         field_provenance["da"] = 1
@@ -836,12 +836,28 @@ def reconstruct_financial_triangles(
         field_provenance["ebitda"] = 3
     elif ebit_raw is not None and calc_da > 0:
         calc_ebitda = ebit_raw + calc_da
-        field_provenance["ebitda"] = 2
+        _prop("ebitda", 2, field_provenance.get("da", 0))
     elif revenue > 0:
         calc_ebitda = revenue * (sec_med["op_margin"] / 100.0) + calc_da
         field_provenance["ebitda"] = 1
     else:
         calc_ebitda = 0.0
+
+    # Triangle 7.5: EBIT
+    # EBIT is a driver for six of the 22 valuation models (EPV, the DCFs, the
+    # acquirer's multiple). It was being computed nowhere and emitted nowhere,
+    # so every one of those models saw it as missing and refused to publish.
+    if ebit_raw is not None:
+        calc_ebit = ebit_raw
+        field_provenance["ebit"] = 3
+    elif calc_ebitda and calc_da > 0 and field_provenance.get("ebitda", 0) >= 2:
+        calc_ebit = calc_ebitda - calc_da
+        _prop("ebit", 2, field_provenance["ebitda"], field_provenance.get("da", 0))
+    else:
+        # No reported operating line and nothing to reconstruct it from. Leave
+        # it absent rather than back-solving it from revenue times a sector
+        # margin: that would be the market cap talking, not the company.
+        calc_ebit = None
 
     # Triangle 8: OCF / CFO
     if s0_cfo is not None:
@@ -852,7 +868,7 @@ def reconstruct_financial_triangles(
         field_provenance["cfo"] = 3
     elif net_income > 0 and calc_da > 0:
         calc_cfo = net_income + calc_da
-        field_provenance["cfo"] = 2
+        _prop("cfo", 2, field_provenance["net_income"], field_provenance.get("da", 0))
     elif net_income > 0:
         calc_cfo = net_income * 1.10
         field_provenance["cfo"] = 1
@@ -868,7 +884,7 @@ def reconstruct_financial_triangles(
         field_provenance["capex"] = 3
     elif calc_da > 0:
         calc_capex = calc_da * 0.85
-        field_provenance["capex"] = 1
+        _prop("capex", 1, field_provenance.get("da", 0))
     else:
         calc_capex = 0.0
         field_provenance["capex"] = 0
@@ -1256,6 +1272,44 @@ def reconstruct_financial_triangles(
         except Exception:
             forensics = None
 
+    # -------------------------------------------------------------
+    # 8.5 Absolute statement lines
+    #
+    # Everything above reconstructs the balance sheet, income statement and
+    # cash flow, tiers each line, and then - until now - threw the lines away
+    # and published only the ratios derived from them. The valuation engine
+    # looks up "debt", "cash", "ebit", "equity", "revenue": absent, all five
+    # resolved as imputed, and the provenance gate refused every per-share
+    # model for every symbol in the universe. The numbers existed the whole
+    # time. Emit them, each carrying the tier of the witness it came from, so
+    # the gate judges the evidence rather than its absence.
+    #
+    # Units: raw VND, matching what the engine derives internally as
+    # price * shares. "mcap" above stays in billions - it is a display field
+    # and the engine does not read it.
+    # -------------------------------------------------------------
+    _absolute_lines = {
+        "total_assets": (tot_assets, "total_assets"),
+        "total_liabilities": (tot_liab, "total_liabilities"),
+        "equity": (tot_eq, "total_equity"),
+        "debt": (tot_debt, "total_debt"),
+        "cash": (cash_equiv, "cash"),
+        "revenue": (revenue, "revenue"),
+        "net_income": (net_income, "net_income"),
+        "ebit": (calc_ebit, "ebit"),
+        "ebitda": (calc_ebitda, "ebitda"),
+        "cfo": (calc_cfo, "cfo"),
+        "capex": (calc_capex, "capex"),
+    }
+    absolute_lines: Dict[str, float] = {}
+    for _name, (_value, _witness) in _absolute_lines.items():
+        if _value is None or _witness not in field_provenance:
+            # Fail closed: a line with no tier is a line with no provenance,
+            # and publishing it untiered would let it read as observed.
+            continue
+        absolute_lines[_name] = float(_value)
+        field_provenance[_name] = field_provenance[_witness]
+
     result = {
         "mcap": mcap,
         "shares_out": shares_out,
@@ -1298,6 +1352,7 @@ def reconstruct_financial_triangles(
         "provenance_tier": provenance_tier,
         "is_valid_fundamental": is_valid_fundamental
     }
+    result.update(absolute_lines)
 
     # -------------------------------------------------------------
     # 9. Consumer-Facing Imputation Flags (no silent fills)
