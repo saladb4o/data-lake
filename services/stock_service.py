@@ -150,7 +150,10 @@ QUANT_SNAPSHOT_FILE = resolve_data_file("screener_snapshot.json")
 class DiskDataLake:
     """Manages persistent L2 data lake across Google Drive and local data/ directories with thread-safe atomic caching and Stale-While-Revalidate support."""
     def __init__(self):
-        self._lock = threading.Lock()
+        # Reentrant: save_symbol_record() holds the lock and calls read_json(),
+        # which takes it again. A plain Lock self-deadlocks there, and because
+        # the writer dies holding it, every later reader blocks too.
+        self._lock = threading.RLock()
         self._cache_mem: Dict[str, Any] = {}
         self._last_loaded: Dict[str, float] = {}
 
