@@ -60,6 +60,8 @@ else:
     except Exception:
         pass
 
+from services.rate_limiter import limit
+
 logger = logging.getLogger(__name__)
 
 # Import vnstock safely (non-blocking lazy auth)
@@ -68,12 +70,20 @@ try:
     from vnstock.core import setup_api_key
     
     def _init_api_key_async():
-        api_key = os.environ.get("VNSTOCK_API_KEY", "vnstock_23c9d8b4f3e6ae4683e96d516f02cf5e")
-        if api_key and setup_api_key:
+        # Env-only: a key committed to source is a leaked credential, and it
+        # silently overrides whatever the operator configured.
+        api_key = os.environ.get("VNSTOCK_API_KEY", "").strip()
+        if not api_key:
+            logger.warning(
+                "VNSTOCK_API_KEY is not set; vnstock runs on the anonymous tier. "
+                "Set it in .env to use your own quota."
+            )
+            return
+        if setup_api_key:
             try:
                 setup_api_key(api_key)
             except Exception:
-                pass
+                logger.warning("vnstock API key was rejected; continuing on the anonymous tier.")
 
     threading.Thread(target=_init_api_key_async, daemon=True, name="vnstock-auth").start()
 except Exception:
@@ -1550,7 +1560,8 @@ def _sync_single_stock_incremental(symbol: str, last_date: str, end_date: str):
         cache.set(check_key, True, ttl_seconds=900)
 
         q = Quote(symbol=symbol, source="VCI")
-        df_new = q.history(start=last_date, end=end_date, interval="1D")
+        with limit("vnstock"):
+            df_new = q.history(start=last_date, end=end_date, interval="1D")
         if df_new is None or getattr(df_new, "empty", True):
             return
 
@@ -1682,7 +1693,8 @@ def get_stock_history(symbol: str, interval: str = "1D", timeframe: str = "ALL")
                 for src in ["KBS", "VCI"]:
                     try:
                         q = Quote(symbol=symbol, source=src)
-                        df_raw = q.history(start=start_str, end=end_str, interval=interval)
+                        with limit("vnstock"):
+                            df_raw = q.history(start=start_str, end=end_str, interval=interval)
                         if df_raw is not None and not df_raw.empty and len(df_raw) >= 3:
                             return df_raw.copy()
                     except Exception:
@@ -3681,7 +3693,8 @@ def get_company_events(symbol: str) -> List[Dict[str, Any]]:
     if not events_list and Company:
         try:
             c = Company(symbol=symbol, source="KBS")
-            df_ev = c.events()
+            with limit("vnstock"):
+                df_ev = c.events()
             if df_ev is not None and not df_ev.empty:
                 for _, row in df_ev.head(15).iterrows():
                     name_vi = str(row.get("event_name_vi") or row.get("event_name") or "Sự kiện quyền")
@@ -4031,7 +4044,8 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
     if Company:
         try:
             c = Company(symbol=symbol, source="KBS")
-            df_off = c.officers()
+            with limit("vnstock"):
+                df_off = c.officers()
             if df_off is not None and not df_off.empty:
                 for _, row in df_off.iterrows():
                     name = str(row.get("name", "")).strip()
@@ -4044,7 +4058,8 @@ def get_company_leadership(symbol: str) -> Dict[str, Any]:
                             "ratio": ""
                         })
 
-            df_sh = c.shareholders()
+            with limit("vnstock"):
+                df_sh = c.shareholders()
             if df_sh is not None and not df_sh.empty:
                 for _, row in df_sh.iterrows():
                     name = str(row.get("name", "")).strip()

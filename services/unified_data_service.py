@@ -32,6 +32,7 @@ from services.quant_scoring import score_universe
 # BEFORE import opts out (and suppresses InsecureRequestWarning there).
 from services.tls_config import TLS_VERIFY, configure_urllib_warnings
 from services.stock_service import resolve_data_file
+from services.rate_limiter import limit
 
 configure_urllib_warnings()
 
@@ -87,7 +88,8 @@ def _request_with_retry(
     """
     for attempt in range(1, max_attempts + 1):
         try:
-            resp = _HTTP_SESSION.request(method, url, timeout=timeout, verify=TLS_VERIFY, **kwargs)
+            with limit("http"):
+                resp = _HTTP_SESSION.request(method, url, timeout=timeout, verify=TLS_VERIFY, **kwargs)
         except requests.RequestException as exc:
             if attempt >= max_attempts:
                 logger.warning("Request to %s failed after %d attempt(s): %s", url, max_attempts, exc)

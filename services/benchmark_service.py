@@ -36,7 +36,8 @@ try:
     from vnstock import Quote
     from vnstock.core import setup_api_key
 
-    api_key = os.environ.get("VNSTOCK_API_KEY", "vnstock_23c9d8b4f3e6ae4683e96d516f02cf5e")
+    # Env-only; see services/stock_service.py for the rationale.
+    api_key = os.environ.get("VNSTOCK_API_KEY", "").strip()
     if api_key:
         try:
             setup_api_key(api_key)
