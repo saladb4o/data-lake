@@ -86,7 +86,12 @@ def main():
             stats = sync_universe_from_vnstock(force=True)
             print(f"   listing sync reports {stats.get('total_symbols', 0)} symbols")
         except Exception as exc:
+            # Print the traceback, not just the message. The first failure
+            # here read "listing sync failed: KeyError: 'keywords'" and gave
+            # no clue which of several dict lookups raised it.
+            import traceback
             print(f"   listing sync failed: {type(exc).__name__}: {exc}")
+            traceback.print_exc()
         symbols_map = load_local_symbols()
         print(f"📦 Reloaded {len(symbols_map)} valid equity symbols.")
 

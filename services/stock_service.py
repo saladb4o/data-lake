@@ -566,14 +566,17 @@ SECTOR_ICB_REGISTRY = {
 
 SECTOR_METADATA = {k: {"name": v["name"], "icon": v["icon"], "color": v["color"], "keywords": []} for k, v in SECTOR_ICB_REGISTRY.items()}
 SECTOR_METADATA.update({
-    "NganHang": {"name": "Ngân Hàng", "icon": "🏦", "color": "#38bdf8", "sector_code": "VNFIN"},
-    "ChungKhoan": {"name": "Chứng Khoán", "icon": "📈", "color": "#a855f7", "sector_code": "VNFIN"},
-    "BatDongSan": {"name": "Bất Động Sản", "icon": "🏢", "color": "#f59e0b", "sector_code": "VNREAL"},
-    "Thep_VatLieu": {"name": "Thép & Vật Liệu", "icon": "🏗️", "color": "#94a3b8", "sector_code": "VNMAT"},
-    "CongNghe": {"name": "Công Nghệ & VT", "icon": "💻", "color": "#10b981", "sector_code": "VNIT"},
-    "BanLe_TieuDung": {"name": "Bán Lẻ & Tiêu Dùng", "icon": "🛒", "color": "#ec4899", "sector_code": "VNCOND"},
-    "DauKhi_NangLuong": {"name": "Dầu Khí & Năng Lượng", "icon": "⚡", "color": "#f97316", "sector_code": "VNENE"},
-    "HoaChat_PhanBon": {"name": "Hóa Chất & Phân Bón", "icon": "🧪", "color": "#14b8a6", "sector_code": "VNMAT"}
+    # Keep "keywords" on every entry: the comprehension above gives each
+    # sector an empty list, and an update() that drops the key leaves the
+    # mapping non-uniform for anything that iterates it.
+    "NganHang": {"name": "Ngân Hàng", "icon": "🏦", "color": "#38bdf8", "sector_code": "VNFIN", "keywords": []},
+    "ChungKhoan": {"name": "Chứng Khoán", "icon": "📈", "color": "#a855f7", "sector_code": "VNFIN", "keywords": []},
+    "BatDongSan": {"name": "Bất Động Sản", "icon": "🏢", "color": "#f59e0b", "sector_code": "VNREAL", "keywords": []},
+    "Thep_VatLieu": {"name": "Thép & Vật Liệu", "icon": "🏗️", "color": "#94a3b8", "sector_code": "VNMAT", "keywords": []},
+    "CongNghe": {"name": "Công Nghệ & VT", "icon": "💻", "color": "#10b981", "sector_code": "VNIT", "keywords": []},
+    "BanLe_TieuDung": {"name": "Bán Lẻ & Tiêu Dùng", "icon": "🛒", "color": "#ec4899", "sector_code": "VNCOND", "keywords": []},
+    "DauKhi_NangLuong": {"name": "Dầu Khí & Năng Lượng", "icon": "⚡", "color": "#f97316", "sector_code": "VNENE", "keywords": []},
+    "HoaChat_PhanBon": {"name": "Hóa Chất & Phân Bón", "icon": "🧪", "color": "#14b8a6", "sector_code": "VNMAT", "keywords": []}
 })
 
 HNX_KNOWN = {"SHS", "MBS", "PVS", "IDC", "CEO", "HUT", "VCS", "TNG", "BVS", "PVC", "IDV", "CAP", "L14", "DTD", "NTP"}
@@ -880,7 +883,14 @@ def sync_universe_from_vnstock(force: bool = False) -> Dict[str, Any]:
         if not sec:
             name_lower = (d.get('organ_name', '') + " " + d.get('en_organ_name', '')).lower()
             for sk, smeta in SECTOR_METADATA.items():
-                if any(kw in name_lower for kw in smeta["keywords"]):
+                # .get, not [] - the eight legacy entries that
+                # SECTOR_METADATA.update() overwrites below the comprehension
+                # carry no "keywords" key, so indexing raised KeyError the
+                # first time a symbol reached this name-matching fallback.
+                # Which is every symbol on a fresh machine: this path runs
+                # only when the ICB lookup found nothing, and it aborted the
+                # whole listing sync before a single symbol was written.
+                if any(kw in name_lower for kw in smeta.get("keywords", ())):
                     sec = sk
                     break
                     
