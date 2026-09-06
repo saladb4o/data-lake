@@ -31,6 +31,19 @@ from services.fair_value_backtest_service import (
 )
 from services.backtest_service import QUARTERS_TIMELINE
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
 
 @pytest.fixture(scope="module")
 def engine() -> FairValueBacktestService:
@@ -52,6 +65,7 @@ class TestTradeHoldingDays:
                 start_year=2021,
                 end_year=2025,
                 custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+                fundamentals_mode=_SNAPSHOT,
             )
             assert res.metrics["total_trades"] >= 0
             for trade in res.trades:
@@ -65,6 +79,7 @@ class TestTradeHoldingDays:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI"],
+            fundamentals_mode=_SNAPSHOT,
         )
         for trade in res.trades:
             d_in = datetime.strptime(trade["entry_date"], "%Y-%m-%d")
@@ -85,6 +100,7 @@ class TestTradeHoldingDays:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         nominal_max_days = 24 * 30 + 60  # ~780 days
         for trade in res.trades:
@@ -100,6 +116,7 @@ class TestTradeHoldingDays:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         sl_trades = [t for t in res.trades if t["exit_reason"] == "STOP_LOSS"]
         for trade in sl_trades:
@@ -123,6 +140,7 @@ class TestStopLossTakeProfitTriggers:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         sl_trades = [t for t in res.trades if t["exit_reason"] == "STOP_LOSS"]
         for trade in sl_trades:
@@ -137,6 +155,7 @@ class TestStopLossTakeProfitTriggers:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         tp_trades = [t for t in res.trades if t["exit_reason"] == "TAKE_PROFIT"]
         for trade in tp_trades:
@@ -151,6 +170,7 @@ class TestStopLossTakeProfitTriggers:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         tp_trades = [t for t in res.trades if t["exit_reason"] == "TAKE_PROFIT"]
         for trade in tp_trades:
@@ -175,6 +195,7 @@ class TestEquityCurveAmortizationAndTimestamps:
             start_year=2021,
             end_year=2026,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         eq = res.equity_curve
         assert len(eq) > 1
@@ -191,6 +212,7 @@ class TestEquityCurveAmortizationAndTimestamps:
                 start_year=start_y,
                 end_year=end_y,
                 custom_symbols=["HPG", "FPT"],
+                fundamentals_mode=_SNAPSHOT,
             )
             assert len(res.equity_curve) == len(expected_timeline)
             for i, pt in enumerate(res.equity_curve):
@@ -286,6 +308,7 @@ class TestNumericMetricsSanity:
             margin_of_safety_pct=99.0,
             start_year=2024,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         m = res.metrics
         required_numeric_keys = [
@@ -318,6 +341,7 @@ class TestNumericMetricsSanity:
             start_year=2025,
             end_year=2025,
             custom_symbols=["HPG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         m = res.metrics
         # A single trade leaves nothing to compute a volatility from, so the
@@ -336,6 +360,7 @@ class TestNumericMetricsSanity:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         d = res.to_dict()
         assert isinstance(d, dict)
@@ -361,6 +386,7 @@ class TestCadenceForwardSettlement:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         for trade in res.trades:
             d_in = datetime.strptime(trade["entry_date"], "%Y-%m-%d")
@@ -377,6 +403,7 @@ class TestCadenceForwardSettlement:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         entry_dates = set(t["entry_date"] for t in res.trades)
         # 5-year timeline with annual cadence -> entries should only be in Q1 of each year

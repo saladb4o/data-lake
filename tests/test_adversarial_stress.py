@@ -39,6 +39,20 @@ from services.fair_value_backtest_service import (
 )
 import services.stock_service as stock_service
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
+
 
 client = TestClient(app)
 
@@ -194,7 +208,14 @@ class TestExtremeValuationInputs:
             "peak_sales": -100e9,
         }
 
-        # Run all 22 models via engine.calculate_all_models
+        # A negative price is not a stress input to absorb, it is a bad
+        # anchor: every upside and margin-of-safety figure divides by it.
+        with pytest.raises(ValueError, match="[Pp]rice"):
+            engine.calculate_all_models(symbol="DISTRESSED", fundamental_data=distressed_data)
+
+        # With a usable price and every other field still distressed, all 22
+        # models must run and none may emit NaN, Inf or a negative value.
+        distressed_data = dict(distressed_data, price=1_000.0)
         model_outputs = engine.calculate_all_models(symbol="DISTRESSED", fundamental_data=distressed_data)
         assert len(model_outputs) == 22
         for m in model_outputs:
@@ -300,10 +321,11 @@ class TestCorruptedPayloadImmunity:
     def test_completely_empty_and_null_dict(self):
         engine = ValuationEngine()
 
-        # Completely empty dict
-        res_empty = engine.get_comprehensive_valuation(symbol="EMPTY_SYM", fundamental_data={})
-        assert isinstance(res_empty, ValuationMatrixResult)
-        assert res_empty.composite_fair_value >= 0.0
+        # Completely empty dict. Crash-proof does not mean "always returns a
+        # number": price anchors every upside and margin-of-safety figure, so
+        # an absent one is refused explicitly rather than defaulted to 10,000.
+        with pytest.raises(ValueError, match="[Pp]rice"):
+            engine.get_comprehensive_valuation(symbol="EMPTY_SYM", fundamental_data={})
 
         # Dict with explicit None values for every expected key
         all_none = {
@@ -346,9 +368,15 @@ class TestCorruptedPayloadImmunity:
             "netco_ebitda": None,
             "serveco_ebitda": None,
         }
-        res_none = engine.get_comprehensive_valuation(symbol="NONE_SYM", fundamental_data=all_none)
+        with pytest.raises(ValueError, match="[Pp]rice"):
+            engine.get_comprehensive_valuation(symbol="NONE_SYM", fundamental_data=all_none)
+
+        # With a usable price and everything else None, the engine must still
+        # not crash - it runs all 22 models and declines each of them.
+        priced = dict(all_none, price=20_000.0)
+        res_none = engine.get_comprehensive_valuation(symbol="NONE_SYM", fundamental_data=priced)
         assert isinstance(res_none, ValuationMatrixResult)
-        assert res_none.composite_fair_value >= 0.0
+        assert res_none.composite_fair_value == 0.0
         assert len(res_none.models) == 22
 
     def test_corrupted_types_and_strings(self):
@@ -367,7 +395,14 @@ class TestCorruptedPayloadImmunity:
             "total_assets": 1000e9,
             "total_liabilities": 500e9,
         }
-        res = engine.get_comprehensive_valuation(symbol="CORRUPTED", fundamental_data=corrupted)
+        # "N/A" sanitises to absent, and an absent price is refused.
+        with pytest.raises(ValueError, match="[Pp]rice"):
+            engine.get_comprehensive_valuation(symbol="CORRUPTED", fundamental_data=corrupted)
+
+        # The unparseable strings elsewhere must still not crash the engine.
+        res = engine.get_comprehensive_valuation(
+            symbol="CORRUPTED", fundamental_data=dict(corrupted, price=18_000.0)
+        )
         assert isinstance(res, ValuationMatrixResult)
         assert res.composite_fair_value >= 0.0
 
@@ -412,8 +447,7 @@ class TestConcurrencyAndBurstSimulations:
                 margin_of_safety_pct=15.0,
                 start_year=2024,
                 end_year=2025,
-                top_k=5,
-            )
+                top_k=5, fundamentals_mode=_SNAPSHOT)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             futures = [executor.submit(_run_bt, m) for m in modes * 2]
@@ -436,10 +470,17 @@ class TestConcurrencyAndBurstSimulations:
 
         assert len(responses) == 20
         for res in responses:
-            assert res.status_code == 200
+            # A symbol with no market data is now refused (422) rather than
+            # valued against a default price. What this test guards is that
+            # concurrency never produces a crash, a hang or a 500.
+            assert res.status_code in (200, 422), res.status_code
             data = res.json()
-            assert data["status"] == "success"
-            assert "composite_fair_value" in data["data"]
+            if res.status_code == 200:
+                assert data["status"] == "success"
+                assert "composite_fair_value" in data["data"]
+            else:
+                assert data["status"] == "error"
+                assert data["message"]
 
 
 # =============================================================================
@@ -453,14 +494,19 @@ class TestMissingDataLakeFallbacks:
         """When disk lake fails to find historical models, engine must fallback to sector priors."""
         engine = ValuationEngine()
 
+        # A price is required; the lake being empty is what is under test.
         val_res = engine.get_comprehensive_valuation(
             symbol="FALLBACK_ORPHAN_SYM",
-            fundamental_data={"symbol": "FALLBACK_ORPHAN_SYM", "sector_code": "VNMAT"},
+            fundamental_data={
+                "symbol": "FALLBACK_ORPHAN_SYM",
+                "sector_code": "VNMAT",
+                "price": 15_000.0,
+            },
         )
         assert isinstance(val_res, ValuationMatrixResult)
         assert val_res.composite_fair_value >= 0.0
         assert val_res.models is not None
-        assert len(val_res.models) > 0
+        assert len(val_res.models) == 22
 
     def test_fair_value_backtest_non_existent_universe(self):
         """When backtesting an empty universe / exchange, returns safe 0-trade metrics."""
@@ -469,8 +515,7 @@ class TestMissingDataLakeFallbacks:
             screening_strategy="peter_lynch_garp",
             exchange="NON_EXISTENT_EXCHANGE",
             start_year=2024,
-            end_year=2025,
-        )
+            end_year=2025, fundamentals_mode=_SNAPSHOT)
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] == 0
         assert res.metrics["total_return_pct"] == 0.0

@@ -33,6 +33,19 @@ from services.fair_value_backtest_service import (
 )
 from services.backtest_service import QUARTERS_TIMELINE
 
+# These tests exercise the mechanics of the backtest - trade generation,
+# metrics, edge cases - not where its fundamentals come from. The default is
+# now fundamentals_mode="point_in_time", which values only symbol-quarters
+# with a published filing and so produces no trades until
+# data/historical_fundamentals.json is populated. Each run_backtest call below
+# pins "snapshot_projected" so these keep testing what they were written to
+# test; the point-in-time path is covered by
+# tests/test_point_in_time_fundamentals.py.
+from services.fair_value_backtest_service import FundamentalsMode as _FundamentalsMode
+
+_SNAPSHOT = _FundamentalsMode.SNAPSHOT_PROJECTED
+
+
 
 @pytest.fixture(autouse=True)
 def clear_cache():
@@ -67,6 +80,7 @@ class TestCadenceStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.diagnostics["execution_settings"]["rebalance_cadence"] == cadence
@@ -89,6 +103,7 @@ class TestCadenceStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         res_c = svc.run_backtest(
             mode=BacktestMode.SCREENING_ONLY,
@@ -96,6 +111,7 @@ class TestCadenceStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         if step > 1:
             assert res_c.metrics["total_trades"] <= res_q.metrics["total_trades"]
@@ -108,6 +124,7 @@ class TestCadenceStress:
             start_year=2024,
             end_year=2024,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert len(res.yearly_returns) == 1
@@ -137,6 +154,7 @@ class TestHorizonSpanStress:
             start_year=start_y,
             end_year=end_y,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert len(res.yearly_returns) == expected_years
@@ -163,6 +181,7 @@ class TestExitPremiumStress:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.exit_premium_pct == exit_prem
@@ -180,6 +199,7 @@ class TestExitPremiumStress:
             start_year=2022,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         for trade in res.trades:
             assert trade["exit_reason"] in ["HOLDING_EXPIRY", "STOP_LOSS"]
@@ -199,6 +219,7 @@ class TestSingleStockUniverseStress:
             custom_symbols=["HPG"],
             start_year=2021,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] > 0
@@ -212,6 +233,7 @@ class TestSingleStockUniverseStress:
             custom_symbols=["XYZ_UNKNOWN"],
             start_year=2023,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] > 0
@@ -226,6 +248,7 @@ class TestSingleStockUniverseStress:
             custom_symbols=["SYN1", "SYN2", "SYN3"],
             start_year=2023,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] > 0
@@ -246,6 +269,7 @@ class TestZeroTradeScenarioStress:
             use_dynamic_beta_mos=False,
             start_year=2024,
             end_year=2025,
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.metrics["total_trades"] == 0
@@ -283,6 +307,7 @@ class TestTemporalIntegrityStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG", "DGC", "SSI", "REE"],
+            fundamentals_mode=_SNAPSHOT,
         )
         for trade in res.trades:
             d_in = datetime.strptime(trade["entry_date"], "%Y-%m-%d")
@@ -299,6 +324,7 @@ class TestTemporalIntegrityStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         # Entry dates must strictly fall on or after the start_year
         for trade in res.trades:
@@ -315,6 +341,7 @@ class TestTemporalIntegrityStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert len(res.equity_curve) == len(timeline_2021_2025)
         for i, pt in enumerate(res.equity_curve):
@@ -340,6 +367,7 @@ class TestHoldingPeriodStress:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert len(res.equity_curve) > 0
@@ -364,6 +392,7 @@ class TestValuationModelPermutations:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.valuation_model_id == mid
@@ -382,6 +411,7 @@ class TestValuationModelPermutations:
             start_year=2023,
             end_year=2025,
             custom_symbols=["HPG", "FPT"],
+            fundamentals_mode=_SNAPSHOT,
         )
         assert isinstance(res, BacktestResultPayload)
         assert res.diagnostics["valuation_settings"]["composite_mode"] == comp_mode
@@ -402,6 +432,7 @@ class TestPayloadIntegrity:
             start_year=2021,
             end_year=2025,
             custom_symbols=["HPG", "FPT", "VCB", "MBB", "MWG"],
+            fundamentals_mode=_SNAPSHOT,
         )
         d = res.to_dict()
         assert isinstance(d, dict)
