@@ -216,13 +216,52 @@ class SQLiteLakeStore:
 
     # --- JSON interchange ----------------------------------------------
 
+    # Some lakes wrap their symbols in a container key rather than sitting at
+    # the top level, and historical_prices.json is handled both ways in
+    # stock_service. Treating a wrapper as a symbol produced rows literally
+    # named SYMBOLS and UPDATED_AT.
+    CONTAINER_KEYS = ("symbols", "stocks", "records", "data")
+
+    @classmethod
+    def _unwrap(cls, data: Dict[str, Any]) -> Tuple[Dict[str, Any], Optional[str]]:
+        """Returns the symbol-keyed mapping and the container key it came from."""
+        for key in cls.CONTAINER_KEYS:
+            inner = data.get(key)
+            if isinstance(inner, dict) and inner:
+                return inner, key
+        return data, None
+
     def import_json(self, lake: str, json_path: str) -> int:
         """Seeds a lake from its existing JSON file. Returns rows written."""
         with open(json_path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
         if not isinstance(data, dict):
             raise ValueError(f"{json_path} is not a symbol-keyed object")
-        return self.put_many(lake, data)
+
+        records, container = self._unwrap(data)
+        if container is not None:
+            # Remember the wrapper so export_json reproduces the original shape
+            # instead of silently flattening the file downstream tools read.
+            self._set_meta(f"container:{lake}", container)
+            sidecar = {k: v for k, v in data.items() if k != container}
+            if sidecar:
+                self._set_meta(f"sidecar:{lake}", json.dumps(sidecar, ensure_ascii=False))
+        return self.put_many(lake, records)
+
+    def _set_meta(self, key: str, value: str) -> None:
+        conn = self._connect()
+        with conn:
+            conn.execute(
+                "INSERT INTO lake_meta(key, value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (key, value),
+            )
+
+    def _get_meta(self, key: str) -> Optional[str]:
+        row = self._connect().execute(
+            "SELECT value FROM lake_meta WHERE key=?", (key,)
+        ).fetchone()
+        return row[0] if row else None
 
     def export_json(self, lake: str, json_path: str, indent: Optional[int] = None) -> int:
         """Writes the lake back out as the JSON file downstream tools expect.
@@ -231,12 +270,22 @@ class SQLiteLakeStore:
         half-written lake.
         """
         data = self.get_all(lake)
+        count = len(data)
+
+        # Restore the original document shape if this lake was wrapped.
+        container = self._get_meta(f"container:{lake}")
+        if container:
+            sidecar_raw = self._get_meta(f"sidecar:{lake}")
+            document: Dict[str, Any] = json.loads(sidecar_raw) if sidecar_raw else {}
+            document[container] = data
+            data = document
+
         os.makedirs(os.path.dirname(os.path.abspath(json_path)) or ".", exist_ok=True)
         tmp = f"{json_path}.tmp_{os.getpid()}_{int(time.time() * 1000)}"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh, ensure_ascii=False, indent=indent)
         os.replace(tmp, json_path)
-        return len(data)
+        return count
 
     def close(self) -> None:
         conn = getattr(self._local, "conn", None)

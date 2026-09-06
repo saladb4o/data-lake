@@ -88,8 +88,14 @@ def cmd_verify(store: SQLiteLakeStore, args) -> int:
         if not os.path.exists(path) or store.count(lake) == 0:
             continue
         with open(path, "r", encoding="utf-8") as fh:
-            original = json.load(fh)
+            document = json.load(fh)
+        # Compare like with like: a wrapped document is stored unwrapped, so
+        # comparing the raw document against the rows reports every symbol as a
+        # mismatch. A safety net that cries wolf is worse than none.
+        original, container = SQLiteLakeStore._unwrap(document)
         roundtripped = store.get_all(lake)
+        if container:
+            print(f"           (symbols nested under \"{container}\")")
 
         missing = set(original) - set(roundtripped)
         extra = set(roundtripped) - set(original)

@@ -145,3 +145,52 @@ class TestConcurrency:
         stop.set()
         w.join(timeout=10)
         assert not errors, f"reads failed during writes: {errors[0]!r}"
+
+
+class TestWrappedLakeShapes:
+    """Some lakes wrap their symbols in a container key.
+
+    historical_prices.json is read both ways in stock_service
+    (`lake.get(symbol) or lake.get("symbols", {}).get(symbol)`), and
+    screener_snapshot.json nests under "stocks". Treating the wrapper as a
+    symbol produced rows named SYMBOLS and UPDATED_AT.
+    """
+
+    @pytest.mark.parametrize("container", ["symbols", "stocks", "records", "data"])
+    def test_wrapped_document_round_trips_unchanged(self, store, tmp_path, container):
+        original = {
+            container: {"VCB": {"c": 1}, "TCB": {"c": 2}},
+            "updated_at": "2026-01-01",
+            "total_symbols": 2,
+        }
+        src = tmp_path / f"{container}.json"
+        src.write_text(json.dumps(original, ensure_ascii=False), encoding="utf-8")
+
+        assert store.import_json(container, str(src)) == 2, "should import 2 symbols, not the wrapper"
+        assert store.count(container) == 2
+        assert store.get(container, "VCB") == {"c": 1}
+
+        out = tmp_path / "out.json"
+        store.export_json(container, str(out))
+        assert json.loads(out.read_text(encoding="utf-8")) == original, (
+            "export must restore the original document shape, sidecar keys included"
+        )
+
+    def test_flat_document_is_untouched(self, store, tmp_path):
+        original = {"VCB": {"c": 1}, "TCB": {"c": 2}}
+        src = tmp_path / "flat.json"
+        src.write_text(json.dumps(original), encoding="utf-8")
+        store.import_json("flat", str(src))
+
+        out = tmp_path / "out.json"
+        store.export_json("flat", str(out))
+        assert json.loads(out.read_text(encoding="utf-8")) == original
+
+    def test_wrapper_is_not_mistaken_for_a_symbol(self, store, tmp_path):
+        src = tmp_path / "hp.json"
+        src.write_text(json.dumps({"symbols": {f"S{i:03d}": {"c": i} for i in range(50)},
+                                   "updated_at": "x"}), encoding="utf-8")
+        store.import_json("hp", str(src))
+        assert "SYMBOLS" not in set(store.symbols("hp"))
+        assert "UPDATED_AT" not in set(store.symbols("hp"))
+        assert store.count("hp") == 50
