@@ -166,6 +166,37 @@ SECTOR_MODEL_MAP: Dict[str, List[str]] = {
     "2000":  ["industrial_apv", "ev_ebitda", "dcf_2stage_mckinsey", "buffett_owners_earnings", "blended_pe", "p_fcf"],
 }
 
+# The ICB level-2 codes the listing carries that had no entry above.
+#
+# Once the classifier started reading Vietcap's icbCode2, the run reported
+# 566 symbols holding a real code that this map did not recognise - so they
+# fell through to VNIND, which is not "industrials" but "unclassified", and
+# were judged by the six most data-hungry models in the system. 2300 alone
+# is 301 symbols: Construction & Materials, the largest sector on the
+# Vietnamese exchanges.
+#
+# SECTOR_ICB_REGISTRY already declares which codes belong to which sector -
+# "1300, 1700" for materials, "2300, 2700" for industrials, "3300, 3700,
+# 5300" for consumer discretionary. Only the secondary code of each group
+# was ever written here. These entries close that gap by pointing at the
+# same list as their group, and a test asserts the two structures agree in
+# both directions so they cannot drift apart again.
+#
+# 5500 (Media) and 5700 (Travel & Leisure) appear in the listing but in no
+# registry group; ICB places both under consumer discretionary, and they
+# are added to the registry entry as well rather than being special-cased
+# here.
+for _icb, _group in (
+    ("1300", "VNMAT"),   # Chemicals -> Basic Resources & Chemicals
+    ("2300", "VNIND"),   # Construction & Materials -> Industrials
+    ("3300", "VNCOND"),  # Automobiles & Parts
+    ("3700", "VNCOND"),  # Personal & Household Goods
+    ("5300", "VNCOND"),  # Retail
+    ("5500", "VNCOND"),  # Media
+    ("5700", "VNCOND"),  # Travel & Leisure
+):
+    SECTOR_MODEL_MAP.setdefault(_icb, SECTOR_MODEL_MAP[_group])
+
 # Sector model weight priors.
 #
 # These were labelled "Pre-calibrated ... IVW" but nothing in this repository
