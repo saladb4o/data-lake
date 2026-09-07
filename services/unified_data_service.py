@@ -178,6 +178,38 @@ TRADINGVIEW_COLUMNS = [
     "earnings_estimate_fq", "sales_estimates_fq"
 ]
 
+#: Columns fetched in a second pass, never mixed into the request every
+#: symbol depends on.
+#:
+#: Checked against TradingView's published financial-identifier catalogue,
+#: which turned up two distinct faults in the list above:
+#:
+#:  * OPERATING_MARGIN, INTEREST_EXPENSE_ON_DEBT, CAPITAL_EXPENDITURES,
+#:    RESEARCH_AND_DEV and PREFERRED_DIVIDENDS are published at FH/FQ/FY
+#:    only. The "_ttm" forms requested above exist for no company at all.
+#:  * "depreciation_and_amortization" is not an identifier. The
+#:    income-statement line is DEP_AMORT_EXP_INCOME_S; the cash-flow line is
+#:    CASH_FLOW_DEPRECATION_N_AMORTIZATION - the vendor's own spelling of
+#:    "deprecation", which the correctly-spelled copy above therefore misses.
+#:
+#: And OPER_INCOME, operating income at TTM - the same quantity EBIT names -
+#: was never requested, while EBIT stood as the largest blocking driver in
+#: the universe and the only one the valuation engine cannot derive.
+#:
+#: A second pass rather than an extension of the first: an identifier this
+#: service has never sent before could be rejected, and the batch every
+#: symbol depends on must not be what discovers that.
+TRADINGVIEW_SUPPLEMENTARY_COLUMNS = [
+    "oper_income_ttm", "oper_income_fq", "oper_income_fy",
+    "dep_amort_exp_income_s_ttm", "dep_amort_exp_income_s_fq",
+    "cash_flow_deprecation_n_amortization_fq",
+    "ebitda_margin_ttm", "gross_profit_ttm", "total_oper_expense_ttm",
+    "operating_margin_fy", "interest_expense_on_debt_fy",
+    "capital_expenditures_fy", "cost_of_goods_ttm",
+    "return_on_invested_capital_fq", "book_tangible_per_share_fq",
+]
+
+
 DEFAULT_SECTOR_MEDIANS = {
     "VNFIN": {"pe": 10.5, "pb": 1.45, "ps": 3.2, "roe": 19.5, "roa": 2.2, "de_ratio": 7.5, "net_de_ratio": 5.2, "gross_margin": 45.0, "op_margin": 35.0, "net_margin": 28.0, "cur_ratio": 1.1},
     "VNREAL": {"pe": 16.5, "pb": 1.70, "ps": 2.5, "roe": 12.0, "roa": 4.5, "de_ratio": 1.25, "net_de_ratio": 0.85, "gross_margin": 32.0, "op_margin": 20.0, "net_margin": 14.0, "cur_ratio": 1.6},
@@ -191,7 +223,11 @@ DEFAULT_SECTOR_MEDIANS = {
     "VNHEAL": {"pe": 17.0, "pb": 2.50, "ps": 1.60, "roe": 18.5, "roa": 11.0, "de_ratio": 0.35, "net_de_ratio": 0.05, "gross_margin": 36.0, "op_margin": 18.5, "net_margin": 15.0, "cur_ratio": 2.1}
 }
 
-def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int = 150) -> Dict[str, Dict[str, Any]]:
+def fetch_tradingview_batch_by_tickers(
+    tickers_list: List[str],
+    chunk_size: int = 150,
+    columns: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """
     Tier 1 source: fundamental & valuation snapshot via the TradingView scanner,
     fetched in concurrent chunks to stay sub-second without timing out.
@@ -205,6 +241,7 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
     if not tickers_list:
         return results
 
+    request_columns = list(columns) if columns else TRADINGVIEW_COLUMNS
     chunks = [tickers_list[i:i + chunk_size] for i in range(0, len(tickers_list), chunk_size)]
 
     def _fetch_chunk(chunk_tickers):
@@ -214,7 +251,7 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
                 "query": {"types": []},
                 "tickers": list(chunk_tickers)
             },
-            "columns": TRADINGVIEW_COLUMNS
+            "columns": request_columns
         }
         chunk_res = {}
         resp = _request_with_retry("POST", TRADINGVIEW_SCANNER_URL, json=payload, timeout=12)
@@ -244,14 +281,14 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
             if not ticker_full or not d_values:
                 continue
             ex, sym = ticker_full.split(":", 1) if ":" in ticker_full else ("", ticker_full)
-            if len(d_values) != len(TRADINGVIEW_COLUMNS):
+            if len(d_values) != len(request_columns):
                 logger.warning(
                     "TradingView column/value arity mismatch for %s (%d values vs %d columns); skipping",
-                    ticker_full, len(d_values), len(TRADINGVIEW_COLUMNS),
+                    ticker_full, len(d_values), len(request_columns),
                 )
                 continue
             # Protocol: "d" is positionally aligned with the requested "columns".
-            r_dict = dict(zip(TRADINGVIEW_COLUMNS, d_values))
+            r_dict = dict(zip(request_columns, d_values))
             r_dict["symbol"] = sym.upper().strip()
             r_dict["exchange"] = ex.upper().strip()
             chunk_res[sym.upper().strip()] = r_dict
@@ -320,12 +357,24 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         return {}
         
     val_lookup = {}
+    # The vendor names its own line items in every row it sends. Reading the
+    # name from the payload rather than from data/financial_models.json
+    # matters: nothing in this repository writes that file and data/*.json is
+    # gitignored, so the catalogue the item-code census was going to consult
+    # may simply not exist wherever the sync runs - and a census that prints
+    # 30 codes with no names against them answers nothing.
+    name_lookup: Dict[int, str] = {}
     for it in raw_items:
         fdate = it.get('fiscalDate')
         c = int(it.get('itemCode', 0))
         if c not in val_lookup:
             val_lookup[c] = {}
         val_lookup[c][fdate] = it.get('numericValue')
+        if c not in name_lookup:
+            label = (it.get('itemName') or it.get('itemVnName')
+                     or it.get('itemEnName') or "")
+            if isinstance(label, str) and label.strip():
+                name_lookup[c] = label.strip()
 
     # Detect entity form
     latest_d = distinct_dates[0]
@@ -420,6 +469,17 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         "bank_loan_loss_fq": bank_loan_loss,
         "latest_fiscal_date": latest_d,
         "company_form": detected_form,
+        # The itemCodes this payload actually carries. Kept so the sync can
+        # census them without a second round of requests: the EBIT extractor
+        # reads codes [21020, 22000] and came back empty for all 619
+        # backfilled symbols that have no operating line, which says the
+        # codes are wrong rather than the statements absent. Naming the
+        # codes that ARE present, against the itemName catalogue, is what
+        # settles which line to read. Not published downstream.
+        "available_item_codes": sorted(val_lookup.keys()),
+        # {itemCode: the vendor's own name for it}, taken from the rows just
+        # parsed. Diagnostic only; never read as a number.
+        "item_code_names": name_lookup,
         "source": "VNDIRECT_FINFO"
     }
     
@@ -641,6 +701,260 @@ def fetch_vietcap_company_details(symbol: str) -> Dict[str, Any]:
     if shares is None and mcap is None:
         return {}
     return {"shares_outstanding": shares, "market_cap": mcap}
+
+
+#: Vietcap's financial-statistics route. Confirmed against the vnstock
+#: package installed alongside this service (vnstock/explorer/vci): its
+#: RATIO column map lists "ebit", "ebitda", "ebitMargin" and "roic" as
+#: fields of this endpoint. Vietcap already answered for 564 of 564 symbols
+#: when asked for share counts, which is the same population that has no
+#: operating line.
+_VIETCAP_STATS_URL = (
+    "https://iq.vietcap.com.vn/api/iq-insight-service"
+    "/v1/company/{sym}/statistics-financial"
+)
+
+#: Deliberately a margin and not the EBIT field beside it.
+#:
+#: The payload carries "ebit" outright, but nothing in it states a unit, and
+#: this vendor is already known to publish share counts in millions under a
+#: name that says nothing of the sort. Reading an absolute EBIT of unknown
+#: scale risks an operating line wrong by a factor of a billion, which is
+#: exactly what the tier system exists to prevent and would not be visible
+#: as an error - it would just be a valuation.
+#:
+#: A margin is a ratio. Multiplied by revenue we already hold, in units we
+#: already know, it yields EBIT in our units with no unit assumption at all,
+#: through the rung the ladder already has and already tests.
+_VIETCAP_EBIT_MARGIN_ALIASES = (
+    "ebitMargin", "ebit_margin",
+)
+
+
+def _vietcap_latest_period(payload: Any) -> Dict[str, Any]:
+    """The most recent period in a statistics-financial body.
+
+    vnstock reads this route into a frame keyed "years"/"quarters", so the
+    document is a series rather than a single record. The shape is not
+    pinned by any contract available here, so every plausible arrangement is
+    accepted and anything else yields {} - never a guess.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(data, dict):
+        for key in ("quarters", "years"):
+            series = data.get(key)
+            if isinstance(series, list) and series:
+                for row in series:
+                    if isinstance(row, dict) and row:
+                        return row
+        return data if all(not isinstance(v, (list, dict)) for v in data.values()) else {}
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and row:
+                return row
+    return {}
+
+
+def fetch_vietcap_ebit_margin(symbol: str) -> Optional[float]:
+    """EBIT margin, as a percentage, for one symbol. None when unavailable.
+
+    Never raises: transport failure, non-200, malformed JSON, an unexpected
+    body shape or an absent margin all return None, and the caller simply
+    keeps the operating line it already had (which is to say, none).
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry("GET", _VIETCAP_STATS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        return None
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return None
+    margin = _safe_float(_first_alias(record, _VIETCAP_EBIT_MARGIN_ALIASES))
+    if margin is None:
+        return None
+    # A margin outside this band is not a percentage - it is either a
+    # fraction the vendor labelled a percent, or a different quantity
+    # altogether. Either way it is discarded rather than reinterpreted.
+    if not (-100.0 <= margin <= 100.0):
+        return None
+    return margin
+
+
+#: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
+#: const.py names this host as its _GRAPHQL_URL, and a third-party crawler
+#: (github.com/cnhson/DataCrawl) issues exactly this query against it.
+_VIETCAP_GRAPHQL_URL = "https://trading.vietcap.com.vn/data-mt/graphql"
+
+_VIETCAP_RATIO_QUERY = """fragment Ratios on CompanyFinancialRatio {
+  yearReport
+  lengthReport
+  revenue
+  netProfit
+  roe
+  roic
+  roa
+  ev
+  issueShare
+  eps
+  pe
+  pb
+  ebit
+}
+query Query($ticker: String!, $period: String!) {
+  CompanyFinancialRatio(ticker: $ticker, period: $period) {
+    ratio {
+      ...Ratios
+    }
+  }
+}"""
+
+
+def _vietcap_ratio_rows(payload: Any) -> List[Dict[str, Any]]:
+    """The ratio rows out of a GraphQL response, newest first.
+
+    Returns [] for any shape that is not the documented one rather than
+    reaching into it speculatively.
+    """
+    if not isinstance(payload, dict):
+        return []
+    node = ((payload.get("data") or {}).get("CompanyFinancialRatio") or {})
+    rows = node.get("ratio") if isinstance(node, dict) else None
+    if not isinstance(rows, list):
+        return []
+    clean = [r for r in rows if isinstance(r, dict) and r]
+    clean.sort(
+        key=lambda r: (
+            _safe_float(r.get("yearReport")) or 0.0,
+            _safe_float(r.get("lengthReport")) or 0.0,
+        ),
+        reverse=True,
+    )
+    return clean
+
+
+def fetch_vietcap_ebit_margin_graphql(symbol: str) -> Optional[float]:
+    """EBIT margin as a percentage, computed inside one vendor record.
+
+    This route reports EBIT and revenue as absolute figures side by side,
+    and that adjacency is the whole point: whatever unit the vendor keeps
+    them in, it is the same unit for both, so their ratio carries no unit
+    at all. The scale question that makes a bare EBIT unusable simply does
+    not arise, and no assumption stands in for the answer.
+
+    A ratio outside [-1, 1] means the two figures are not what they are
+    labelled - a company does not earn more operating profit than revenue -
+    so it is discarded rather than reinterpreted.
+
+    Never raises. Any failure returns None and the caller keeps the
+    operating line it had.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "POST", _VIETCAP_GRAPHQL_URL, timeout=12,
+        json={
+            "query": _VIETCAP_RATIO_QUERY,
+            "variables": {"ticker": symbol, "period": "Q"},
+        },
+    )
+    if resp is None:
+        return None
+    try:
+        rows = _vietcap_ratio_rows(resp.json())
+    except ValueError:
+        return None
+    for row in rows:
+        ebit = _safe_float(row.get("ebit"))
+        revenue = _safe_float(row.get("revenue"))
+        if ebit is None or revenue is None or revenue <= 0:
+            continue
+        ratio = ebit / revenue
+        if not (-1.0 <= ratio <= 1.0):
+            continue
+        return ratio * 100.0
+    return None
+
+
+def vietcap_graphql_probe(reference_symbol: str = "FPT") -> bool:
+    """One request, before spending several hundred."""
+    try:
+        resp = _HTTP_SESSION.post(
+            _VIETCAP_GRAPHQL_URL, timeout=12, verify=TLS_VERIFY,
+            json={
+                "query": _VIETCAP_RATIO_QUERY,
+                "variables": {"ticker": reference_symbol, "period": "Q"},
+            },
+        )
+    except Exception as exc:
+        print(f"     vietcap graphql ratio         {type(exc).__name__}: {exc}")
+        return False
+    if resp.status_code >= 400:
+        print(f"     vietcap graphql ratio         HTTP {resp.status_code}")
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        print("     vietcap graphql ratio         HTTP 200, not JSON")
+        return False
+    if isinstance(body, dict) and body.get("errors"):
+        print(f"     vietcap graphql ratio         HTTP 200, GraphQL errors:"
+              f" {str(body['errors'])[:160]}")
+        return False
+    rows = _vietcap_ratio_rows(body)
+    print(f"     vietcap graphql ratio         HTTP 200, {len(rows)} ratio rows")
+    if not rows:
+        return False
+    row = rows[0]
+    print(f"       newest row fields: {sorted(row)[:16]}")
+    ebit, revenue = _safe_float(row.get("ebit")), _safe_float(row.get("revenue"))
+    print(f"       ebit={ebit!r} revenue={revenue!r} roic={row.get('roic')!r}")
+    if ebit is None or revenue is None or revenue <= 0:
+        print("       no usable ebit/revenue pair on the newest row.")
+        return False
+    print(f"       implied EBIT margin: {ebit / revenue * 100.0:.2f}%")
+    return True
+
+
+def vietcap_stats_probe(reference_symbol: str = "FPT") -> bool:
+    """One request, before spending several hundred.
+
+    Four TCBS routes 404'd for the life of the project because the only
+    record of it was a warning inside a swallowed except. This prints the
+    status, the shape of the body and the field names, so a rename reads as
+    a rename and a wrong guess about the envelope reads as a wrong guess.
+    """
+    url = _VIETCAP_STATS_URL.format(sym=reference_symbol)
+    try:
+        resp = _HTTP_SESSION.get(url, timeout=10, verify=TLS_VERIFY)
+    except Exception as exc:
+        print(f"     vietcap statistics-financial  {type(exc).__name__}: {exc}")
+        return False
+    if resp.status_code >= 400:
+        print(f"     vietcap statistics-financial  HTTP {resp.status_code}")
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        print("     vietcap statistics-financial  HTTP 200, not JSON")
+        return False
+    envelope = body.get("data") if isinstance(body, dict) else body
+    shape = (f"dict keys {sorted(envelope)[:8]}" if isinstance(envelope, dict)
+             else f"list of {len(envelope)}" if isinstance(envelope, list)
+             else type(envelope).__name__)
+    record = _vietcap_latest_period(body)
+    print(f"     vietcap statistics-financial  HTTP 200, envelope: {shape}")
+    if not record:
+        print("       no period record found in it; leaving the route unused.")
+        return False
+    print(f"       latest-period fields: {sorted(record)[:16]}")
+    key = next((a for a in _VIETCAP_EBIT_MARGIN_ALIASES if record.get(a) is not None), None)
+    if key is None:
+        print("       ebit margin: none of the known aliases matched"
+              f" (ebit={record.get('ebit')!r}, ebitda={record.get('ebitda')!r},"
+              f" roic={record.get('roic')!r})")
+        return False
+    print(f"       ebit margin: {key} = {record.get(key)!r}")
+    return True
 
 
 def vietcap_probe(reference_symbol: str = "FPT") -> bool:
@@ -1157,8 +1471,30 @@ def reconstruct_financial_triangles(
     # -------------------------------------------------------------
     fcf_raw = _safe_float(tv_data.get("free_cash_flow_ttm") or tv_data.get("free_cash_flow_fq"))
     cfo_raw = _safe_float(tv_data.get("cash_f_operating_activities_ttm") or tv_data.get("cash_f_operating_activities_fq"))
-    da_raw = _safe_float(tv_data.get("depreciation_and_amortization_ttm") or tv_data.get("depreciation_and_amortization_fq") or tv_data.get("cash_flow_depreciation_n_amortization_ttm") or tv_data.get("cash_flow_depreciation_n_amortization_fq"))
-    capex_raw = _safe_float(tv_data.get("capital_expenditures_ttm") or tv_data.get("capital_expenditures_fq") or tv_data.get("capex_ttm") or tv_data.get("capex_fq"))
+    # "depreciation_and_amortization_*" and
+    # "cash_flow_depreciation_n_amortization_*" are not TradingView
+    # identifiers: the income-statement line is DEP_AMORT_EXP_INCOME_S and
+    # the cash-flow line spells it CASH_FLOW_DEPRECATION_N_AMORTIZATION.
+    # The four names read here first have therefore never once matched.
+    # They stay, harmlessly, in case another vendor's overlay writes them.
+    da_raw = _safe_float(
+        tv_data.get("dep_amort_exp_income_s_ttm")
+        or tv_data.get("dep_amort_exp_income_s_fq")
+        or tv_data.get("cash_flow_deprecation_n_amortization_fq")
+        or tv_data.get("depreciation_and_amortization_ttm")
+        or tv_data.get("depreciation_and_amortization_fq")
+        or tv_data.get("cash_flow_depreciation_n_amortization_ttm")
+        or tv_data.get("cash_flow_depreciation_n_amortization_fq")
+    )
+    # CAPITAL_EXPENDITURES is published at FH/FQ/FY only, so the "_ttm"
+    # form read first here exists for no company; "capex_*" is not an
+    # identifier at all. The annual figure is the one that answers.
+    capex_raw = _safe_float(
+        tv_data.get("capital_expenditures_ttm")
+        or tv_data.get("capital_expenditures_fy")
+        or tv_data.get("capital_expenditures_fq")
+        or tv_data.get("capex_ttm") or tv_data.get("capex_fq")
+    )
 
     # Triangle 6: D&A Reconstitution
     if da_raw is not None:
@@ -1193,8 +1529,19 @@ def reconstruct_financial_triangles(
     # EBIT is a driver for six of the 22 valuation models (EPV, the DCFs, the
     # acquirer's multiple). It was being computed nowhere and emitted nowhere,
     # so every one of those models saw it as missing and refused to publish.
+    # Operating income is the same quantity, reported under TradingView's
+    # other identifier for it (OPER_INCOME). It is a reading, not a
+    # derivation, so it sits alongside the reported EBIT rather than below
+    # the triangulations - and it was never requested until now.
+    oper_income_raw = _safe_float(
+        tv_data.get("oper_income_ttm") or tv_data.get("oper_income_fq")
+        or tv_data.get("oper_income_fy")
+    )
     if ebit_raw is not None:
         calc_ebit = ebit_raw
+        field_provenance["ebit"] = 3
+    elif oper_income_raw is not None:
+        calc_ebit = oper_income_raw
         field_provenance["ebit"] = 3
     elif pretax_raw is not None and interest_raw is not None:
         # EBIT = pretax income + interest expense, the textbook identity.
@@ -2151,6 +2498,28 @@ _TV_REQUIRED_LINES = (
 )
 
 
+def _has_no_ebit_rung(entry: Optional[Dict[str, Any]]) -> bool:
+    """True when not one rung of the EBIT ladder can fire for this row.
+
+    Mirrors Triangle 7.5 exactly: a reported EBIT, pretax plus interest,
+    EBITDA less D&A, or revenue times a reported operating margin. A symbol
+    with any of them needs no vendor call; asking anyway spends a request to
+    learn nothing.
+    """
+    if not entry:
+        return True
+    if entry.get("ebit_ttm") is not None or entry.get("ebit_fq") is not None:
+        return False
+    if (entry.get("pretax_income_ttm") is not None
+            and entry.get("interest_expense_on_debt_ttm") is not None):
+        return False
+    if (entry.get("ebitda_ttm") is not None
+            and entry.get("depreciation_and_amortization_ttm") is not None):
+        return False
+    return not (entry.get("operating_margin_ttm") is not None
+                or entry.get("operating_margin_fq") is not None)
+
+
 def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
     """True when TradingView left at least one statement line empty.
 
@@ -2238,6 +2607,34 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # Batch fetch from TradingView
     tv_batch = fetch_tradingview_batch_by_tickers(tv_tickers, chunk_size=150)
     print(f"  ✓ Fetched {len(tv_batch)} symbols directly from TradingView Scanner API")
+
+    # Second pass for the identifiers the primary list gets wrong or omits;
+    # see TRADINGVIEW_SUPPLEMENTARY_COLUMNS. Kept separate so a rejected
+    # identifier costs these columns and not the universe.
+    try:
+        tv_extra = fetch_tradingview_batch_by_tickers(
+            tv_tickers, chunk_size=150,
+            columns=TRADINGVIEW_SUPPLEMENTARY_COLUMNS,
+        )
+    except Exception:
+        logger.debug("TradingView supplementary pass failed", exc_info=True)
+        tv_extra = {}
+    filled = collections.Counter()
+    for sym, extra in tv_extra.items():
+        row = tv_batch.setdefault(sym, {})
+        for key, value in extra.items():
+            if key in ("symbol", "exchange") or value is None:
+                continue
+            row.setdefault(key, value)
+            filled[key] += 1
+    if tv_extra:
+        print(f"  ✓ Supplementary columns for {len(tv_extra)} symbols;"
+              " non-null counts:")
+        for key in TRADINGVIEW_SUPPLEMENTARY_COLUMNS:
+            print(f"       {key:<44} {filled.get(key, 0):>5}")
+    else:
+        print("  ⚠ Supplementary column pass returned nothing;"
+              " the identifiers may have been rejected.")
 
     # -----------------------------------------------------------------
     # VNDIRECT backfill for the statement lines TradingView does not carry.
@@ -2422,6 +2819,76 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             # writes a parser against markup that has actually been read.
             probe_html_share_sources()
 
+    # -----------------------------------------------------------------
+    # The operating line, for the symbols whose ladder has no rung to
+    # stand on.
+    #
+    # EBIT is the largest blocking driver in the universe (755 symbols) and
+    # the only one the valuation engine cannot derive - the operating line
+    # comes out of Triangle 7.5 or it does not exist. The census showed all
+    # four of its rungs empty for those symbols: TradingView serves the EBIT
+    # family to about 760 symbols and thin coverage to the rest.
+    #
+    # Vietcap answered for 564 of 564 when asked for share counts, and its
+    # statistics-financial route carries an EBIT margin. A margin, not the
+    # EBIT beside it: see _VIETCAP_EBIT_MARGIN_ALIASES for why an absolute
+    # figure of unstated unit is refused. Multiplied by revenue we already
+    # hold, it feeds the rung the ladder already has, which propagates
+    # revenue's own tier and refuses outright where revenue is a sector
+    # stand-in.
+    # -----------------------------------------------------------------
+    needs_margin = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
+        and _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get("total_revenue_ttm")
+        ) is not None
+    ]
+    if needs_margin:
+        print(f"  🔎 {len(needs_margin)} symbols have no EBIT rung but do have"
+              " revenue; probing Vietcap statistics-financial...")
+        # Two independent routes to the same number. The GraphQL one is
+        # preferred: it reports EBIT and revenue side by side, so the margin
+        # is computed inside a single vendor record and carries no unit
+        # assumption whatsoever. statistics-financial states a margin
+        # directly and stands behind it.
+        use_graphql = vietcap_graphql_probe()
+        use_stats = vietcap_stats_probe()
+        if not (use_graphql or use_stats):
+            print("     neither route yielded an EBIT margin; skipping the fetch.")
+            needs_margin = []
+
+        def _margin_worker(sym: str):
+            for enabled, fetch in ((use_graphql, fetch_vietcap_ebit_margin_graphql),
+                                   (use_stats, fetch_vietcap_ebit_margin)):
+                if not enabled:
+                    continue
+                try:
+                    margin = fetch(sym)
+                except Exception:
+                    logger.debug("Vietcap margin fetch failed for %s via %s",
+                                 sym, fetch.__name__, exc_info=True)
+                    continue
+                if margin is not None:
+                    return sym, margin
+            return sym, None
+
+        margin_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_margin_worker, s) for s in needs_margin]
+            for fut in as_completed(futures):
+                sym, margin = fut.result()
+                if margin is None:
+                    continue
+                # Written under TradingView's own column name so the ladder
+                # reads it through the rung already in place and already
+                # tested, rather than through a second code path.
+                tv_batch.setdefault(sym, {})["operating_margin_ttm"] = margin
+                margin_filled += 1
+        if needs_margin:
+            print(f"  ✓ Vietcap answered an EBIT margin for {margin_filled}"
+                  f"/{len(needs_margin)} of them")
+
     unified_stocks = {}
     missing_symbols = []
 
@@ -2578,23 +3045,53 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 if all((tv_batch.get(sym) or {}).get(c) is not None for c in columns)
             )
 
+        # Each rung is counted over the same alternatives Triangle 7.5
+        # actually reads. The first version of this census counted the
+        # "_ttm" name alone, and five of those do not exist at any company:
+        # TradingView publishes OPERATING_MARGIN, INTEREST_EXPENSE_ON_DEBT
+        # and CAPITAL_EXPENDITURES at FH/FQ/FY only, and
+        # "depreciation_and_amortization" is not an identifier at all. So
+        # the table read zero across the board and was taken as evidence
+        # about the vendor's coverage, when it was evidence about the names
+        # the census itself was passing.
+        def _rung_any(*groups: Tuple[str, ...]) -> int:
+            return sum(
+                1 for sym in no_ebit
+                if all(
+                    any((tv_batch.get(sym) or {}).get(c) is not None for c in group)
+                    for group in groups
+                )
+            )
+
+        _EBIT = ("ebit_ttm", "ebit_fq")
+        _OPER = ("oper_income_ttm", "oper_income_fq", "oper_income_fy")
+        _PRETAX = ("pretax_income_ttm", "pretax_income_fq")
+        _INT = ("interest_expense_on_debt_fq", "interest_expense_on_debt_fy",
+                "interest_expense_on_debt_ttm")
+        _EBITDA = ("ebitda_ttm", "ebitda_fq")
+        _DA = ("dep_amort_exp_income_s_ttm", "dep_amort_exp_income_s_fq",
+               "cash_flow_deprecation_n_amortization_fq")
+        _OPM = ("operating_margin_fq", "operating_margin_fy",
+                "operating_margin_ttm")
+        _REV = ("total_revenue_ttm", "total_revenue_fq")
+
         print(f"     Ladder rungs on those {len(no_ebit)} rows"
-              " (each needs every column listed):")
-        for label, columns in (
-            ("1. reported EBIT", ("ebit_ttm",)),
-            ("2a. pretax income", ("pretax_income_ttm",)),
-            ("2b. interest expense", ("interest_expense_on_debt_ttm",)),
-            ("2. pretax + interest", ("pretax_income_ttm",
-                                      "interest_expense_on_debt_ttm")),
-            ("3. reported EBITDA and D&A", ("ebitda_ttm",
-                                            "depreciation_and_amortization_ttm")),
-            ("4a. operating margin", ("operating_margin_ttm",)),
-            ("4. revenue x operating margin", ("total_revenue_ttm",
-                                               "operating_margin_ttm")),
-            ("-- net income (for reference)", ("net_income_ttm",)),
-            ("-- income tax (for reference)", ("income_tax_ttm",)),
+              " (each counted over the names the ladder really reads):")
+        for label, groups in (
+            ("1. reported EBIT", (_EBIT,)),
+            ("1b. operating income", (_OPER,)),
+            ("2a. pretax income", (_PRETAX,)),
+            ("2b. interest expense", (_INT,)),
+            ("2. pretax + interest", (_PRETAX, _INT)),
+            ("3a. reported EBITDA", (_EBITDA,)),
+            ("3b. D&A", (_DA,)),
+            ("3. EBITDA - D&A", (_EBITDA, _DA)),
+            ("4a. operating margin", (_OPM,)),
+            ("4. revenue x operating margin", (_REV, _OPM)),
+            ("-- revenue (for reference)", (_REV,)),
+            ("-- net income (for reference)", (("net_income_ttm",),)),
         ):
-            print(f"       {label:<40} {_rung(*columns):>5}")
+            print(f"       {label:<40} {_rung_any(*groups):>5}")
         vnd_ebit = sum(
             1 for sym in no_ebit
             if (vnd_by_symbol.get(sym) or {}).get("ebit_ttm") is not None
@@ -2605,6 +3102,62 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         print("     (The VNDIRECT overlay carries no pretax or interest line"
               " at all, so rung 2 is unreachable for a backfilled symbol"
               " however the vendor reports it.)")
+
+        # VNDIRECT has the statements - it answered with revenue, net income,
+        # assets and equity for these very symbols. Only the operating line
+        # comes back empty, which points at the itemCodes the extractor
+        # reads ([21020, 22000]) rather than at the vendor. So census the
+        # codes that ARE present on the income statement, with the names the
+        # itemName catalogue gives them, and let the log say outright which
+        # line is EBIT, which is pretax, and which is interest expense.
+        # Costs no requests: the codes come from payloads already fetched.
+        code_census: "collections.Counter[int]" = collections.Counter()
+        for sym in no_ebit:
+            for code in (vnd_by_symbol.get(sym) or {}).get("available_item_codes", ()):
+                code_census[code] += 1
+        if code_census:
+            # The vendor's own names, carried on the rows it sent. The
+            # local catalogue is consulted only as a second opinion: nothing
+            # in this repository writes data/financial_models.json and
+            # data/*.json is gitignored, so it may not exist here at all.
+            vendor_names: Dict[int, str] = {}
+            for sym in no_ebit:
+                for code, label in ((vnd_by_symbol.get(sym) or {})
+                                    .get("item_code_names") or {}).items():
+                    vendor_names.setdefault(int(code), label)
+            try:
+                from services.stock_service import _FINANCIAL_MODELS_BY_CODE
+            except Exception:
+                _FINANCIAL_MODELS_BY_CODE = {}
+            print(f"     (vendor named {len(vendor_names)} of these codes;"
+                  f" the local catalogue holds"
+                  f" {len(_FINANCIAL_MODELS_BY_CODE)} definitions)")
+
+            def _name_of(code: int) -> str:
+                if code in vendor_names:
+                    return vendor_names[code]
+                for meta in _FINANCIAL_MODELS_BY_CODE.get(code) or []:
+                    label = (meta.get("name_vn") or meta.get("name_en") or "").strip()
+                    if label:
+                        return label
+                return "(unnamed by vendor and absent from the local catalogue)"
+
+            # 2xxxx is the income statement in the VAS chart of accounts;
+            # that is where EBIT, pretax income and interest expense live.
+            income_codes = sorted(
+                (c for c in code_census if 20000 <= c < 30000),
+                key=lambda c: -code_census[c],
+            )
+            print(f"     Income-statement itemCodes present across those"
+                  f" {len(no_ebit)} rows (top 30 by coverage):")
+            for code in income_codes[:30]:
+                marker = "  <-- read today" if code in (21020, 22000) else ""
+                print(f"       {code:<8} {code_census[code]:>5}  "
+                      f"{_name_of(code)[:52]}{marker}")
+            if not income_codes:
+                print("       none: VNDIRECT returns no income statement for"
+                      " these symbols, and the operating line has to come"
+                      " from somewhere else entirely.")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
