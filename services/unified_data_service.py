@@ -420,6 +420,14 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         "bank_loan_loss_fq": bank_loan_loss,
         "latest_fiscal_date": latest_d,
         "company_form": detected_form,
+        # The itemCodes this payload actually carries. Kept so the sync can
+        # census them without a second round of requests: the EBIT extractor
+        # reads codes [21020, 22000] and came back empty for all 619
+        # backfilled symbols that have no operating line, which says the
+        # codes are wrong rather than the statements absent. Naming the
+        # codes that ARE present, against the itemName catalogue, is what
+        # settles which line to read. Not published downstream.
+        "available_item_codes": sorted(val_lookup.keys()),
         "source": "VNDIRECT_FINFO"
     }
     
@@ -2605,6 +2613,49 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         print("     (The VNDIRECT overlay carries no pretax or interest line"
               " at all, so rung 2 is unreachable for a backfilled symbol"
               " however the vendor reports it.)")
+
+        # VNDIRECT has the statements - it answered with revenue, net income,
+        # assets and equity for these very symbols. Only the operating line
+        # comes back empty, which points at the itemCodes the extractor
+        # reads ([21020, 22000]) rather than at the vendor. So census the
+        # codes that ARE present on the income statement, with the names the
+        # itemName catalogue gives them, and let the log say outright which
+        # line is EBIT, which is pretax, and which is interest expense.
+        # Costs no requests: the codes come from payloads already fetched.
+        code_census: "collections.Counter[int]" = collections.Counter()
+        for sym in no_ebit:
+            for code in (vnd_by_symbol.get(sym) or {}).get("available_item_codes", ()):
+                code_census[code] += 1
+        if code_census:
+            try:
+                from services.stock_service import _FINANCIAL_MODELS_BY_CODE
+            except Exception:
+                _FINANCIAL_MODELS_BY_CODE = {}
+
+            def _name_of(code: int) -> str:
+                metas = _FINANCIAL_MODELS_BY_CODE.get(code) or []
+                for meta in metas:
+                    label = (meta.get("name_vn") or meta.get("name_en") or "").strip()
+                    if label:
+                        return label
+                return "(no name in the itemName catalogue)"
+
+            # 2xxxx is the income statement in the VAS chart of accounts;
+            # that is where EBIT, pretax income and interest expense live.
+            income_codes = sorted(
+                (c for c in code_census if 20000 <= c < 30000),
+                key=lambda c: -code_census[c],
+            )
+            print(f"     Income-statement itemCodes present across those"
+                  f" {len(no_ebit)} rows (top 30 by coverage):")
+            for code in income_codes[:30]:
+                marker = "  <-- read today" if code in (21020, 22000) else ""
+                print(f"       {code:<8} {code_census[code]:>5}  "
+                      f"{_name_of(code)[:52]}{marker}")
+            if not income_codes:
+                print("       none: VNDIRECT returns no income statement for"
+                      " these symbols, and the operating line has to come"
+                      " from somewhere else entirely.")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
