@@ -174,20 +174,26 @@ class TestTheCodesAreIdentifiedByArithmeticNotByName:
         rate and the n are what separate that from the statement's own
         structure, so neither may be dropped from the output."""
         src = inspect.getsource(uds.sync_unified_screener_universe)
-        block = src[src.index("Best arithmetic fit"):src.index("Compute Empirical Percentiles")]
-        assert "rate" in block and "(n={tried})" in block
-        assert "tried < 200" in block, (
-            "a fit measured on a handful of companies must not be reported "
-            "as if it were the statement's structure"
-        )
+        block = src[src.index("recover_item_code_relations"):
+                    src.index("Compute Empirical Percentiles")]
+        assert "{rate:5.1f}%" in block and "(n={n})" in block
 
-    def test_the_search_does_not_scan_the_payload_per_comparison(self):
-        """It compares tens of thousands of code triples. Reading each
-        value out of its row inside that loop turns a diagnostic into a
-        minute of the sync's runtime."""
+    def test_the_search_lives_where_it_can_be_tested(self):
+        """It was written inline in a 400-line sync function, where the
+        only thing a test could check was the text of the source. It is a
+        function now, and tests/test_item_code_relations.py checks what it
+        actually recovers."""
+        assert callable(getattr(uds, "recover_item_code_relations", None))
+
+    def test_a_coefficient_that_is_not_whole_is_shown_as_it_is(self):
+        """No line of a statement is 0.83 of another line, so a fractional
+        coefficient is the log saying "this is not a line". Rounding it to
+        1 would erase exactly that signal."""
         src = inspect.getsource(uds.sync_unified_screener_universe)
-        block = src[src.index("Best arithmetic fit"):src.index("Compute Empirical Percentiles")]
-        assert "row.get(" not in block
+        block = src[src.index("recover_item_code_relations"):
+                    src.index("Compute Empirical Percentiles")]
+        assert "abs(abs(b) - 1.0) < 0.02" in block
+        assert "{abs(b):.3f}*" in block
 
     def test_the_probe_only_prints(self):
         """The same invariant as the census: identifying a code is a

@@ -2581,6 +2581,123 @@ _TV_REQUIRED_LINES = (
 )
 
 
+def recover_item_code_relations(
+    by_code_rows: List[Dict[int, Optional[float]]],
+    income_codes: List[int],
+    min_companies: int = 200,
+    max_codes: int = 24,
+    max_terms: int = 6,
+) -> List[Tuple[int, List[Tuple[int, float]], float, int]]:
+    """Find, per item code, the codes that reproduce it arithmetically.
+
+    VNDIRECT names none of its own item codes and the local catalogue that
+    was supposed to name them holds nothing, so which line is the operating
+    one cannot be looked up. It can be measured. Two codes are known good -
+    the extractor reads revenue at 21001 and net income at 23000 and gets
+    sensible numbers for hundreds of companies - and an income statement is
+    a set of exact arithmetic relations, so the rest can be identified by
+    what their values do.
+
+    Three generations of this got here, and the first two were wrong:
+
+    1. Four identities under one proposed reading of the numbering. Every
+       one came back at 0.0%. The reading was wrong - in the log rather
+       than in a published valuation, which is what stating it as something
+       falsifiable was for.
+    2. An exhaustive pair search, which solved much of the statement at
+       100% but returned "no pair reproduces it" for the codes that matter,
+       22200 among them. That is the signature of a subtotal: an operating
+       line is gross profit plus financial income less financial expense,
+       selling and administration, and no pair will ever reproduce five
+       terms.
+    3. Greedy term-by-term, which fails for a reason worth recording: a
+       term that genuinely belongs can increase the residual. On a
+       synthetic statement with a known five-term operating line, greedy
+       gets three terms right, finds that subtracting the fourth true term
+       makes the median residual worse, stops, and reports 7.3% for a
+       relation that is exact. On another sample it reported 0.2%.
+
+    Orthogonal matching pursuit re-solves the whole selected set at each
+    step rather than subtracting once and moving on, so no single term has
+    to justify itself alone. It recovers that same relation with
+    coefficients of 1.000 and a 100% hit rate.
+
+    Returns (target, [(code, coefficient)], hit rate as a percentage, n).
+    Coefficients are returned as found: one that is not close to a whole
+    number is itself the finding, because no line of a statement is 0.83 of
+    another line. Nothing here is proposed and nothing is published - the
+    payloads decide which codes appear and in which direction, and the
+    caller prints the answer.
+    """
+    try:
+        import numpy as np
+    except Exception:  # pragma: no cover - numpy is a hard dependency of pandas
+        return []
+
+    cols = {
+        c: [row.get(c) for row in by_code_rows] for c in income_codes
+    }
+    covered = sorted(
+        (c for c in income_codes
+         if sum(v is not None for v in cols[c]) >= min_companies),
+        key=lambda c: -sum(v is not None for v in cols[c]),
+    )[:max_codes]
+    if len(covered) < 4:
+        return []
+
+    out: List[Tuple[int, List[Tuple[int, float]], float, int]] = []
+    for target in covered:
+        pool = [c for c in covered if c != target]
+        matrix = y = None
+        while len(pool) >= 3:
+            m = np.array(
+                [[r.get(c, np.nan) for c in pool] for r in by_code_rows],
+                dtype=float,
+            )
+            v = np.array(
+                [r.get(target, np.nan) for r in by_code_rows], dtype=float,
+            )
+            keep = ~np.isnan(v) & ~np.isnan(m).any(axis=1)
+            if int(keep.sum()) >= min_companies:
+                matrix, y = m[keep], v[keep]
+                break
+            # Complete cases only. A code present for a handful of
+            # companies would otherwise decide which rows the whole search
+            # sees, so drop the sparsest and try again.
+            pool.pop()
+        if matrix is None:
+            continue
+
+        selected: List[int] = []
+        resid = y.copy()
+        for _ in range(max_terms):
+            norms = np.linalg.norm(matrix, axis=0)
+            norms[norms == 0] = 1.0
+            score = np.abs(matrix.T @ resid) / norms
+            if selected:
+                score[selected] = -1.0
+            selected.append(int(np.argmax(score)))
+            beta, *_rest = np.linalg.lstsq(matrix[:, selected], y, rcond=None)
+            resid = y - matrix[:, selected] @ beta
+            if float(np.median(np.abs(resid))) <= 1e-9 * max(
+                    float(np.median(np.abs(y))), 1.0):
+                break
+        beta, *_rest = np.linalg.lstsq(matrix[:, selected], y, rcond=None)
+        terms = [
+            (pool[j], float(b)) for j, b in zip(selected, beta)
+            if abs(b) > 0.05
+        ]
+        if not terms:
+            out.append((target, [], 0.0, int(len(y))))
+            continue
+        pred = sum(b * matrix[:, pool.index(c)] for c, b in terms)
+        rate = 100.0 * float(
+            np.mean(np.abs(pred - y) <= 0.01 * np.maximum(np.abs(y), 1.0))
+        )
+        out.append((target, terms, rate, int(len(y))))
+    return out
+
+
 def _has_no_ebit_rung(entry: Optional[Dict[str, Any]]) -> bool:
     """True when not one rung of the EBIT ladder can fire for this row.
 
@@ -3295,71 +3412,58 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                     print(f"       {code:<8} {med:>+9.3f} x revenue"
                           f"   (n={len(ratios)})")
 
-                # The first version of this stated one reading of the
-                # numbering as four identities. Every one of them came back
-                # at 0.0% - the reading was wrong, and it was wrong in the
-                # log rather than in a published valuation, which is what
-                # the identities were for.
+                # Three generations of this probe, each correcting the one
+                # before.
                 #
-                # What the ratio table above did establish: 21000 and 21001
-                # sit at 1.000 x revenue (the anchor, as expected), 22100
-                # at 0.859 and 23100 at 0.144, and 0.859 + 0.144 = 1.003.
-                # That is cost of goods and gross profit, found by what the
-                # numbers do rather than by any name.
+                # First it stated a reading of the numbering as four
+                # identities. All four came back at 0.0%: the reading was
+                # wrong, and it was wrong in the log rather than in a
+                # published valuation, which is what stating it that way
+                # was for.
                 #
-                # So stop proposing readings. For every code, search the
-                # other codes for a pair that reproduces it by addition or
-                # subtraction, and print the best fit with its hit rate.
-                # A relation that holds for hundreds of companies is the
-                # statement's own structure; one that holds for a handful
-                # is coincidence, and the rate says which it is.
-                strong = [
-                    c for c in income_codes
-                    if len(shape.get(c) or []) >= 200
-                ][:20]
-                # Column-major, once: the search reads each code's values
-                # tens of thousands of times, and row.get() per read turns
-                # a diagnostic into a minute of the sync's runtime.
+                # Then it searched pairs instead of proposing anything, and
+                # that solved most of the statement outright - 21900 =
+                # 22900 + 23900, 22070 = 22051 + 22052, 23003 = 23000 +
+                # 23500, 23800 = 22070 + 23003, all at 100% over 520-odd
+                # companies. But the codes that matter most came back
+                # "no pair reproduces it", 22200 among them at 3.6%.
+                #
+                # That is the signature of a subtotal, not of a missing
+                # code. Operating profit is gross profit plus financial
+                # income less financial expense, selling and administration
+                # - five terms, and no pair will ever reproduce it. So the
+                # search is greedy and multi-term: start from the target,
+                # repeatedly subtract or add whichever remaining code most
+                # reduces the median residual, and report the expression
+                # with the share of companies it reproduces to within 1%.
+                #
+                # It still proposes nothing. Which codes appear, and in
+                # which direction, is decided by the payloads.
                 cols = {
-                    c: [row.get(c) for row in by_code_rows] for c in strong
+                    c: [row.get(c) for row in by_code_rows] for c in income_codes
                 }
-                print("     Best arithmetic fit found for each code, searched"
-                      " rather than assumed (>= 200 companies):")
-                for target in strong:
-                    best = None
-                    tvals = cols[target]
-                    for a in strong:
-                        if a == target:
+                relations = recover_item_code_relations(
+                    by_code_rows, income_codes,
+                )
+                if not relations:
+                    print("     (no arithmetic search: numpy unavailable or"
+                          " too few codes carry enough companies)")
+                else:
+                    print("     Arithmetic relations recovered per code, by"
+                          " orthogonal matching pursuit over the payloads"
+                          " (nothing proposed; up to 6 terms):")
+                    for target, terms, rate, n in relations:
+                        if not terms:
+                            print(f"       {target:<8}   nothing reproduces it")
                             continue
-                        avals = cols[a]
-                        for b in strong:
-                            if b in (target, a):
-                                continue
-                            bvals = cols[b]
-                            for sign, op in ((-1.0, "-"), (1.0, "+")):
-                                # a + b is b + a; only search it once.
-                                if sign > 0 and b < a:
-                                    continue
-                                hits = tried = 0
-                                for t, va, vb in zip(tvals, avals, bvals):
-                                    if t is None or va is None or vb is None:
-                                        continue
-                                    tried += 1
-                                    if abs((va + sign * vb) - t) <= 0.01 * max(abs(t), 1.0):
-                                        hits += 1
-                                if tried < 200:
-                                    continue
-                                rate = 100.0 * hits / tried
-                                if best is None or rate > best[0]:
-                                    best = (rate, a, op, b, tried)
-                    if best and best[0] >= 50.0:
-                        rate, a, op, b, tried = best
-                        print(f"       {target:<8} = {a} {op} {b}"
-                              f"   {rate:5.1f}%  (n={tried})")
-                    else:
-                        rate = best[0] if best else 0.0
-                        print(f"       {target:<8}   no pair reproduces it"
-                              f" (best {rate:.1f}%)")
+                        expr = " ".join(
+                            (f"{'+' if b > 0 else '-'} "
+                             f"{'' if abs(abs(b) - 1.0) < 0.02 else f'{abs(b):.3f}*'}"
+                             f"{c}")
+                            for c, b in terms
+                        ).lstrip("+ ")
+                        print(f"       {target:<8} = {expr}")
+                        print(f"                    {rate:5.1f}%  (n={n})")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
