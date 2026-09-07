@@ -125,8 +125,19 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
             models, str(record.get("sector_code") or "DEFAULT")
         )
         row["active_models"] = sum(1 for m in models if m.active)
+        # Only count drivers the symbol's own sector actually asks for.
+        #
+        # add_model() records imputed_drivers before it checks sector
+        # applicability, so a model the sector never allows still files a
+        # complaint on its way to BYPASSED. That is why every ordinary
+        # company appeared blocked by affo, rwa and landbank at once - a
+        # REIT model, a bank model and a real-estate model, none of which
+        # was ever going to be used for it. The table read as a diagnosis
+        # and was an artefact of evaluation order.
         blocked = collections.Counter()
         for model in models:
+            if getattr(model, "status", "") == "BYPASSED":
+                continue
             for driver in (model.diagnostics or {}).get("imputed_drivers", []):
                 blocked[driver] += 1
         row["blocked_by"] = [d for d, _ in blocked.most_common(5)]
@@ -136,7 +147,12 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
         # real-estate drivers at once - which is how a perfectly ordinary
         # company ends up blocked by affo, rwa and landbank simultaneously.
         row["sector_code"] = str(record.get("sector_code") or "")
-        row["models_offered"] = len(models)
+        # Not len(models): every one of the 22 is appended regardless of
+        # sector and merely marked BYPASSED, so that count is always 22 and
+        # says nothing. What matters is how many the sector actually offers.
+        row["models_offered"] = sum(
+            1 for m in models if getattr(m, "status", "") != "BYPASSED"
+        )
     except Exception as exc:  # a refusal to value is a result, not a crash
         row["error"] = f"{type(exc).__name__}: {exc}"
         logger.debug("%s could not be evaluated", symbol, exc_info=True)
