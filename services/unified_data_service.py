@@ -565,6 +565,193 @@ def tcbs_probe_routes(reference_symbol: str = "FPT") -> Optional[str]:
         return template
     return None
 
+#: Vietcap's insight service, the route the vnstock package itself uses for
+#: company details. Note the host: iq.vietcap.com.vn, not the
+#: trading.vietcap.com.vn we already query for the listing. The listing
+#: payload carries names and reference prices and no share count - that was
+#: measured, not assumed - but this route carries numberOfSharesMktCap,
+#: which is the one field 565 symbols are missing.
+_VIETCAP_DETAILS_URL = (
+    "https://iq.vietcap.com.vn/api/iq-insight-service/v1/company/details?ticker={sym}"
+)
+
+#: vnstock renames numberOfSharesMktCap to issue_share; its own column
+#: dictionary labels it "Outstanding Shares (mil)", so the value may arrive
+#: in millions. _shares_to_count() reads the unit from the magnitude rather
+#: than trusting either label.
+_VIETCAP_SHARE_ALIASES = (
+    "numberOfSharesMktCap", "number_of_shares_mkt_cap",
+    "issueShare", "issue_share",
+    "outstandingShare", "outstanding_share",
+    "listedShare", "listed_share",
+)
+_VIETCAP_MCAP_ALIASES = ("marketCap", "market_cap", "marketCapitalization")
+
+
+def _vietcap_record(payload: Any) -> Dict[str, Any]:
+    """Unwraps the service envelope, which nests the document under "data"."""
+    if isinstance(payload, dict):
+        inner = payload.get("data")
+        if isinstance(inner, dict) and inner:
+            return inner
+        if isinstance(inner, list):
+            for row in inner:
+                if isinstance(row, dict) and row:
+                    return row
+        return payload
+    if isinstance(payload, list):
+        for row in payload:
+            if isinstance(row, dict) and row:
+                return row
+    return {}
+
+
+def _first_alias(record: Dict[str, Any], aliases: Tuple[str, ...]) -> Any:
+    for alias in aliases:
+        if record.get(alias) is not None:
+            return record[alias]
+    return None
+
+
+def fetch_vietcap_company_details(symbol: str) -> Dict[str, Any]:
+    """
+    Share count and market cap for one symbol from Vietcap's insight service.
+
+    Returns the same shape fetch_vnstock_financials() does, so both feed the
+    single vnstock_data argument of normalize_stock_data() without the caller
+    caring which vendor answered.
+
+    Failure semantics (never raises): an empty dict on transport failure after
+    retries, non-200, malformed JSON, or a payload with no share count in it.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry("GET", _VIETCAP_DETAILS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        logger.debug("Vietcap IQ unavailable for %s", symbol)
+        return {}
+    try:
+        record = _vietcap_record(resp.json())
+    except ValueError:
+        logger.debug("Vietcap IQ returned malformed JSON for %s", symbol)
+        return {}
+    if not record:
+        return {}
+    shares = _shares_to_count(_first_alias(record, _VIETCAP_SHARE_ALIASES))
+    mcap = _first_alias(record, _VIETCAP_MCAP_ALIASES)
+    if shares is None and mcap is None:
+        return {}
+    return {"shares_outstanding": shares, "market_cap": mcap}
+
+
+def vietcap_probe(reference_symbol: str = "FPT") -> bool:
+    """Reports whether the route answers, and with which fields.
+
+    The TCBS list 404'd for every ticker for the life of the project because
+    the only trace of the failure was a warning inside a swallowed except.
+    This prints the outcome before 558 requests are spent on it, and names
+    the top-level keys so a rename shows up as a rename rather than as an
+    absence.
+    """
+    url = _VIETCAP_DETAILS_URL.format(sym=reference_symbol)
+    try:
+        resp = _HTTP_SESSION.get(url, timeout=10, verify=TLS_VERIFY)
+    except Exception as exc:
+        print(f"     vietcap iq company/details    {type(exc).__name__}: {exc}")
+        return False
+    if resp.status_code >= 400:
+        print(f"     vietcap iq company/details    HTTP {resp.status_code}")
+        return False
+    try:
+        record = _vietcap_record(resp.json())
+    except ValueError:
+        print("     vietcap iq company/details    HTTP 200, not JSON")
+        return False
+    if not record:
+        print("     vietcap iq company/details    HTTP 200, empty body")
+        return False
+    share_key = next((a for a in _VIETCAP_SHARE_ALIASES if record.get(a) is not None), None)
+    print(f"     vietcap iq company/details    HTTP 200, fields: {sorted(record)[:14]}")
+    if share_key is None:
+        print("       share-count field: none of the known aliases matched")
+        return False
+    print(f"       share-count field: {share_key} = {record.get(share_key)!r}"
+          f" -> {_shares_to_count(record.get(share_key))} shares")
+    return True
+
+
+#: Cophieu68 and Vietstock, the two remaining candidates. Unlike every
+#: source above they publish HTML pages, not JSON documents, so there is no
+#: field name to alias and no envelope to unwrap - the share count sits in
+#: markup whose shape cannot be seen from here.
+#:
+#: Writing a parser against a guessed structure is how the TCBS route came
+#: to sit dead in this file for the life of the project. So this is
+#: reconnaissance only: one request per candidate, reporting what actually
+#: came back. A parser gets written in the round after, against real markup.
+_HTML_SHARE_SOURCES = (
+    ("cophieu68 summary", "https://www.cophieu68.vn/quote/summary.php?id={sym}"),
+    ("cophieu68 profile", "https://www.cophieu68.vn/company/profilesymbol.php?id={sym}"),
+    ("vietstock profile", "https://finance.vietstock.vn/{sym}/ho-so-doanh-nghiep.htm"),
+    ("vietstock overview", "https://finance.vietstock.vn/{sym}/CTCP.htm"),
+)
+
+#: The labels these pages put next to a share count, Vietnamese and English.
+#: A page that renders the number only through JavaScript will match none of
+#: them, and that is itself the finding: it means the figure is behind an
+#: XHR whose URL has to be found before anything can be parsed.
+_SHARE_COUNT_LABELS = (
+    "cổ phiếu đang lưu hành",
+    "khối lượng đang lưu hành",
+    "klcp đang lưu hành",
+    "cp lưu hành",
+    "số lượng cổ phiếu",
+    "khối lượng niêm yết",
+    "kl niêm yết",
+    "outstanding share",
+    "shares outstanding",
+)
+
+
+def probe_html_share_sources(reference_symbol: str = "FPT") -> None:
+    """Reports what Cophieu68 and Vietstock actually serve, without parsing.
+
+    Prints, per candidate: the HTTP status, the content type, the body size,
+    and - when a share-count label appears - the surrounding text, so the
+    real markup can be read here rather than imagined. Never raises, never
+    returns data, and costs one request per candidate regardless of how many
+    symbols are unpinned.
+    """
+    import re
+
+    print(f"  🔎 Reconnaissance on the HTML sources (reference {reference_symbol}):")
+    for label, template in _HTML_SHARE_SOURCES:
+        url = template.format(sym=reference_symbol)
+        try:
+            resp = _HTTP_SESSION.get(url, timeout=15, verify=TLS_VERIFY)
+        except Exception as exc:
+            print(f"     {label:<20} {type(exc).__name__}: {exc}")
+            continue
+        ctype = (resp.headers.get("Content-Type") or "?").split(";")[0]
+        body = resp.text or ""
+        print(f"     {label:<20} HTTP {resp.status_code}  {ctype}  {len(body):,} bytes")
+        if resp.status_code >= 400 or not body:
+            continue
+        lowered = body.lower()
+        hit = next((lab for lab in _SHARE_COUNT_LABELS if lab in lowered), None)
+        if hit is None:
+            # No label in the served HTML. Either the page is rendered
+            # client-side or the figure is not on it; both mean a parser
+            # would have had nothing to bite on.
+            print(f"       no share-count label in the served HTML"
+                  f" (checked {len(_SHARE_COUNT_LABELS)} spellings)")
+            continue
+        at = lowered.index(hit)
+        window = body[max(0, at - 120): at + 240]
+        window = re.sub(r"<[^>]+>", " ", window)
+        window = " ".join(window.split())
+        print(f"       matched {hit!r}: ...{window}...")
+
+
 # =============================================================================
 # 3. YFINANCE FALLBACK EXTRACTOR (TIER 3)
 # =============================================================================
@@ -2048,6 +2235,10 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         sym.upper().strip() for sym in master_symbols_map
         if _needs_share_count(tv_batch.get(sym.upper().strip()))
     ]
+    # Keep the full list: the TCBS branch below empties `needs_shares` when
+    # no route answers, and the Vietcap pass still has to cover every one of
+    # them. Without this, a dead TCBS silently cancels its successor too.
+    needs_shares_all = list(needs_shares)
     if needs_shares:
         print(f"  🔎 {len(needs_shares)} symbols have no share-count witness; probing TCBS routes...")
         tcbs_route = tcbs_probe_routes()
@@ -2100,6 +2291,69 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 print(f"     probe {probe}: HTTP {resp.status_code} body={snippet!r}")
             except Exception as exc:
                 print(f"     probe {probe}: {type(exc).__name__}: {exc}")
+
+    # -----------------------------------------------------------------
+    # Vietcap's insight service, for the share count nothing else carries.
+    #
+    # Every cheaper option is now measured and closed. The two listing
+    # payloads that build the universe hold names, sectors and reference
+    # prices only. VNDIRECT answers for 438 of these symbols and reports no
+    # share count at all. All four TCBS routes return 404. TradingView
+    # returns the totals - equity for 435 of them, net income for 398 - but
+    # no market cap and no multiple to divide them by, which is why the
+    # ladder's implied rungs cannot fire.
+    #
+    # This route is the one the vnstock package itself reads for company
+    # details, and it is the only place seen so far that carries
+    # numberOfSharesMktCap. One request per symbol, on a host we have not
+    # queried before, so probe it once before spending 558 of them.
+    # -----------------------------------------------------------------
+    still_unpinned = [
+        sym for sym in needs_shares_all
+        if not tcbs_by_symbol.get(sym)
+    ]
+    if still_unpinned:
+        print(f"  🔎 {len(still_unpinned)} symbols still unpinned; probing Vietcap IQ...")
+        if not vietcap_probe():
+            print("     Vietcap IQ carried no share count; skipping the fetch entirely.")
+            still_unpinned = []
+
+        def _vietcap_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_company_details(sym)
+            except Exception:
+                logger.debug("Vietcap IQ fetch failed for %s", sym, exc_info=True)
+                return sym, {}
+
+        vc_replied = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_vietcap_worker, s) for s in still_unpinned]
+            for fut in as_completed(futures):
+                sym, payload = fut.result()
+                if not payload:
+                    continue
+                vc_replied += 1
+                payload = dict(payload)
+                payload["market_cap"] = _market_cap_to_vnd(payload.get("market_cap"))
+                # A payload that answered but pins nothing is not a witness;
+                # storing it would make the census count it as coverage.
+                if payload.get("shares_outstanding") is None and payload.get("market_cap") is None:
+                    continue
+                tcbs_by_symbol.setdefault(sym, {}).update(
+                    {k: v for k, v in payload.items() if v is not None}
+                )
+        pinned = sum(
+            1 for sym in still_unpinned
+            if (tcbs_by_symbol.get(sym) or {}).get("shares_outstanding") is not None
+        )
+        print(f"  ✓ Vietcap IQ replied for {vc_replied}/{len(still_unpinned)};"
+              f" {pinned} carried a share count outright")
+        if pinned < len(still_unpinned):
+            # Still a gap, so look at the two HTML sources before writing
+            # anything against them. Four requests total, not four per
+            # symbol, and no data is taken from the result - the next round
+            # writes a parser against markup that has actually been read.
+            probe_html_share_sources()
 
     unified_stocks = {}
     missing_symbols = []
@@ -2200,8 +2454,31 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         print(f"     VNDIRECT statements on hand for {vnd_have} of them"
               " (VNDIRECT reports no share count).")
         tcbs_have = sum(1 for sym in no_witness if tcbs_by_symbol.get(sym))
-        print(f"     TCBS answered for {tcbs_have} of them and still left no"
-              " usable market cap, EPS or multiple.")
+        print(f"     TCBS or Vietcap answered for {tcbs_have} of them and still"
+              " left no usable share count, market cap, EPS or multiple.")
+
+        # The top-20 census above is ranked, so it silently hides any column
+        # that falls below the cut - and the columns that matter most here
+        # are exactly the rare ones. Each ladder rung needs a specific pair
+        # of columns; a rung that is one column away from firing for 400
+        # symbols is worth a request to a vendor, and a rung whose both
+        # halves are absent is not. So name them outright rather than
+        # inferring their absence from a ranking.
+        def _have(*columns: str) -> int:
+            return sum(
+                1 for sym in no_witness
+                if all((tv_batch.get(sym) or {}).get(c) is not None for c in columns)
+            )
+
+        print(f"     Ladder rungs on those {len(no_witness)} rows"
+              " (each needs every column listed):")
+        for label, columns in (
+            ("price (every implied rung needs it)", ("close",)),
+            ("reported EPS", ("net_income_ttm", "earnings_per_share_basic_ttm")),
+            ("implied EPS", ("close", "net_income_ttm", "price_earnings_ttm")),
+            ("implied BVPS", ("close", "total_equity_fq", "price_book_fq")),
+        ):
+            print(f"       {label:<40} {_have(*columns):>5}")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
