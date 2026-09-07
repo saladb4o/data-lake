@@ -9,6 +9,7 @@ using the Quant Imputation Engine (Accounting Triangles & 4-Tier Provenance).
 
 import os
 import sys
+import collections
 import json
 import time
 import logging
@@ -35,6 +36,54 @@ from services.stock_service import SECTOR_ICB_REGISTRY, resolve_data_file
 MIN_PLAUSIBLE_UNIVERSE = 100
 
 
+#: Counts ICB codes the listing carries that SECTOR_MODEL_MAP has no entry
+#: for, so an unrecognised code shape is reported rather than silently
+#: falling through to the default.
+unresolved_icb: "collections.Counter[str]" = collections.Counter()
+
+
+def _classify(record: dict, symbol: str, rep_map: dict):
+    """Decides which sector a symbol is valued as, and says how it decided.
+
+    VNIND was never "industrials" here; it was "unclassified". The only real
+    classifier was rep_map, built from the representative_stocks lists - 129
+    hand-typed tickers across ten sectors - so roughly 1,393 of the 1,522
+    symbols defaulted to VNIND because nobody had typed them in. VNIND is
+    then offered the six most data-hungry models in the system: a UPCOM
+    microcap was being judged by a two-stage McKinsey DCF, and 149 of the
+    150 refusals that carry good data are VNIND.
+
+    The real classification was already on disk and unread. The listing sync
+    stores Vietcap's icbCode2 as "icb_code", and SECTOR_MODEL_MAP has
+    carried numeric keys - 0500, 1700, 8300, 9500 and the rest, the ICB
+    level-2 set - for exactly this lookup, which nothing ever performed.
+
+    Order: an ICB code the model map recognises, then the hand-curated list,
+    then the old default. Each answer names its own route so a run says how
+    many symbols each path classified, rather than leaving a silent
+    fallthrough to look like a classification.
+    """
+    from services.valuation_engine import SECTOR_MODEL_MAP
+
+    raw = record.get("icb_code")
+    if raw not in (None, ""):
+        # "8300, 8700, 8500" appears in the registry; a listing record
+        # carries one code, but split anyway rather than assume.
+        for part in str(raw).replace(";", ",").split(","):
+            code = part.strip()
+            if not code:
+                continue
+            if code in SECTOR_MODEL_MAP:
+                return code, record.get("industry") or code, "ICB code from the listing"
+            unresolved_icb[code] += 1
+
+    if symbol in rep_map:
+        code, name = rep_map[symbol]
+        return code, name, "representative-stocks list"
+
+    return "VNIND", record.get("industry") or "Công Nghiệp", "default (unclassified)"
+
+
 def load_local_symbols() -> dict:
     # Through the shared resolver. As a hardcoded PROJECT_ROOT/data/... this
     # ignored DATA_LOCAL_DIR and GOOGLE_DRIVE_DATA_DIR, so the list was
@@ -44,6 +93,7 @@ def load_local_symbols() -> dict:
     # snapshot.
     symbols_file = resolve_data_file("all_symbols.json")
     master = {}
+    census: "collections.Counter[str]" = collections.Counter()
 
     # Build reverse lookup from representative stocks
     rep_map = {}
@@ -59,7 +109,8 @@ def load_local_symbols() -> dict:
                 stype = (r.get("type") or "STOCK").upper()
                 ex = (r.get("exchange") or "HOSE").upper()
                 if stype in ["STOCK", "CO_PHIEU"] and ex in ["HOSE", "HNX", "UPCOM"]:
-                    sec_code, sec_name = rep_map.get(sym, ("VNIND", r.get("industry") or "Công Nghiệp"))
+                    sec_code, sec_name, how = _classify(r, sym, rep_map)
+                    census[how] += 1
                     master[sym] = {
                         "symbol": sym,
                         "name": r.get("organ_name", f"Công ty Cổ phần {sym}"),
@@ -67,6 +118,19 @@ def load_local_symbols() -> dict:
                         "sector_code": sec_code,
                         "sector_name": sec_name
                     }
+
+    if master:
+        print("  🏷️  Sector classification:")
+        for how, count in census.most_common():
+            print(f"       {how:<38} {count:>5}")
+        unmapped = sorted(unresolved_icb.items(), key=lambda kv: -kv[1])[:10]
+        if unmapped:
+            # An ICB code the model map has no entry for is worth naming: it
+            # is the difference between "the listing does not carry codes"
+            # and "it carries codes in a shape we do not recognise", and
+            # those need opposite fixes.
+            print("       ICB codes present but not in SECTOR_MODEL_MAP: "
+                  + ", ".join(f"{c}({n})" for c, n in unmapped))
     return master
 
 def main():
