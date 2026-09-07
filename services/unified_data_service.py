@@ -199,13 +199,25 @@ TRADINGVIEW_COLUMNS = [
 #: A second pass rather than an extension of the first: an identifier this
 #: service has never sent before could be rejected, and the batch every
 #: symbol depends on must not be what discovers that.
+#: Measured, not guessed: the first supplementary pass requested twenty-one
+#: identifiers and the log counted how many companies answered each. Six came
+#: back null for all 1522 - dep_amort_exp_income_s_ttm and _fq,
+#: cash_flow_deprecation_n_amortization_fq, total_oper_expense_ttm,
+#: interest_expense_on_debt_fy and cost_of_goods_ttm. A column that answers
+#: for nobody is a name the scanner does not serve, not a line no company
+#: reports, so translating a Pine fin_id into a scanner column by lowercasing
+#: it and appending a period suffix is right for some identifiers and wrong
+#: for others. They are dropped rather than left in to be counted again.
+#:
+#: The consequence worth naming: TradingView serves no interest expense at
+#: all - not at TTM, where the catalogue says the line does not exist, and
+#: not at FY, where the name returns nothing. Rung 2 of the EBIT ladder has
+#: no TradingView route, whatever the pretax line does.
 TRADINGVIEW_SUPPLEMENTARY_COLUMNS = [
     "oper_income_ttm", "oper_income_fq", "oper_income_fy",
-    "dep_amort_exp_income_s_ttm", "dep_amort_exp_income_s_fq",
-    "cash_flow_deprecation_n_amortization_fq",
-    "ebitda_margin_ttm", "gross_profit_ttm", "total_oper_expense_ttm",
-    "operating_margin_fy", "interest_expense_on_debt_fy",
-    "capital_expenditures_fy", "cost_of_goods_ttm",
+    "ebitda_margin_ttm", "gross_profit_ttm",
+    "operating_margin_fy",
+    "capital_expenditures_fy",
     "return_on_invested_capital_fq", "book_tangible_per_share_fq",
 ]
 
@@ -477,6 +489,15 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         # codes that ARE present, against the itemName catalogue, is what
         # settles which line to read. Not published downstream.
         "available_item_codes": sorted(val_lookup.keys()),
+        # {itemCode: its TTM value} for the income statement only. The census
+        # cannot name a code the vendor never names, and it named none of
+        # them - so the codes have to be identified by what their numbers do
+        # relative to lines already known (revenue at 21001, net income at
+        # 23000), not by a label. Diagnostic only; never read as a number by
+        # anything that publishes.
+        "income_statement_ttm_by_code": {
+            c: _sum_ttm([c]) for c in val_lookup if 20000 <= c < 30000
+        },
         # {itemCode: the vendor's own name for it}, taken from the rows just
         # parsed. Diagnostic only; never read as a number.
         "item_code_names": name_lookup,
@@ -3158,6 +3179,97 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 print("       none: VNDIRECT returns no income statement for"
                       " these symbols, and the operating line has to come"
                       " from somewhere else entirely.")
+
+            # The vendor named none of its own codes, so no lookup can say
+            # which line is the operating one. But two lines ARE known: the
+            # extractor already reads revenue at 21001 and net income at
+            # 23000 and gets sensible numbers for hundreds of companies. That
+            # is enough to identify the rest arithmetically instead of by
+            # guessing at a numbering scheme - which is how [21020, 22000]
+            # got into the extractor in the first place, and neither code
+            # exists in any payload the vendor sent.
+            #
+            # Two things are printed. First, each code's median value as a
+            # fraction of revenue: cost of goods sits near 0.8, gross profit
+            # near 0.2, the operating line between net income and gross
+            # profit, and taxes are small and negative. Second, the hit rate
+            # of the VAS income-statement identities under one specific
+            # reading of the codes. An identity that holds for nearly every
+            # company confirms every label in its chain at once; one that
+            # does not, refutes the reading. Neither is a number the engine
+            # can read - this block only prints.
+            by_code_rows = [
+                (vnd_by_symbol.get(sym) or {}).get(
+                    "income_statement_ttm_by_code") or {}
+                for sym in no_ebit
+            ]
+            by_code_rows = [r for r in by_code_rows if r]
+
+            def _rev_of(row):
+                for c in (21001, 21000, 21010):
+                    v = row.get(c)
+                    if v is not None and v > 0:
+                        return v
+                return None
+
+            if by_code_rows:
+                print("     Median value as a fraction of revenue, per code"
+                      " (n = companies where both are present):")
+                shape: Dict[int, List[float]] = {}
+                for row in by_code_rows:
+                    rev = _rev_of(row)
+                    if not rev:
+                        continue
+                    for code, val in row.items():
+                        if val is None:
+                            continue
+                        shape.setdefault(int(code), []).append(val / rev)
+                for code in income_codes[:30]:
+                    ratios = sorted(shape.get(code) or [])
+                    if not ratios:
+                        continue
+                    med = ratios[len(ratios) // 2]
+                    print(f"       {code:<8} {med:>+9.3f} x revenue"
+                          f"   (n={len(ratios)})")
+
+                # One reading of the codes, stated as identities so the log
+                # can refute it. Under this reading 22200 is the operating
+                # line - profit from the core business - and 22070 is
+                # interest expense, which together are rung 2 of the EBIT
+                # ladder for every symbol VNDIRECT answers for.
+                identities = (
+                    ("gross profit   21900 = 21001 - 21500",
+                     lambda r: (r.get(21900), (r.get(21001), r.get(21500)),
+                                lambda a, b: a - b)),
+                    ("operating line 22200 = 21900 + 22051 - 22052"
+                     " - 22100 - 22110",
+                     lambda r: (r.get(22200),
+                                (r.get(21900), r.get(22051), r.get(22052),
+                                 r.get(22100), r.get(22110)),
+                                lambda g, fi, fe, sell, adm:
+                                    g + fi - fe - sell - adm)),
+                    ("pretax         22500 = 22200 + 22230",
+                     lambda r: (r.get(22500), (r.get(22200), r.get(22230)),
+                                lambda a, b: a + b)),
+                    ("after tax      22900 = 22500 - 22509 - 22510",
+                     lambda r: (r.get(22900),
+                                (r.get(22500), r.get(22509), r.get(22510)),
+                                lambda p, t1, t2: p - t1 - t2)),
+                )
+                print("     Identity hit rates under one reading of the codes"
+                      " (within 1% of the stated line):")
+                for label, build in identities:
+                    hits = tried = 0
+                    for row in by_code_rows:
+                        stated, parts, fn = build(row)
+                        if stated is None or any(p is None for p in parts):
+                            continue
+                        tried += 1
+                        scale = max(abs(stated), 1.0)
+                        if abs(fn(*parts) - stated) / scale <= 0.01:
+                            hits += 1
+                    rate = (100.0 * hits / tried) if tried else 0.0
+                    print(f"       {label:<58} {rate:5.1f}%  (n={tried})")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
