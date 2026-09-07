@@ -80,3 +80,62 @@ class TestItSurvivesTheErrorPath:
         del broken["models_offered"]
         broken["error"] = "ValueError: boom"
         _report([broken])  # must not raise
+
+
+class _Model:
+    def __init__(self, status, imputed=(), active=False):
+        self.status = status
+        self.active = active
+        self.diagnostics = {"imputed_drivers": list(imputed)}
+
+
+class TestBlockedByCountsOnlyApplicableModels:
+    """The blocking table was an artefact of evaluation order.
+
+    add_model() records imputed_drivers before it checks sector
+    applicability, so a model the sector never allows still files its
+    complaint on the way to BYPASSED. Every ordinary company therefore
+    appeared blocked by affo (a REIT driver), rwa (a bank driver) and
+    landbank (a real-estate driver) at once - which no single company could
+    be short of, and which read as a diagnosis rather than as noise.
+    """
+
+    def _evaluate(self, monkeypatch, models):
+        class _Engine:
+            def calculate_all_models(self, symbol, record):
+                return models
+
+            def calculate_composite_fair_value(self, models, sector):
+                return 0.0
+
+        import services.valuation_engine as ve
+
+        monkeypatch.setattr(ve, "ValuationEngine", _Engine)
+        return audit.evaluate({"symbol": "AAV", "sector_code": "VNIND"})
+
+    def test_a_bypassed_model_does_not_file_a_blocking_driver(self, monkeypatch):
+        row = self._evaluate(monkeypatch, [_Model("BYPASSED", ["affo", "rwa"])])
+        assert row["blocked_by"] == []
+
+    def test_an_applicable_model_still_files_one(self, monkeypatch):
+        row = self._evaluate(monkeypatch, [_Model("INSUFFICIENT_DATA", ["ebit"])])
+        assert row["blocked_by"] == ["ebit"]
+
+    def test_the_two_are_separated_within_one_symbol(self, monkeypatch):
+        row = self._evaluate(
+            monkeypatch,
+            [_Model("BYPASSED", ["affo", "landbank"]),
+             _Model("INSUFFICIENT_DATA", ["ebit", "fcf"])],
+        )
+        assert set(row["blocked_by"]) == {"ebit", "fcf"}
+
+    def test_models_offered_counts_the_sector_s_own_models_not_all_22(
+        self, monkeypatch
+    ):
+        # Every model is appended to results regardless of sector and merely
+        # marked BYPASSED, so len(models) is always 22 and measures nothing.
+        row = self._evaluate(
+            monkeypatch,
+            [_Model("BYPASSED")] * 16 + [_Model("INSUFFICIENT_DATA", ["ebit"])] * 6,
+        )
+        assert row["models_offered"] == 6
