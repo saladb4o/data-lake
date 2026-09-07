@@ -1809,6 +1809,54 @@ def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
     return any(tv_entry.get(key) is None for key in _TV_REQUIRED_LINES)
 
 
+#: The TradingView columns any one of which yields a share count. A row
+#: carrying none of them sends the symbol to the fabricated 50,000,000 and
+#: takes its market cap, and therefore every valuation model, to tier 0.
+_TV_SHARE_WITNESSES = (
+    "diluted_shares_outstanding_fq",
+    "total_shares_outstanding_fq",
+    "market_cap_basic",
+)
+
+
+def _needs_share_count(tv_entry: Optional[Dict[str, Any]]) -> bool:
+    """True when TradingView gives no way to arrive at a share count."""
+    if not tv_entry:
+        return True
+    if any(tv_entry.get(key) is not None for key in _TV_SHARE_WITNESSES):
+        return False
+    # A reported total and its per-share twin also pin the count down.
+    return not (
+        tv_entry.get("net_income_ttm") is not None
+        and tv_entry.get("earnings_per_share_basic_ttm") is not None
+    )
+
+
+#: A VN listed company is worth between roughly 10 billion and 500,000
+#: billion VND. Expressed in raw dong that is 1e10..5e14; expressed in
+#: billions it is 10..5e5. The two ranges are five orders of magnitude
+#: apart, so a market cap can be assigned to one or the other without
+#: guessing - and anything landing in the gap between them is ambiguous and
+#: gets dropped rather than published under a unit nobody verified. The
+#: engine already carries one scar from a market cap read in the wrong
+#: unit; it will not carry a second.
+_MCAP_RAW_VND_FLOOR = 1e9
+_MCAP_BILLIONS_CEILING = 1e7
+
+
+def _market_cap_to_vnd(value: Any) -> Optional[float]:
+    """Normalises a vendor market cap to raw VND, or None if ambiguous."""
+    mcap = _safe_float(value)
+    if mcap is None or mcap <= 0:
+        return None
+    if mcap >= _MCAP_RAW_VND_FLOOR:
+        return mcap
+    if mcap < _MCAP_BILLIONS_CEILING:
+        return mcap * 1_000_000_000.0
+    logger.debug("market cap %r sits between the unit ranges; discarding", value)
+    return None
+
+
 def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[str, Any]:
     """
     Executes full multi-source synchronization for all symbols in master universe.
@@ -1872,6 +1920,51 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         )
         print(f"  ✓ VNDIRECT returned statements for {filled}/{len(needs_vnd)} of them")
 
+    # -----------------------------------------------------------------
+    # TCBS for the share count TradingView and VNDIRECT both leave out.
+    #
+    # fetch_vnstock_financials() has always returned marketCap, pe, pb and
+    # eps from the TCBS public feed, and any one of those pins the share
+    # count down: market cap over price directly, or a reported total over
+    # the per-share figure a multiple implies. It was wired into
+    # _fallback_worker alone - the path taken only by symbols TradingView
+    # omits entirely. The 565 symbols that need it are not on that path:
+    # TradingView returns a row for them, near-empty but present, so they
+    # go through the main loop and never reach TCBS at all. The source was
+    # written, working, and connected to the one branch its users never
+    # take.
+    # -----------------------------------------------------------------
+    tcbs_by_symbol: Dict[str, Dict[str, Any]] = {}
+    needs_shares = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _needs_share_count(tv_batch.get(sym.upper().strip()))
+    ]
+    if needs_shares:
+        print(f"  🔎 {len(needs_shares)} symbols have no share-count witness; querying TCBS...")
+
+        def _tcbs_worker(sym: str):
+            try:
+                return sym, fetch_vnstock_financials(sym)
+            except Exception:
+                logger.debug("TCBS fetch failed for %s", sym, exc_info=True)
+                return sym, {}
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            for fut in as_completed([executor.submit(_tcbs_worker, s) for s in needs_shares]):
+                sym, payload = fut.result()
+                if not payload:
+                    continue
+                payload = dict(payload)
+                payload["market_cap"] = _market_cap_to_vnd(payload.get("market_cap"))
+                if any(payload.get(k) is not None for k in ("market_cap", "eps", "pe", "pb")):
+                    tcbs_by_symbol[sym] = payload
+        usable = sum(
+            1 for p in tcbs_by_symbol.values()
+            if p.get("market_cap") is not None or p.get("eps") is not None
+        )
+        print(f"  ✓ TCBS answered for {len(tcbs_by_symbol)}/{len(needs_shares)}"
+              f"; {usable} carry a market cap or EPS that pins the share count")
+
     unified_stocks = {}
     missing_symbols = []
 
@@ -1891,6 +1984,7 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 sector_code=sec_code,
                 sector_name=sec_name,
                 tv_data=tv_entry,
+                vnstock_data=tcbs_by_symbol.get(sym_clean),
                 vndirect_data=vnd_by_symbol.get(sym_clean),
                 enable_source0_fallback=False
             )
@@ -1969,6 +2063,9 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         vnd_have = sum(1 for sym in no_witness if vnd_by_symbol.get(sym))
         print(f"     VNDIRECT statements on hand for {vnd_have} of them"
               " (VNDIRECT reports no share count).")
+        tcbs_have = sum(1 for sym in no_witness if tcbs_by_symbol.get(sym))
+        print(f"     TCBS answered for {tcbs_have} of them and still left no"
+              " usable market cap, EPS or multiple.")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
