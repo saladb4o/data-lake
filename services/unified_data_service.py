@@ -14,6 +14,7 @@ Accounting Triangles Imputation Engine & Multi-Tier Provenance System.
 import os
 import sys
 import json
+import collections
 import time
 import logging
 import random
@@ -1930,6 +1931,44 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             for fut in as_completed(futures):
                 s, normalized = fut.result()
                 unified_stocks[s] = normalized
+
+    # -----------------------------------------------------------------
+    # Share-count census.
+    #
+    # A fabricated share count caps the market cap at tier 0 and every
+    # valuation model with it, so this one field decides more of the
+    # coverage number than any other. Three rungs were added to the ladder
+    # on the strength of a guess about which TradingView columns these rows
+    # carry; the coverage report did not move by a single symbol, and there
+    # was no way to see why from the outside.
+    #
+    # So: report it. This prints what the symbols with no share witness
+    # actually received, which says whether the next rung should read
+    # another column, call another vendor, or whether these rows are empty
+    # and no ladder will ever reach them. It changes no behaviour.
+    # -----------------------------------------------------------------
+    no_witness = [
+        sym for sym, rec in unified_stocks.items()
+        if (rec.get("field_provenance") or {}).get("shares", 0) == 0
+    ]
+    print(f"\n  📊 Share-count witness: {len(unified_stocks) - len(no_witness)}"
+          f"/{len(unified_stocks)} symbols have one, {len(no_witness)} do not.")
+    if no_witness:
+        census = collections.Counter()
+        for sym in no_witness:
+            for key, value in (tv_batch.get(sym) or {}).items():
+                if value is not None:
+                    census[key] += 1
+        if census:
+            print(f"     TradingView columns present on those {len(no_witness)} rows:")
+            for key, count in census.most_common(20):
+                print(f"       {key:<40} {count:>5}")
+        else:
+            print("     TradingView returned empty rows for every one of them;")
+            print("     the share count has to come from another vendor.")
+        vnd_have = sum(1 for sym in no_witness if vnd_by_symbol.get(sym))
+        print(f"     VNDIRECT statements on hand for {vnd_have} of them"
+              " (VNDIRECT reports no share count).")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
