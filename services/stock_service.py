@@ -518,7 +518,11 @@ SECTOR_ICB_REGISTRY = {
         "code": "VNCOND",
         "name": "Hàng Tiêu Dùng & Bán Lẻ",
         "en_name": "Consumer Discretionary & Retail",
-        "icb_code": "3300, 3700, 5300",
+        # 5500 Media and 5700 Travel & Leisure appear in the Vietcap
+        # listing and belonged to no group here, so 77 symbols holding
+        # them fell through to the unclassified default. ICB places
+        # both under consumer discretionary.
+        "icb_code": "3300, 3700, 5300, 5500, 5700",
         "sector_key": "VNCOND",
         "base_point": 1920.10,
         "pe": 21.0, "pb": 3.20, "roe": 17.6,
