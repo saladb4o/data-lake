@@ -432,37 +432,138 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
 # 2. VNSTOCK & TCBS FINANCIAL RATIOS (TIER 2)
 # =============================================================================
 
-def fetch_vnstock_financials(symbol: str) -> Dict[str, Any]:
+#: TCBS route candidates, tried in order. The route this module used for
+#: the life of the project - /tcanalysis/v1/finance/{sym}/overview - returns
+#: 404 for every ticker, large caps included. It is not a real route, so
+#: fetch_vnstock_financials() has never returned anything: the failure was
+#: swallowed into an empty dict and the "Tier 2 source" was dead the whole
+#: time, silently.
+#:
+#: The replacement is not asserted either, because this environment cannot
+#: reach TCBS to check. Instead the candidates are probed once against a
+#: reference ticker and the one that answers is used; the probe prints what
+#: each returned, so a wrong list is visible in the log rather than
+#: swallowed the way the last one was.
+_TCBS_ROUTES = (
+    "https://apipubaws.tcbs.com.vn/tcanalysis/v1/ticker/{sym}/overview",
+    "https://apipubaws.tcbs.com.vn/tcanalysis/v1/ticker/{sym}/financialratio?yearly=0&isAll=true",
+    "https://apipubaws.tcbs.com.vn/tcanalysis/v1/finance/{sym}/financialratio?yearly=0&isAll=true",
+    "https://apipubaws.tcbs.com.vn/tcanalysis/v1/finance/{sym}/overview",
+)
+
+#: Field aliases across the TCBS shapes. Each route returns a different
+#: document; rather than hard-coding one, take the first alias present.
+_TCBS_FIELD_ALIASES = {
+    "market_cap": ("marketCap", "market_cap", "marketcap"),
+    "pe": ("pe", "priceToEarning", "price_to_earning"),
+    "pb": ("pb", "priceToBook", "price_to_book"),
+    "eps": ("eps", "earningPerShare", "earning_per_share"),
+    "roe": ("roe", "returnOnEquity"),
+    "roa": ("roa", "returnOnAsset"),
+    "shares_outstanding": ("outstandingShare", "issueShare", "shareOutstanding",
+                           "outstanding_share", "listedShare"),
+}
+
+#: A VN listed company has between roughly 100,000 and 20,000,000,000
+#: shares. Expressed in millions that is 0.1..20,000. The ranges do not
+#: overlap, so - as with the market cap - the unit is readable from the
+#: value and the gap between them is discarded rather than guessed.
+_SHARES_RAW_FLOOR = 1e5
+_SHARES_MILLIONS_CEILING = 5e4
+
+
+def _tcbs_first_record(payload: Any) -> Dict[str, Any]:
+    """TCBS routes return either a document or a series; take the latest."""
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        for row in payload:
+            if isinstance(row, dict) and row:
+                return row
+    return {}
+
+
+def _shares_to_count(value: Any) -> Optional[float]:
+    """Normalises a vendor share count to whole shares, or None if unclear."""
+    shares = _safe_float(value)
+    if shares is None or shares <= 0:
+        return None
+    if shares >= _SHARES_RAW_FLOOR:
+        return shares
+    if shares < _SHARES_MILLIONS_CEILING:
+        return shares * 1_000_000.0
+    logger.debug("share count %r sits between the unit ranges; discarding", value)
+    return None
+
+
+def fetch_vnstock_financials(symbol: str, route: Optional[str] = None) -> Dict[str, Any]:
     """
-    Tier 2 source: financial ratios (pe/pb/roe/roa/eps/market_cap) via the
-    TCBS public analysis feed used by vnstock.
+    Tier 2 source: ratios and a share count via the TCBS public feed.
+
+    `route` is a URL template containing {sym}; pass the one that
+    tcbs_probe_routes() found to answer. Without it the first candidate is
+    tried, which keeps existing callers working.
 
     Failure semantics (never raises): returns an empty dict on transport
     failure after retries, non-200 status, or malformed/empty payload, so
     callers fall through to the Tier 3 Yahoo fallback.
     """
     symbol = symbol.upper().strip()
-    url = f"https://apipubaws.tcbs.com.vn/tcanalysis/v1/finance/{symbol}/overview"
+    url = (route or _TCBS_ROUTES[0]).format(sym=symbol)
     resp = _request_with_retry("GET", url, timeout=10)
     if resp is None:
         logger.warning("vnstock/TCBS financials unavailable for %s", symbol)
         return {}
     try:
-        j = resp.json()
+        payload = resp.json()
     except ValueError:
         logger.warning("vnstock/TCBS returned malformed JSON for %s", symbol)
         return {}
-    if not isinstance(j, dict) or not j:
+    record = _tcbs_first_record(payload)
+    if not record:
         logger.warning("vnstock/TCBS returned empty or invalid payload for %s", symbol)
         return {}
-    return {
-        "pe": j.get("pe"),
-        "pb": j.get("pb"),
-        "roe": j.get("roe"),
-        "roa": j.get("roa"),
-        "eps": j.get("eps"),
-        "market_cap": j.get("marketCap"),
-    }
+    out: Dict[str, Any] = {}
+    for field, aliases in _TCBS_FIELD_ALIASES.items():
+        for alias in aliases:
+            if record.get(alias) is not None:
+                out[field] = record[alias]
+                break
+        else:
+            out[field] = None
+    out["shares_outstanding"] = _shares_to_count(out.get("shares_outstanding"))
+    return out
+
+
+def tcbs_probe_routes(reference_symbol: str = "FPT") -> Optional[str]:
+    """Finds the TCBS route that answers, printing what each one returned.
+
+    The previous route 404'd for every ticker and nobody knew, because the
+    only record of it was a warning inside a swallowed exception path. This
+    prints one line per candidate so a dead list cannot hide again.
+    """
+    for template in _TCBS_ROUTES:
+        url = template.format(sym=reference_symbol)
+        try:
+            resp = _HTTP_SESSION.get(url, timeout=10, verify=TLS_VERIFY)
+        except Exception as exc:
+            print(f"     {template.split('/tcanalysis/')[-1]:<52} {type(exc).__name__}")
+            continue
+        label = template.split("/tcanalysis/")[-1]
+        if resp.status_code >= 400:
+            print(f"     {label:<52} HTTP {resp.status_code}")
+            continue
+        try:
+            record = _tcbs_first_record(resp.json())
+        except ValueError:
+            print(f"     {label:<52} HTTP 200, not JSON")
+            continue
+        if not record:
+            print(f"     {label:<52} HTTP 200, empty body")
+            continue
+        print(f"     {label:<52} HTTP 200, fields: {sorted(record)[:12]}")
+        return template
+    return None
 
 # =============================================================================
 # 3. YFINANCE FALLBACK EXTRACTOR (TIER 3)
@@ -634,8 +735,16 @@ def reconstruct_financial_triangles(
         count = total / per_share
         return count if count >= MIN_PLAUSIBLE_SHARES else None
 
+    #: A share count the vendor states outright. TradingView omits it for a
+    #: third of the universe; TCBS reports it under outstandingShare, and a
+    #: stated figure outranks anything divided out of a multiple.
+    shares_vendor = _safe_float(vn_data.get("shares_outstanding"))
+
     if shares_dil and shares_dil >= MIN_PLAUSIBLE_SHARES:
         shares_out = shares_dil
+        field_provenance["shares"] = 3
+    elif shares_vendor and shares_vendor >= MIN_PLAUSIBLE_SHARES:
+        shares_out = shares_vendor
         field_provenance["shares"] = 3
     elif shares_tot and shares_tot >= MIN_PLAUSIBLE_SHARES:
         shares_out = shares_tot
@@ -1940,11 +2049,15 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         if _needs_share_count(tv_batch.get(sym.upper().strip()))
     ]
     if needs_shares:
-        print(f"  🔎 {len(needs_shares)} symbols have no share-count witness; querying TCBS...")
+        print(f"  🔎 {len(needs_shares)} symbols have no share-count witness; probing TCBS routes...")
+        tcbs_route = tcbs_probe_routes()
+        if tcbs_route is None:
+            print("     no TCBS route answered; skipping the fetch entirely.")
+            needs_shares = []
 
         def _tcbs_worker(sym: str):
             try:
-                return sym, fetch_vnstock_financials(sym)
+                return sym, fetch_vnstock_financials(sym, route=tcbs_route)
             except Exception:
                 logger.debug("TCBS fetch failed for %s", sym, exc_info=True)
                 return sym, {}
@@ -1963,11 +2076,14 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 replied += 1
                 payload = dict(payload)
                 payload["market_cap"] = _market_cap_to_vnd(payload.get("market_cap"))
-                if any(payload.get(k) is not None for k in ("market_cap", "eps", "pe", "pb")):
+                if any(payload.get(k) is not None
+                       for k in ("shares_outstanding", "market_cap", "eps", "pe", "pb")):
                     tcbs_by_symbol[sym] = payload
         usable = sum(
             1 for p in tcbs_by_symbol.values()
-            if p.get("market_cap") is not None or p.get("eps") is not None
+            if p.get("shares_outstanding") is not None
+            or p.get("market_cap") is not None
+            or p.get("eps") is not None
         )
         print(f"  ✓ TCBS replied for {replied}/{len(needs_shares)};"
               f" {len(tcbs_by_symbol)} carried any field;"
