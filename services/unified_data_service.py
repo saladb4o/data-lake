@@ -1676,6 +1676,11 @@ def reconstruct_financial_triangles(
         "ebitda": (calc_ebitda, "ebitda"),
         "cfo": (calc_cfo, "cfo"),
         "capex": (calc_capex, "capex"),
+        # Depreciation and amortisation. Tiered here since the beginning and
+        # never published, so the engine could not compute EBITDA = EBIT +
+        # D&A and fell back on asserting D&A is 25% of EBIT for every
+        # company on earth.
+        "da": (calc_da, "da"),
     }
 
     # Tangible book equity, for p_tbv - the model tbvps blocks for all 1,177
