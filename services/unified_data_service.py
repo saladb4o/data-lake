@@ -1949,11 +1949,18 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 logger.debug("TCBS fetch failed for %s", sym, exc_info=True)
                 return sym, {}
 
+        # Count the two failure modes apart. "TCBS answered for 0" conflates
+        # a vendor that never replied - blocked, moved, timing out, ours to
+        # fix - with one that replied and had nothing, which is the vendor's
+        # ceiling and sends us elsewhere. They need opposite responses, so a
+        # single zero is not a measurement.
+        replied = 0
         with ThreadPoolExecutor(max_workers=8) as executor:
             for fut in as_completed([executor.submit(_tcbs_worker, s) for s in needs_shares]):
                 sym, payload = fut.result()
                 if not payload:
                     continue
+                replied += 1
                 payload = dict(payload)
                 payload["market_cap"] = _market_cap_to_vnd(payload.get("market_cap"))
                 if any(payload.get(k) is not None for k in ("market_cap", "eps", "pe", "pb")):
@@ -1962,8 +1969,21 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             1 for p in tcbs_by_symbol.values()
             if p.get("market_cap") is not None or p.get("eps") is not None
         )
-        print(f"  ✓ TCBS answered for {len(tcbs_by_symbol)}/{len(needs_shares)}"
-              f"; {usable} carry a market cap or EPS that pins the share count")
+        print(f"  ✓ TCBS replied for {replied}/{len(needs_shares)};"
+              f" {len(tcbs_by_symbol)} carried any field;"
+              f" {usable} carried a market cap or EPS that pins the share count")
+        if replied == 0 and needs_shares:
+            # Nobody replied at all. That is transport, not absence: name it
+            # here rather than leaving a bare zero to be misread as "the
+            # vendor has no data for these symbols".
+            probe = needs_shares[0]
+            probe_url = f"https://apipubaws.tcbs.com.vn/tcanalysis/v1/finance/{probe}/overview"
+            try:
+                resp = _HTTP_SESSION.get(probe_url, timeout=10, verify=TLS_VERIFY)
+                snippet = (resp.text or "")[:200].replace("\n", " ")
+                print(f"     probe {probe}: HTTP {resp.status_code} body={snippet!r}")
+            except Exception as exc:
+                print(f"     probe {probe}: {type(exc).__name__}: {exc}")
 
     unified_stocks = {}
     missing_symbols = []
