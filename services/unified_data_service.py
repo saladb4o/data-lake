@@ -1534,9 +1534,28 @@ def reconstruct_financial_triangles(
         calc_da = 0.0
 
     # Triangle 7: EBITDA
+    #
+    # The margin rung exists because D&A is the weak link: where it is not
+    # reported, calc_da falls to revenue * 0.04 - a sector assumption - and
+    # EBITDA inherits tier 1 and is refused for 630 symbols. A reported
+    # EBITDA margin needs no D&A at all. It is a ratio, so it carries no
+    # unit assumption, and multiplied by revenue we already hold it lands
+    # in our units; it propagates revenue's own tier, so a company whose
+    # revenue is a sector stand-in is still refused.
+    #
+    # ebitda_margin_ttm was added to the supplementary request in a3d3799,
+    # answered for 672 symbols, and was read by nothing. That is the tenth
+    # instance in this audit of a value fetched, tiered and never connected
+    # to its user - and the first one I introduced myself.
+    ebitda_margin_raw = _safe_float(tv_data.get("ebitda_margin_ttm"))
+    if ebitda_margin_raw is not None and not (-100.0 <= ebitda_margin_raw <= 100.0):
+        ebitda_margin_raw = None
     if ebitda_raw is not None:
         calc_ebitda = ebitda_raw
         field_provenance["ebitda"] = 3
+    elif ebitda_margin_raw is not None and revenue > 0:
+        calc_ebitda = revenue * (ebitda_margin_raw / 100.0)
+        _prop("ebitda", 3, field_provenance.get("revenue", 0))
     elif ebit_raw is not None and calc_da > 0:
         calc_ebitda = ebit_raw + calc_da
         _prop("ebitda", 2, field_provenance.get("da", 0))
@@ -1584,12 +1603,14 @@ def reconstruct_financial_triangles(
         _prop("ebit", 2, field_provenance["ebitda"], field_provenance.get("da", 0))
     elif revenue > 0 and field_provenance.get("revenue", 0) >= 2 and _safe_float(
         tv_data.get("operating_margin_ttm") or tv_data.get("operating_margin_fq")
+        or tv_data.get("operating_margin_fy")
     ) is not None:
         # Revenue times the reported operating margin. Two reported figures
         # multiplied together, which is triangulation; it is not the sector
         # median below, which would be the market cap talking.
         op_margin = _safe_float(
             tv_data.get("operating_margin_ttm") or tv_data.get("operating_margin_fq")
+        or tv_data.get("operating_margin_fy")
         )
         calc_ebit = revenue * (op_margin / 100.0)
         # Never better than the revenue it multiplies. Testing `revenue > 0`
@@ -1651,7 +1672,13 @@ def reconstruct_financial_triangles(
 
     # Margins
     gross_m_raw = _safe_float(tv_data.get("gross_margin_ttm") or tv_data.get("gross_margin_fq"))
-    op_m_raw = _safe_float(tv_data.get("operating_margin_ttm") or tv_data.get("operating_margin_fq"))
+    # _fy included because it is the one that answers: the catalogue does
+    # not publish OPERATING_MARGIN at TTM at all, and the measured run put
+    # operating_margin_fy at 795 non-null of 1522. _ttm is kept first
+    # because that is the key the Vietcap margin is written under.
+    op_m_raw = _safe_float(tv_data.get("operating_margin_ttm")
+                           or tv_data.get("operating_margin_fq")
+                           or tv_data.get("operating_margin_fy"))
     net_m_raw = _safe_float(tv_data.get("net_margin_ttm") or tv_data.get("net_margin_fq"))
 
     # Scale normalization: if decimal (e.g. 0.25 -> 25.0%)
@@ -1942,7 +1969,23 @@ def reconstruct_financial_triangles(
     # ROIC (Return on Invested Capital) — proxy from available data
     # ROIC = NOPAT / Invested Capital
     # NOPAT ≈ EBIT * (1 - tax_rate), Invested Capital ≈ Total Equity + Total Debt - Cash
-    if ebit_raw is not None and tot_eq and tot_eq > 0 and tot_debt is not None:
+    # A reported ROIC outranks every proxy below it. return_on_invested_
+    # capital_fq was added to the supplementary request in a3d3799,
+    # answered for 744 symbols, and - like the EBITDA margin above - was
+    # read by nothing, while roic blocked 155 symbols. It is a percentage,
+    # so there is no unit to get wrong; a value outside the band is
+    # discarded rather than reinterpreted, and a fraction the vendor
+    # labelled a percent would land inside it, so the |x| <= 1 rescale the
+    # neighbouring ratios use is deliberately not applied here - it cannot
+    # be told apart from a genuine sub-1% return.
+    roic_raw = _safe_float(tv_data.get("return_on_invested_capital_fq"))
+    if roic_raw is not None and not (-100.0 <= roic_raw <= 100.0):
+        roic_raw = None
+
+    if roic_raw is not None:
+        roic = round(roic_raw, 2)
+        field_provenance["roic"] = 3
+    elif ebit_raw is not None and tot_eq and tot_eq > 0 and tot_debt is not None:
         nopat = ebit_raw * 0.80  # assume 20% effective tax rate
         invested_capital = tot_eq + tot_debt - cash_equiv
         roic = round((nopat / max(1.0, invested_capital)) * 100.0, 2) if invested_capital > 0 else round(roe * 0.85, 2)
@@ -2066,9 +2109,28 @@ def reconstruct_financial_triangles(
     # sheet for this company; a zero alongside it is then a reading rather
     # than an assumption. Where neither is reported, nothing is emitted and
     # p_tbv stays refused, as it should be.
+    # A reported tangible book value per share settles it outright, and
+    # needs neither of those columns. book_tangible_per_share_fq was added
+    # to the supplementary request in a3d3799, answered for 785 symbols,
+    # and was read by nothing.
+    #
+    # It is a per-share figure, and this vendor's per-share figures are in
+    # the listing currency - the same units as close, which the whole
+    # engine already runs on. That is an inference rather than a statement,
+    # so it is checked rather than trusted: tangible book cannot exceed
+    # total book, and a figure in the wrong units misses that bound by
+    # three orders of magnitude. Anything failing it falls through to the
+    # subtraction below.
+    _tbvps_raw = _safe_float(tv_data.get("book_tangible_per_share_fq"))
     _goodwill_reported = tv_data.get("goodwill_fq") is not None
     _intangibles_reported = tv_data.get("intangibles_net_fq") is not None
-    if (_goodwill_reported or _intangibles_reported) and "total_equity" in field_provenance:
+    if (_tbvps_raw is not None and shares_out > 0 and tot_eq and tot_eq > 0
+            and 0.0 < _tbvps_raw * shares_out <= tot_eq * 1.02
+            and "total_equity" in field_provenance):
+        _absolute_lines["tangible_equity"] = (
+            _tbvps_raw * shares_out, "total_equity",
+        )
+    elif (_goodwill_reported or _intangibles_reported) and "total_equity" in field_provenance:
         _absolute_lines["tangible_equity"] = (
             tot_eq - goodwill_raw - intangibles_raw, "total_equity",
         )
@@ -2538,7 +2600,8 @@ def _has_no_ebit_rung(entry: Optional[Dict[str, Any]]) -> bool:
             and entry.get("depreciation_and_amortization_ttm") is not None):
         return False
     return not (entry.get("operating_margin_ttm") is not None
-                or entry.get("operating_margin_fq") is not None)
+                or entry.get("operating_margin_fq") is not None
+                or entry.get("operating_margin_fy") is not None)
 
 
 def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
