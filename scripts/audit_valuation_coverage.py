@@ -130,6 +130,13 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
             for driver in (model.diagnostics or {}).get("imputed_drivers", []):
                 blocked[driver] += 1
         row["blocked_by"] = [d for d, _ in blocked.most_common(5)]
+        # Which sector this symbol was valued as, and whether that sector is
+        # one SECTOR_MODEL_MAP knows. A sector it does not know falls through
+        # to all 22 models, so the symbol is judged against bank, REIT and
+        # real-estate drivers at once - which is how a perfectly ordinary
+        # company ends up blocked by affo, rwa and landbank simultaneously.
+        row["sector_code"] = str(record.get("sector_code") or "")
+        row["models_offered"] = len(models)
     except Exception as exc:  # a refusal to value is a result, not a crash
         row["error"] = f"{type(exc).__name__}: {exc}"
         logger.debug("%s could not be evaluated", symbol, exc_info=True)
@@ -178,6 +185,29 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
         print("\nMost common blocking drivers:")
         for driver, count in drivers.most_common(12):
             print(f"  {driver:<28} {count:>6} symbols")
+
+    # The symbols the provenance gate lets through and the model map still
+    # refuses. These are not a data problem: their drivers are vendor
+    # reported or triangulated, and they are turned away anyway. Report them
+    # by sector, because a sector missing from SECTOR_MODEL_MAP is a
+    # one-line fix and a sector whose own models need absent drivers is not.
+    from services.valuation_engine import SECTOR_MODEL_MAP
+
+    gated_out = [
+        r for r in refused
+        if r["worst_tier"] is not None and r["worst_tier"] >= 2
+    ]
+    if gated_out:
+        print(f"\nRefused despite tier-2-or-better data: {len(gated_out)}"
+              f" of {len(refused)} refusals")
+        by_sector = collections.Counter(
+            (r.get("sector_code") or "", (r.get("sector_code") or "") in SECTOR_MODEL_MAP, r.get("models_offered") or 0)
+            for r in gated_out
+        )
+        print("  sector           in map  models offered  symbols")
+        for (sector, known, offered), count in by_sector.most_common(15):
+            print(f"  {sector or '(none)':<16} {'yes' if known else 'NO':<7}"
+                  f" {offered:>14}  {count:>7}")
 
     if refused and show_blocked:
         print(f"\nFirst {min(show_blocked, len(refused))} refused symbols:")
