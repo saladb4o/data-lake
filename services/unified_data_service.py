@@ -1196,9 +1196,39 @@ def reconstruct_financial_triangles(
     if ebit_raw is not None:
         calc_ebit = ebit_raw
         field_provenance["ebit"] = 3
+    elif pretax_raw is not None and interest_raw is not None:
+        # EBIT = pretax income + interest expense, the textbook identity.
+        # Both lines are reported and both were already being read a hundred
+        # lines above for net income, then left unused - so the operating
+        # line was declared missing for companies whose income statement
+        # states everything needed to compute it.
+        #
+        # abs() because the sign convention is not fixed: TradingView
+        # reports the expense as a positive magnitude in some rows and as a
+        # negative adjustment in others, and what the identity needs is the
+        # magnitude added back. Interest income, were it netted in here,
+        # would be the one case this reads wrong, and it is not separable
+        # from this column.
+        calc_ebit = pretax_raw + abs(interest_raw)
+        field_provenance["ebit"] = 2
     elif calc_ebitda and calc_da > 0 and field_provenance.get("ebitda", 0) >= 2:
         calc_ebit = calc_ebitda - calc_da
         _prop("ebit", 2, field_provenance["ebitda"], field_provenance.get("da", 0))
+    elif revenue > 0 and field_provenance.get("revenue", 0) >= 2 and _safe_float(
+        tv_data.get("operating_margin_ttm") or tv_data.get("operating_margin_fq")
+    ) is not None:
+        # Revenue times the reported operating margin. Two reported figures
+        # multiplied together, which is triangulation; it is not the sector
+        # median below, which would be the market cap talking.
+        op_margin = _safe_float(
+            tv_data.get("operating_margin_ttm") or tv_data.get("operating_margin_fq")
+        )
+        calc_ebit = revenue * (op_margin / 100.0)
+        # Never better than the revenue it multiplies. Testing `revenue > 0`
+        # alone let this fire on a revenue imputed from a sector median,
+        # which would have dressed a stand-in up as a triangulated operating
+        # line - the exact fabrication the gate exists to catch.
+        _prop("ebit", 2, field_provenance["revenue"])
     else:
         # No reported operating line and nothing to reconstruct it from. Leave
         # it absent rather than back-solving it from revenue times a sector
@@ -1647,6 +1677,28 @@ def reconstruct_financial_triangles(
         "cfo": (calc_cfo, "cfo"),
         "capex": (calc_capex, "capex"),
     }
+
+    # Tangible book equity, for p_tbv - the model tbvps blocks for all 1,177
+    # symbols that carry it.
+    #
+    # TBV = equity - goodwill - intangibles. The trap is that TradingView
+    # omits a null column entirely, so an absent goodwill_fq means either
+    # "this company has no goodwill" or "the vendor does not report the line
+    # for it", and those are not distinguishable from the payload. Assuming
+    # the first inflates tangible book above the truth, which for a floor
+    # valuation is the wrong direction to be wrong in.
+    #
+    # So the line is published only when the vendor reports at least one of
+    # the two, which is evidence that it reports this part of the balance
+    # sheet for this company; a zero alongside it is then a reading rather
+    # than an assumption. Where neither is reported, nothing is emitted and
+    # p_tbv stays refused, as it should be.
+    _goodwill_reported = tv_data.get("goodwill_fq") is not None
+    _intangibles_reported = tv_data.get("intangibles_net_fq") is not None
+    if (_goodwill_reported or _intangibles_reported) and "total_equity" in field_provenance:
+        _absolute_lines["tangible_equity"] = (
+            tot_eq - goodwill_raw - intangibles_raw, "total_equity",
+        )
     absolute_lines: Dict[str, float] = {}
     for _name, (_value, _witness) in _absolute_lines.items():
         if _value is None or _witness not in field_provenance:
