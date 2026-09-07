@@ -148,19 +148,46 @@ class TestTheCodesAreIdentifiedByArithmeticNotByName:
         # cash flow too would carry most of the payload around for nothing.
         assert "20000 <= c < 30000" in src
 
-    def test_the_probe_states_identities_that_can_refute_it(self):
-        """A reading of the codes that cannot fail is not a measurement.
+    def test_the_probe_searches_rather_than_proposing_a_reading(self):
+        """The first version stated four identities under one reading of
+        the numbering. All four came back at 0.0% - the reading was wrong,
+        and it was wrong in the log rather than in a published valuation,
+        which is exactly what stating them was for.
 
-        Each identity is printed with its hit rate, so a reading that is
-        wrong shows up as a low percentage rather than as a number the
-        engine quietly starts using.
+        The ratio table did settle three codes on its own: 21000 and 21001
+        at 1.000 x revenue, 22100 at 0.859 and 23100 at 0.144, summing to
+        1.003 - cost of goods and gross profit, identified by what the
+        numbers do. So the probe now searches for the relations instead of
+        proposing them: no hard-coded reading survives here to be wrong.
         """
         src = inspect.getsource(uds.sync_unified_screener_universe)
         block = src[src.index("code_census"):src.index("Compute Empirical Percentiles")]
-        assert "Identity hit rates" in block
-        assert "identities = (" in block
-        for line in ("21900 = 21001 - 21500", "22200 = 21900"):
-            assert line in block
+        assert "searched" in block
+        # No proposed reading may be hard-coded: those are the numbers that
+        # were wrong, and the anchors are named in prose, not in a formula.
+        for guess in ("21900 = 21001", "22200 = 21900", "22500 = 22200",
+                      "22900 = 22500"):
+            assert guess not in block
+
+    def test_the_search_reports_a_hit_rate_and_a_sample_size(self):
+        """A relation that holds for four companies is coincidence. The
+        rate and the n are what separate that from the statement's own
+        structure, so neither may be dropped from the output."""
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        block = src[src.index("Best arithmetic fit"):src.index("Compute Empirical Percentiles")]
+        assert "rate" in block and "(n={tried})" in block
+        assert "tried < 200" in block, (
+            "a fit measured on a handful of companies must not be reported "
+            "as if it were the statement's structure"
+        )
+
+    def test_the_search_does_not_scan_the_payload_per_comparison(self):
+        """It compares tens of thousands of code triples. Reading each
+        value out of its row inside that loop turns a diagnostic into a
+        minute of the sync's runtime."""
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        block = src[src.index("Best arithmetic fit"):src.index("Compute Empirical Percentiles")]
+        assert "row.get(" not in block
 
     def test_the_probe_only_prints(self):
         """The same invariant as the census: identifying a code is a
