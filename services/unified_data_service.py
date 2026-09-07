@@ -178,6 +178,38 @@ TRADINGVIEW_COLUMNS = [
     "earnings_estimate_fq", "sales_estimates_fq"
 ]
 
+#: Columns fetched in a second pass, never mixed into the request every
+#: symbol depends on.
+#:
+#: Checked against TradingView's published financial-identifier catalogue,
+#: which turned up two distinct faults in the list above:
+#:
+#:  * OPERATING_MARGIN, INTEREST_EXPENSE_ON_DEBT, CAPITAL_EXPENDITURES,
+#:    RESEARCH_AND_DEV and PREFERRED_DIVIDENDS are published at FH/FQ/FY
+#:    only. The "_ttm" forms requested above exist for no company at all.
+#:  * "depreciation_and_amortization" is not an identifier. The
+#:    income-statement line is DEP_AMORT_EXP_INCOME_S; the cash-flow line is
+#:    CASH_FLOW_DEPRECATION_N_AMORTIZATION - the vendor's own spelling of
+#:    "deprecation", which the correctly-spelled copy above therefore misses.
+#:
+#: And OPER_INCOME, operating income at TTM - the same quantity EBIT names -
+#: was never requested, while EBIT stood as the largest blocking driver in
+#: the universe and the only one the valuation engine cannot derive.
+#:
+#: A second pass rather than an extension of the first: an identifier this
+#: service has never sent before could be rejected, and the batch every
+#: symbol depends on must not be what discovers that.
+TRADINGVIEW_SUPPLEMENTARY_COLUMNS = [
+    "oper_income_ttm", "oper_income_fq", "oper_income_fy",
+    "dep_amort_exp_income_s_ttm", "dep_amort_exp_income_s_fq",
+    "cash_flow_deprecation_n_amortization_fq",
+    "ebitda_margin_ttm", "gross_profit_ttm", "total_oper_expense_ttm",
+    "operating_margin_fy", "interest_expense_on_debt_fy",
+    "capital_expenditures_fy", "cost_of_goods_ttm",
+    "return_on_invested_capital_fq", "book_tangible_per_share_fq",
+]
+
+
 DEFAULT_SECTOR_MEDIANS = {
     "VNFIN": {"pe": 10.5, "pb": 1.45, "ps": 3.2, "roe": 19.5, "roa": 2.2, "de_ratio": 7.5, "net_de_ratio": 5.2, "gross_margin": 45.0, "op_margin": 35.0, "net_margin": 28.0, "cur_ratio": 1.1},
     "VNREAL": {"pe": 16.5, "pb": 1.70, "ps": 2.5, "roe": 12.0, "roa": 4.5, "de_ratio": 1.25, "net_de_ratio": 0.85, "gross_margin": 32.0, "op_margin": 20.0, "net_margin": 14.0, "cur_ratio": 1.6},
@@ -191,7 +223,11 @@ DEFAULT_SECTOR_MEDIANS = {
     "VNHEAL": {"pe": 17.0, "pb": 2.50, "ps": 1.60, "roe": 18.5, "roa": 11.0, "de_ratio": 0.35, "net_de_ratio": 0.05, "gross_margin": 36.0, "op_margin": 18.5, "net_margin": 15.0, "cur_ratio": 2.1}
 }
 
-def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int = 150) -> Dict[str, Dict[str, Any]]:
+def fetch_tradingview_batch_by_tickers(
+    tickers_list: List[str],
+    chunk_size: int = 150,
+    columns: Optional[List[str]] = None,
+) -> Dict[str, Dict[str, Any]]:
     """
     Tier 1 source: fundamental & valuation snapshot via the TradingView scanner,
     fetched in concurrent chunks to stay sub-second without timing out.
@@ -205,6 +241,7 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
     if not tickers_list:
         return results
 
+    request_columns = list(columns) if columns else TRADINGVIEW_COLUMNS
     chunks = [tickers_list[i:i + chunk_size] for i in range(0, len(tickers_list), chunk_size)]
 
     def _fetch_chunk(chunk_tickers):
@@ -214,7 +251,7 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
                 "query": {"types": []},
                 "tickers": list(chunk_tickers)
             },
-            "columns": TRADINGVIEW_COLUMNS
+            "columns": request_columns
         }
         chunk_res = {}
         resp = _request_with_retry("POST", TRADINGVIEW_SCANNER_URL, json=payload, timeout=12)
@@ -244,14 +281,14 @@ def fetch_tradingview_batch_by_tickers(tickers_list: List[str], chunk_size: int 
             if not ticker_full or not d_values:
                 continue
             ex, sym = ticker_full.split(":", 1) if ":" in ticker_full else ("", ticker_full)
-            if len(d_values) != len(TRADINGVIEW_COLUMNS):
+            if len(d_values) != len(request_columns):
                 logger.warning(
                     "TradingView column/value arity mismatch for %s (%d values vs %d columns); skipping",
-                    ticker_full, len(d_values), len(TRADINGVIEW_COLUMNS),
+                    ticker_full, len(d_values), len(request_columns),
                 )
                 continue
             # Protocol: "d" is positionally aligned with the requested "columns".
-            r_dict = dict(zip(TRADINGVIEW_COLUMNS, d_values))
+            r_dict = dict(zip(request_columns, d_values))
             r_dict["symbol"] = sym.upper().strip()
             r_dict["exchange"] = ex.upper().strip()
             chunk_res[sym.upper().strip()] = r_dict
@@ -1434,8 +1471,30 @@ def reconstruct_financial_triangles(
     # -------------------------------------------------------------
     fcf_raw = _safe_float(tv_data.get("free_cash_flow_ttm") or tv_data.get("free_cash_flow_fq"))
     cfo_raw = _safe_float(tv_data.get("cash_f_operating_activities_ttm") or tv_data.get("cash_f_operating_activities_fq"))
-    da_raw = _safe_float(tv_data.get("depreciation_and_amortization_ttm") or tv_data.get("depreciation_and_amortization_fq") or tv_data.get("cash_flow_depreciation_n_amortization_ttm") or tv_data.get("cash_flow_depreciation_n_amortization_fq"))
-    capex_raw = _safe_float(tv_data.get("capital_expenditures_ttm") or tv_data.get("capital_expenditures_fq") or tv_data.get("capex_ttm") or tv_data.get("capex_fq"))
+    # "depreciation_and_amortization_*" and
+    # "cash_flow_depreciation_n_amortization_*" are not TradingView
+    # identifiers: the income-statement line is DEP_AMORT_EXP_INCOME_S and
+    # the cash-flow line spells it CASH_FLOW_DEPRECATION_N_AMORTIZATION.
+    # The four names read here first have therefore never once matched.
+    # They stay, harmlessly, in case another vendor's overlay writes them.
+    da_raw = _safe_float(
+        tv_data.get("dep_amort_exp_income_s_ttm")
+        or tv_data.get("dep_amort_exp_income_s_fq")
+        or tv_data.get("cash_flow_deprecation_n_amortization_fq")
+        or tv_data.get("depreciation_and_amortization_ttm")
+        or tv_data.get("depreciation_and_amortization_fq")
+        or tv_data.get("cash_flow_depreciation_n_amortization_ttm")
+        or tv_data.get("cash_flow_depreciation_n_amortization_fq")
+    )
+    # CAPITAL_EXPENDITURES is published at FH/FQ/FY only, so the "_ttm"
+    # form read first here exists for no company; "capex_*" is not an
+    # identifier at all. The annual figure is the one that answers.
+    capex_raw = _safe_float(
+        tv_data.get("capital_expenditures_ttm")
+        or tv_data.get("capital_expenditures_fy")
+        or tv_data.get("capital_expenditures_fq")
+        or tv_data.get("capex_ttm") or tv_data.get("capex_fq")
+    )
 
     # Triangle 6: D&A Reconstitution
     if da_raw is not None:
@@ -1470,8 +1529,19 @@ def reconstruct_financial_triangles(
     # EBIT is a driver for six of the 22 valuation models (EPV, the DCFs, the
     # acquirer's multiple). It was being computed nowhere and emitted nowhere,
     # so every one of those models saw it as missing and refused to publish.
+    # Operating income is the same quantity, reported under TradingView's
+    # other identifier for it (OPER_INCOME). It is a reading, not a
+    # derivation, so it sits alongside the reported EBIT rather than below
+    # the triangulations - and it was never requested until now.
+    oper_income_raw = _safe_float(
+        tv_data.get("oper_income_ttm") or tv_data.get("oper_income_fq")
+        or tv_data.get("oper_income_fy")
+    )
     if ebit_raw is not None:
         calc_ebit = ebit_raw
+        field_provenance["ebit"] = 3
+    elif oper_income_raw is not None:
+        calc_ebit = oper_income_raw
         field_provenance["ebit"] = 3
     elif pretax_raw is not None and interest_raw is not None:
         # EBIT = pretax income + interest expense, the textbook identity.
@@ -2538,6 +2608,34 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     tv_batch = fetch_tradingview_batch_by_tickers(tv_tickers, chunk_size=150)
     print(f"  ✓ Fetched {len(tv_batch)} symbols directly from TradingView Scanner API")
 
+    # Second pass for the identifiers the primary list gets wrong or omits;
+    # see TRADINGVIEW_SUPPLEMENTARY_COLUMNS. Kept separate so a rejected
+    # identifier costs these columns and not the universe.
+    try:
+        tv_extra = fetch_tradingview_batch_by_tickers(
+            tv_tickers, chunk_size=150,
+            columns=TRADINGVIEW_SUPPLEMENTARY_COLUMNS,
+        )
+    except Exception:
+        logger.debug("TradingView supplementary pass failed", exc_info=True)
+        tv_extra = {}
+    filled = collections.Counter()
+    for sym, extra in tv_extra.items():
+        row = tv_batch.setdefault(sym, {})
+        for key, value in extra.items():
+            if key in ("symbol", "exchange") or value is None:
+                continue
+            row.setdefault(key, value)
+            filled[key] += 1
+    if tv_extra:
+        print(f"  ✓ Supplementary columns for {len(tv_extra)} symbols;"
+              " non-null counts:")
+        for key in TRADINGVIEW_SUPPLEMENTARY_COLUMNS:
+            print(f"       {key:<44} {filled.get(key, 0):>5}")
+    else:
+        print("  ⚠ Supplementary column pass returned nothing;"
+              " the identifiers may have been rejected.")
+
     # -----------------------------------------------------------------
     # VNDIRECT backfill for the statement lines TradingView does not carry.
     #
@@ -2947,23 +3045,53 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 if all((tv_batch.get(sym) or {}).get(c) is not None for c in columns)
             )
 
+        # Each rung is counted over the same alternatives Triangle 7.5
+        # actually reads. The first version of this census counted the
+        # "_ttm" name alone, and five of those do not exist at any company:
+        # TradingView publishes OPERATING_MARGIN, INTEREST_EXPENSE_ON_DEBT
+        # and CAPITAL_EXPENDITURES at FH/FQ/FY only, and
+        # "depreciation_and_amortization" is not an identifier at all. So
+        # the table read zero across the board and was taken as evidence
+        # about the vendor's coverage, when it was evidence about the names
+        # the census itself was passing.
+        def _rung_any(*groups: Tuple[str, ...]) -> int:
+            return sum(
+                1 for sym in no_ebit
+                if all(
+                    any((tv_batch.get(sym) or {}).get(c) is not None for c in group)
+                    for group in groups
+                )
+            )
+
+        _EBIT = ("ebit_ttm", "ebit_fq")
+        _OPER = ("oper_income_ttm", "oper_income_fq", "oper_income_fy")
+        _PRETAX = ("pretax_income_ttm", "pretax_income_fq")
+        _INT = ("interest_expense_on_debt_fq", "interest_expense_on_debt_fy",
+                "interest_expense_on_debt_ttm")
+        _EBITDA = ("ebitda_ttm", "ebitda_fq")
+        _DA = ("dep_amort_exp_income_s_ttm", "dep_amort_exp_income_s_fq",
+               "cash_flow_deprecation_n_amortization_fq")
+        _OPM = ("operating_margin_fq", "operating_margin_fy",
+                "operating_margin_ttm")
+        _REV = ("total_revenue_ttm", "total_revenue_fq")
+
         print(f"     Ladder rungs on those {len(no_ebit)} rows"
-              " (each needs every column listed):")
-        for label, columns in (
-            ("1. reported EBIT", ("ebit_ttm",)),
-            ("2a. pretax income", ("pretax_income_ttm",)),
-            ("2b. interest expense", ("interest_expense_on_debt_ttm",)),
-            ("2. pretax + interest", ("pretax_income_ttm",
-                                      "interest_expense_on_debt_ttm")),
-            ("3. reported EBITDA and D&A", ("ebitda_ttm",
-                                            "depreciation_and_amortization_ttm")),
-            ("4a. operating margin", ("operating_margin_ttm",)),
-            ("4. revenue x operating margin", ("total_revenue_ttm",
-                                               "operating_margin_ttm")),
-            ("-- net income (for reference)", ("net_income_ttm",)),
-            ("-- income tax (for reference)", ("income_tax_ttm",)),
+              " (each counted over the names the ladder really reads):")
+        for label, groups in (
+            ("1. reported EBIT", (_EBIT,)),
+            ("1b. operating income", (_OPER,)),
+            ("2a. pretax income", (_PRETAX,)),
+            ("2b. interest expense", (_INT,)),
+            ("2. pretax + interest", (_PRETAX, _INT)),
+            ("3a. reported EBITDA", (_EBITDA,)),
+            ("3b. D&A", (_DA,)),
+            ("3. EBITDA - D&A", (_EBITDA, _DA)),
+            ("4a. operating margin", (_OPM,)),
+            ("4. revenue x operating margin", (_REV, _OPM)),
+            ("-- revenue (for reference)", (_REV,)),
+            ("-- net income (for reference)", (("net_income_ttm",),)),
         ):
-            print(f"       {label:<40} {_rung(*columns):>5}")
+            print(f"       {label:<40} {_rung_any(*groups):>5}")
         vnd_ebit = sum(
             1 for sym in no_ebit
             if (vnd_by_symbol.get(sym) or {}).get("ebit_ttm") is not None
