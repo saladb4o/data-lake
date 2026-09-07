@@ -2203,6 +2203,29 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         print(f"     TCBS answered for {tcbs_have} of them and still left no"
               " usable market cap, EPS or multiple.")
 
+        # The top-20 census above is ranked, so it silently hides any column
+        # that falls below the cut - and the columns that matter most here
+        # are exactly the rare ones. Each ladder rung needs a specific pair
+        # of columns; a rung that is one column away from firing for 400
+        # symbols is worth a request to a vendor, and a rung whose both
+        # halves are absent is not. So name them outright rather than
+        # inferring their absence from a ranking.
+        def _have(*columns: str) -> int:
+            return sum(
+                1 for sym in no_witness
+                if all((tv_batch.get(sym) or {}).get(c) is not None for c in columns)
+            )
+
+        print(f"     Ladder rungs on those {len(no_witness)} rows"
+              " (each needs every column listed):")
+        for label, columns in (
+            ("price (every implied rung needs it)", ("close",)),
+            ("reported EPS", ("net_income_ttm", "earnings_per_share_basic_ttm")),
+            ("implied EPS", ("close", "net_income_ttm", "price_earnings_ttm")),
+            ("implied BVPS", ("close", "total_equity_fq", "price_book_fq")),
+        ):
+            print(f"       {label:<40} {_have(*columns):>5}")
+
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
     # "percentiles" block; see services/quant_scoring.py for semantics.
