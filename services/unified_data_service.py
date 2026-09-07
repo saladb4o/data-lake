@@ -1677,6 +1677,28 @@ def reconstruct_financial_triangles(
         "cfo": (calc_cfo, "cfo"),
         "capex": (calc_capex, "capex"),
     }
+
+    # Tangible book equity, for p_tbv - the model tbvps blocks for all 1,177
+    # symbols that carry it.
+    #
+    # TBV = equity - goodwill - intangibles. The trap is that TradingView
+    # omits a null column entirely, so an absent goodwill_fq means either
+    # "this company has no goodwill" or "the vendor does not report the line
+    # for it", and those are not distinguishable from the payload. Assuming
+    # the first inflates tangible book above the truth, which for a floor
+    # valuation is the wrong direction to be wrong in.
+    #
+    # So the line is published only when the vendor reports at least one of
+    # the two, which is evidence that it reports this part of the balance
+    # sheet for this company; a zero alongside it is then a reading rather
+    # than an assumption. Where neither is reported, nothing is emitted and
+    # p_tbv stays refused, as it should be.
+    _goodwill_reported = tv_data.get("goodwill_fq") is not None
+    _intangibles_reported = tv_data.get("intangibles_net_fq") is not None
+    if (_goodwill_reported or _intangibles_reported) and "total_equity" in field_provenance:
+        _absolute_lines["tangible_equity"] = (
+            tot_eq - goodwill_raw - intangibles_raw, "total_equity",
+        )
     absolute_lines: Dict[str, float] = {}
     for _name, (_value, _witness) in _absolute_lines.items():
         if _value is None or _witness not in field_provenance:

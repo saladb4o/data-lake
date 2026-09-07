@@ -2527,7 +2527,25 @@ class ValuationEngine:
         bvps = res.resolve("bvps", ("bvps",),
                            derive=(("equity", "shares"), lambda: safe_div(equity_val, shares, 0.0)),
                            impute=lambda: safe_div(equity_val, shares, 0.0))
+        # Tangible book value per share. This had no derivation: it went
+        # straight to bvps * 0.9, was marked imputed, and took p_tbv down
+        # with it for every symbol carrying it - 1,177 of 1,522.
+        #
+        # The subtraction happens upstream, where the rest of the balance
+        # sheet is reconstructed, and it is published only for companies
+        # whose vendor actually reports goodwill or intangibles. An absent
+        # column means "not reported" as often as it means "none", and
+        # reading it as zero would inflate tangible book above the truth -
+        # the wrong direction for a floor valuation. Where the line is not
+        # published, tangible_equity resolves as imputed and p_tbv stays
+        # refused.
+        tangible_equity = res.resolve(
+            "tangible_equity", ("tangible_equity",),
+            impute=lambda: equity_val * 0.9,
+        )
         tbvps = res.resolve("tbvps", ("tbvps",),
+                            derive=(("tangible_equity", "shares"),
+                                    lambda: safe_div(tangible_equity, shares, 0.0)),
                             impute=lambda: bvps * 0.9)
         cfo = res.resolve("cfo", ("cfo", "cfo_ttm"), impute=lambda: net_income * 1.1)
         cfo_per_share = safe_div(cfo, shares, 0.0)
