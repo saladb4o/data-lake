@@ -83,9 +83,10 @@ class TestItSurvivesTheErrorPath:
 
 
 class _Model:
-    def __init__(self, status, imputed=(), active=False):
+    def __init__(self, status, imputed=(), active=False, model_id="blended_pe"):
         self.status = status
         self.active = active
+        self.model_id = model_id
         self.diagnostics = {"imputed_drivers": list(imputed)}
 
 
@@ -113,29 +114,62 @@ class TestBlockedByCountsOnlyApplicableModels:
         monkeypatch.setattr(ve, "ValuationEngine", _Engine)
         return audit.evaluate({"symbol": "AAV", "sector_code": "VNIND"})
 
-    def test_a_bypassed_model_does_not_file_a_blocking_driver(self, monkeypatch):
-        row = self._evaluate(monkeypatch, [_Model("BYPASSED", ["affo", "rwa"])])
-        assert row["blocked_by"] == []
-
-    def test_an_applicable_model_still_files_one(self, monkeypatch):
-        row = self._evaluate(monkeypatch, [_Model("INSUFFICIENT_DATA", ["ebit"])])
-        assert row["blocked_by"] == ["ebit"]
-
-    def test_the_two_are_separated_within_one_symbol(self, monkeypatch):
+    def test_a_model_outside_the_sector_list_files_no_blocking_driver(
+        self, monkeypatch
+    ):
+        # reit_affo_dcf is a REIT model; VNIND never offers it. Its complaint
+        # about affo says nothing about an industrial company.
         row = self._evaluate(
             monkeypatch,
-            [_Model("BYPASSED", ["affo", "landbank"]),
-             _Model("INSUFFICIENT_DATA", ["ebit", "fcf"])],
+            [_Model("INSUFFICIENT_DATA", ["affo"], model_id="reit_affo_dcf")],
+        )
+        assert row["blocked_by"] == []
+
+    def test_a_model_the_sector_offers_still_files_one(self, monkeypatch):
+        row = self._evaluate(
+            monkeypatch,
+            [_Model("INSUFFICIENT_DATA", ["ebit"], model_id="industrial_apv")],
+        )
+        assert row["blocked_by"] == ["ebit"]
+
+    def test_status_is_not_what_decides_it(self, monkeypatch):
+        # The previous attempt filtered on BYPASSED and changed nothing:
+        # add_model() tests `missing` before `sector_ok`, so a model that is
+        # both wrong for the sector and short of drivers is filed
+        # INSUFFICIENT_DATA and never reaches BYPASSED. Both models here
+        # carry that status; only the sector list separates them.
+        row = self._evaluate(
+            monkeypatch,
+            [_Model("INSUFFICIENT_DATA", ["affo", "landbank"], model_id="p_affo"),
+             _Model("INSUFFICIENT_DATA", ["ebit", "fcf"], model_id="p_fcf")],
         )
         assert set(row["blocked_by"]) == {"ebit", "fcf"}
 
     def test_models_offered_counts_the_sector_s_own_models_not_all_22(
         self, monkeypatch
     ):
-        # Every model is appended to results regardless of sector and merely
-        # marked BYPASSED, so len(models) is always 22 and measures nothing.
         row = self._evaluate(
             monkeypatch,
-            [_Model("BYPASSED")] * 16 + [_Model("INSUFFICIENT_DATA", ["ebit"])] * 6,
+            [_Model("INSUFFICIENT_DATA", model_id="reit_affo_dcf")] * 16
+            + [_Model("INSUFFICIENT_DATA", ["ebit"], model_id="industrial_apv")] * 6,
         )
         assert row["models_offered"] == 6
+
+    def test_an_unmapped_sector_counts_every_model_rather_than_none(
+        self, monkeypatch
+    ):
+        # No list means no basis for exclusion. Dropping everything would
+        # report such a symbol as blocked by nothing at all.
+        class _Engine:
+            def calculate_all_models(self, symbol, record):
+                return [_Model("INSUFFICIENT_DATA", ["ebit"], model_id="whatever")]
+
+            def calculate_composite_fair_value(self, models, sector):
+                return 0.0
+
+        import services.valuation_engine as ve
+
+        monkeypatch.setattr(ve, "ValuationEngine", _Engine)
+        row = audit.evaluate({"symbol": "X", "sector_code": "NOT_A_SECTOR"})
+        assert row["blocked_by"] == ["ebit"]
+        assert row["models_offered"] == 1

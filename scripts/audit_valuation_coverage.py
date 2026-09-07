@@ -134,9 +134,31 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
         # REIT model, a bank model and a real-estate model, none of which
         # was ever going to be used for it. The table read as a diagnosis
         # and was an artefact of evaluation order.
+        # Filter by the sector's model list, not by status.
+        #
+        # Filtering on BYPASSED looked right and did nothing: add_model()
+        # tests `missing` before `sector_ok`, so a model that is both wrong
+        # for the sector and short of drivers is filed INSUFFICIENT_DATA and
+        # never reaches BYPASSED. Only a model that is inapplicable *and*
+        # fully fed gets that status, which is almost none of them - the
+        # blocking table came back byte-identical, affo at 906 and all.
+        #
+        # The sector's own list is the thing that decides applicability, so
+        # read it directly rather than inferring it from an outcome.
+        from services.valuation_engine import SECTOR_MODEL_MAP
+
+        sector_code = str(record.get("sector_code") or "DEFAULT").upper()
+        prefix = sector_code[:5] if len(sector_code) >= 5 else sector_code
+        applicable = SECTOR_MODEL_MAP.get(prefix, SECTOR_MODEL_MAP.get(sector_code))
+
+        def _applies(model) -> bool:
+            if applicable is None:
+                return True
+            return getattr(model, "model_id", None) in applicable
+
         blocked = collections.Counter()
         for model in models:
-            if getattr(model, "status", "") == "BYPASSED":
+            if not _applies(model):
                 continue
             for driver in (model.diagnostics or {}).get("imputed_drivers", []):
                 blocked[driver] += 1
@@ -150,9 +172,7 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
         # Not len(models): every one of the 22 is appended regardless of
         # sector and merely marked BYPASSED, so that count is always 22 and
         # says nothing. What matters is how many the sector actually offers.
-        row["models_offered"] = sum(
-            1 for m in models if getattr(m, "status", "") != "BYPASSED"
-        )
+        row["models_offered"] = sum(1 for m in models if _applies(m))
     except Exception as exc:  # a refusal to value is a result, not a crash
         row["error"] = f"{type(exc).__name__}: {exc}"
         logger.debug("%s could not be evaluated", symbol, exc_info=True)
