@@ -2514,8 +2514,25 @@ class ValuationEngine:
         res.mark("sps", res.provenance.get("revenue", IMPUTED))
         ebit = res.resolve("ebit", ("ebit", "ebit_ttm", "operating_profit"),
                            impute=lambda: revenue * 0.15)
+        da = res.resolve("da", ("da", "depreciation_amortization"),
+                         impute=lambda: ebit * 0.25)
+        # EBITDA = EBIT + D&A.
+        #
+        # This was derive=(("ebit",), lambda: ebit * 1.25) - an assertion
+        # that depreciation is exactly a quarter of operating profit for
+        # every company, declared as a derivation and therefore recorded as
+        # DERIVED, which is to say trusted. The resolver's own docstring
+        # calls that an assumption wearing a formula.
+        #
+        # D&A was tiered upstream from the start and simply never published,
+        # so the identity was unavailable and the multiplier stood in for
+        # it. With the real line emitted, a company whose D&A is reported
+        # gets the identity; one whose D&A is not keeps the multiplier as an
+        # impute, where it is marked imputed and refused. That is narrower
+        # than before, and correct: the previous behaviour valued companies
+        # on a number nobody measured.
         ebitda = res.resolve("ebitda", ("ebitda",),
-                             derive=(("ebit",), lambda: ebit * 1.25),
+                             derive=(("ebit", "da"), lambda: ebit + da),
                              impute=lambda: ebit * 1.25)
         net_income = res.resolve("net_income", ("net_income", "net_income_ttm", "pat"),
                                  impute=lambda: ebit * 0.8)

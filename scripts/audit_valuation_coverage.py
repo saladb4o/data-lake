@@ -173,6 +173,18 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
         # sector and merely marked BYPASSED, so that count is always 22 and
         # says nothing. What matters is how many the sector actually offers.
         row["models_offered"] = sum(1 for m in models if _applies(m))
+        # Models that ran on real data and returned nothing positive.
+        #
+        # A refusal with an empty blocked_by list is not the same failure as
+        # one short of drivers, and the two need opposite responses: the
+        # first is every applicable model declining to value a company - no
+        # earnings, no book equity, equity wiped out by debt - which is an
+        # answer, and no amount of new data changes it. AAV and API report
+        # exactly that and were indistinguishable from a data gap.
+        row["models_declined"] = sum(
+            1 for m in models
+            if _applies(m) and getattr(m, "status", "") == "NOT_APPLICABLE"
+        )
     except Exception as exc:  # a refusal to value is a result, not a crash
         row["error"] = f"{type(exc).__name__}: {exc}"
         logger.debug("%s could not be evaluated", symbol, exc_info=True)
@@ -236,6 +248,16 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
     if gated_out:
         print(f"\nRefused despite tier-2-or-better data: {len(gated_out)}"
               f" of {len(refused)} refusals")
+        declined = [r for r in gated_out if not r["blocked_by"]
+                    and (r.get("models_declined") or 0) > 0]
+        if declined:
+            print(f"  of which {len(declined)} were not short of anything:"
+                  f" every model the sector offers ran on real data and"
+                  f" declined to value the company.")
+            print(f"  {', '.join(r['symbol'] for r in declined[:12])}"
+                  + (" ..." if len(declined) > 12 else ""))
+            print("  No new vendor changes those; a company with no earnings"
+                  " and no book equity has no fair value to publish.")
         by_sector = collections.Counter(
             (r.get("sector_code") or "", (r.get("sector_code") or "") in SECTOR_MODEL_MAP, r.get("models_offered") or 0)
             for r in gated_out
