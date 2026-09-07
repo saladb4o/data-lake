@@ -37,15 +37,26 @@ class TestTheSupplementaryPass:
         for name in ("oper_income_ttm", "oper_income_fq"):
             assert name in uds.TRADINGVIEW_SUPPLEMENTARY_COLUMNS
 
-    def test_it_asks_for_the_real_d_and_a_identifiers(self):
-        assert "dep_amort_exp_income_s_ttm" in uds.TRADINGVIEW_SUPPLEMENTARY_COLUMNS
-        # The vendor's spelling, not ours.
-        assert ("cash_flow_deprecation_n_amortization_fq"
-                in uds.TRADINGVIEW_SUPPLEMENTARY_COLUMNS)
+    def test_it_drops_the_names_that_answered_for_nobody(self):
+        """Measured over the whole universe, not reasoned about.
 
-    def test_it_asks_for_the_periods_that_exist(self):
-        for base in ("operating_margin", "interest_expense_on_debt",
-                     "capital_expenditures"):
+        The first supplementary pass counted non-null answers per column
+        across all 1522 symbols. These six returned nothing for anyone,
+        which makes them names the scanner does not serve - the catalogue
+        gives the Pine fin_id, not the scanner's spelling of it, and the
+        two agree for some identifiers and not for others. Asking again
+        costs bandwidth and re-earns the same zero.
+        """
+        for dead in ("dep_amort_exp_income_s_ttm",
+                     "dep_amort_exp_income_s_fq",
+                     "cash_flow_deprecation_n_amortization_fq",
+                     "total_oper_expense_ttm",
+                     "interest_expense_on_debt_fy",
+                     "cost_of_goods_ttm"):
+            assert dead not in uds.TRADINGVIEW_SUPPLEMENTARY_COLUMNS
+
+    def test_it_keeps_the_periods_that_answered(self):
+        for base in ("operating_margin", "capital_expenditures"):
             assert f"{base}_fy" in uds.TRADINGVIEW_SUPPLEMENTARY_COLUMNS
 
     def test_it_never_repeats_a_ttm_that_does_not_exist(self):

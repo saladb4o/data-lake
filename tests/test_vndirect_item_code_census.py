@@ -58,6 +58,7 @@ def test_the_codes_do_not_reach_a_published_record():
         if isinstance(node, dict):
             for key, value in node.items():
                 assert key != "available_item_codes"
+                assert key != "income_statement_ttm_by_code"
                 _walk(value)
         elif isinstance(node, list):
             for value in node:
@@ -125,3 +126,55 @@ class TestTheNamesComeFromThePayload:
             assert forbidden not in block, (
                 f"{forbidden} in the naming block - these are labels, not data"
             )
+
+
+class TestTheCodesAreIdentifiedByArithmeticNotByName:
+    """The census ran and the vendor named none of its own codes: the log
+    printed thirty item codes and "vendor named 0 of these codes".
+
+    So no lookup can say which line is the operating one. Two lines are
+    known anyway - the extractor already reads revenue at 21001 and net
+    income at 23000 and gets sensible numbers for hundreds of companies -
+    and that is enough to identify the rest by what their values do,
+    rather than by guessing at a numbering scheme. Guessing is how
+    [21020, 22000] got into the extractor, and neither code appears in
+    any payload the vendor sent.
+    """
+
+    def test_the_parser_carries_the_income_statement_values(self):
+        src = inspect.getsource(uds.fetch_vndirect_financials)
+        assert '"income_statement_ttm_by_code"' in src
+        # Income statement only: a probe that swept the balance sheet and
+        # cash flow too would carry most of the payload around for nothing.
+        assert "20000 <= c < 30000" in src
+
+    def test_the_probe_states_identities_that_can_refute_it(self):
+        """A reading of the codes that cannot fail is not a measurement.
+
+        Each identity is printed with its hit rate, so a reading that is
+        wrong shows up as a low percentage rather than as a number the
+        engine quietly starts using.
+        """
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        block = src[src.index("code_census"):src.index("Compute Empirical Percentiles")]
+        assert "Identity hit rates" in block
+        assert "identities = (" in block
+        for line in ("21900 = 21001 - 21500", "22200 = 21900"):
+            assert line in block
+
+    def test_the_probe_only_prints(self):
+        """The same invariant as the census: identifying a code is a
+        measurement. Acting on the identification is a separate change,
+        made once the log says the reading holds."""
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        block = src[src.index("by_code_rows"):src.index("Compute Empirical Percentiles")]
+        for forbidden in ("unified_stocks[", "field_provenance", "ebit_ttm =",
+                          "_absolute_lines", "rec["):
+            assert forbidden not in block
+
+    def test_the_values_do_not_reach_a_published_record(self):
+        """Covered for the code list by test_the_codes_do_not_reach_a_
+        published_record; pinned here for the values, which are numbers and
+        so would be far easier to read by accident."""
+        src = inspect.getsource(uds.fetch_vndirect_financials)
+        assert "Diagnostic only" in src or "never read as a number" in src
