@@ -679,6 +679,79 @@ def vietcap_probe(reference_symbol: str = "FPT") -> bool:
     return True
 
 
+#: Cophieu68 and Vietstock, the two remaining candidates. Unlike every
+#: source above they publish HTML pages, not JSON documents, so there is no
+#: field name to alias and no envelope to unwrap - the share count sits in
+#: markup whose shape cannot be seen from here.
+#:
+#: Writing a parser against a guessed structure is how the TCBS route came
+#: to sit dead in this file for the life of the project. So this is
+#: reconnaissance only: one request per candidate, reporting what actually
+#: came back. A parser gets written in the round after, against real markup.
+_HTML_SHARE_SOURCES = (
+    ("cophieu68 summary", "https://www.cophieu68.vn/quote/summary.php?id={sym}"),
+    ("cophieu68 profile", "https://www.cophieu68.vn/company/profilesymbol.php?id={sym}"),
+    ("vietstock profile", "https://finance.vietstock.vn/{sym}/ho-so-doanh-nghiep.htm"),
+    ("vietstock overview", "https://finance.vietstock.vn/{sym}/CTCP.htm"),
+)
+
+#: The labels these pages put next to a share count, Vietnamese and English.
+#: A page that renders the number only through JavaScript will match none of
+#: them, and that is itself the finding: it means the figure is behind an
+#: XHR whose URL has to be found before anything can be parsed.
+_SHARE_COUNT_LABELS = (
+    "cổ phiếu đang lưu hành",
+    "khối lượng đang lưu hành",
+    "klcp đang lưu hành",
+    "cp lưu hành",
+    "số lượng cổ phiếu",
+    "khối lượng niêm yết",
+    "kl niêm yết",
+    "outstanding share",
+    "shares outstanding",
+)
+
+
+def probe_html_share_sources(reference_symbol: str = "FPT") -> None:
+    """Reports what Cophieu68 and Vietstock actually serve, without parsing.
+
+    Prints, per candidate: the HTTP status, the content type, the body size,
+    and - when a share-count label appears - the surrounding text, so the
+    real markup can be read here rather than imagined. Never raises, never
+    returns data, and costs one request per candidate regardless of how many
+    symbols are unpinned.
+    """
+    import re
+
+    print(f"  🔎 Reconnaissance on the HTML sources (reference {reference_symbol}):")
+    for label, template in _HTML_SHARE_SOURCES:
+        url = template.format(sym=reference_symbol)
+        try:
+            resp = _HTTP_SESSION.get(url, timeout=15, verify=TLS_VERIFY)
+        except Exception as exc:
+            print(f"     {label:<20} {type(exc).__name__}: {exc}")
+            continue
+        ctype = (resp.headers.get("Content-Type") or "?").split(";")[0]
+        body = resp.text or ""
+        print(f"     {label:<20} HTTP {resp.status_code}  {ctype}  {len(body):,} bytes")
+        if resp.status_code >= 400 or not body:
+            continue
+        lowered = body.lower()
+        hit = next((lab for lab in _SHARE_COUNT_LABELS if lab in lowered), None)
+        if hit is None:
+            # No label in the served HTML. Either the page is rendered
+            # client-side or the figure is not on it; both mean a parser
+            # would have had nothing to bite on.
+            print(f"       no share-count label in the served HTML"
+                  f" (checked {len(_SHARE_COUNT_LABELS)} spellings)")
+            continue
+        at = lowered.index(hit)
+        window = body[max(0, at - 120): at + 240]
+        window = re.sub(r"<[^>]+>", " ", window)
+        window = " ".join(window.split())
+        print(f"       matched {hit!r}: ...{window}...")
+
+
 # =============================================================================
 # 3. YFINANCE FALLBACK EXTRACTOR (TIER 3)
 # =============================================================================
@@ -2275,6 +2348,12 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         )
         print(f"  ✓ Vietcap IQ replied for {vc_replied}/{len(still_unpinned)};"
               f" {pinned} carried a share count outright")
+        if pinned < len(still_unpinned):
+            # Still a gap, so look at the two HTML sources before writing
+            # anything against them. Four requests total, not four per
+            # symbol, and no data is taken from the result - the next round
+            # writes a parser against markup that has actually been read.
+            probe_html_share_sources()
 
     unified_stocks = {}
     missing_symbols = []

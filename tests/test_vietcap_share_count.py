@@ -147,3 +147,76 @@ def _fetch(module, payload):
 
     with mock.patch.object(module, "_request_with_retry", return_value=_Resp(payload)):
         return module.fetch_vietcap_company_details("FPT")
+
+
+class TestHtmlReconnaissance:
+    """The Cophieu68 / Vietstock probe. It parses nothing on purpose: both
+    sites serve HTML whose shape has not been seen, and writing a parser
+    against a guessed structure is exactly how the dead TCBS route survived
+    in this file for the life of the project."""
+
+    def test_it_reports_a_label_and_the_text_around_it(self, capsys, monkeypatch):
+        html = (
+            "<table><tr><td>KLCP đang lưu hành</td>"
+            "<td class='v'>1,471,000,000</td></tr></table>"
+        )
+        monkeypatch.setattr(
+            uds._HTTP_SESSION, "get",
+            lambda *a, **k: _Resp2(html, {"Content-Type": "text/html; charset=utf-8"}),
+        )
+        uds.probe_html_share_sources("FPT")
+        out = capsys.readouterr().out
+        assert "klcp đang lưu hành" in out
+        assert "1,471,000,000" in out
+        # The tags are stripped so the number is legible in a CI log.
+        assert "<td" not in out
+
+    def test_a_page_without_the_label_says_so_rather_than_staying_silent(
+        self, capsys, monkeypatch
+    ):
+        # A client-rendered page matches nothing, and that is the finding:
+        # it means the figure sits behind an XHR still to be found.
+        monkeypatch.setattr(
+            uds._HTTP_SESSION, "get",
+            lambda *a, **k: _Resp2("<div id='app'></div>", {"Content-Type": "text/html"}),
+        )
+        uds.probe_html_share_sources("FPT")
+        assert "no share-count label" in capsys.readouterr().out
+
+    def test_a_dead_host_is_named_not_swallowed(self, capsys, monkeypatch):
+        def _boom(*a, **k):
+            raise ConnectionError("nope")
+
+        monkeypatch.setattr(uds._HTTP_SESSION, "get", _boom)
+        uds.probe_html_share_sources("FPT")
+        out = capsys.readouterr().out
+        assert "ConnectionError" in out
+        # One line per candidate, so a wholly dead list cannot look like one
+        # dead entry.
+        assert out.count("ConnectionError") == len(uds._HTML_SHARE_SOURCES)
+
+    def test_an_http_error_skips_the_body_scan(self, capsys, monkeypatch):
+        monkeypatch.setattr(
+            uds._HTTP_SESSION, "get",
+            lambda *a, **k: _Resp2("KLCP đang lưu hành", {"Content-Type": "text/html"}, 404),
+        )
+        uds.probe_html_share_sources("FPT")
+        out = capsys.readouterr().out
+        assert "HTTP 404" in out
+        assert "matched" not in out
+
+    def test_it_returns_nothing_and_never_raises(self, monkeypatch):
+        # Reconnaissance only. If this ever starts returning data, it has
+        # become a source and needs the provenance tiering that goes with one.
+        monkeypatch.setattr(
+            uds._HTTP_SESSION, "get",
+            lambda *a, **k: _Resp2("x", {"Content-Type": "text/html"}),
+        )
+        assert uds.probe_html_share_sources("FPT") is None
+
+
+class _Resp2:
+    def __init__(self, text, headers, status=200):
+        self.text = text
+        self.headers = headers
+        self.status_code = status
