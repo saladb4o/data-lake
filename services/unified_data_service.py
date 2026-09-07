@@ -666,6 +666,126 @@ def fetch_vietcap_company_details(symbol: str) -> Dict[str, Any]:
     return {"shares_outstanding": shares, "market_cap": mcap}
 
 
+#: Vietcap's financial-statistics route. Confirmed against the vnstock
+#: package installed alongside this service (vnstock/explorer/vci): its
+#: RATIO column map lists "ebit", "ebitda", "ebitMargin" and "roic" as
+#: fields of this endpoint. Vietcap already answered for 564 of 564 symbols
+#: when asked for share counts, which is the same population that has no
+#: operating line.
+_VIETCAP_STATS_URL = (
+    "https://iq.vietcap.com.vn/api/iq-insight-service"
+    "/v1/company/{sym}/statistics-financial"
+)
+
+#: Deliberately a margin and not the EBIT field beside it.
+#:
+#: The payload carries "ebit" outright, but nothing in it states a unit, and
+#: this vendor is already known to publish share counts in millions under a
+#: name that says nothing of the sort. Reading an absolute EBIT of unknown
+#: scale risks an operating line wrong by a factor of a billion, which is
+#: exactly what the tier system exists to prevent and would not be visible
+#: as an error - it would just be a valuation.
+#:
+#: A margin is a ratio. Multiplied by revenue we already hold, in units we
+#: already know, it yields EBIT in our units with no unit assumption at all,
+#: through the rung the ladder already has and already tests.
+_VIETCAP_EBIT_MARGIN_ALIASES = (
+    "ebitMargin", "ebit_margin",
+)
+
+
+def _vietcap_latest_period(payload: Any) -> Dict[str, Any]:
+    """The most recent period in a statistics-financial body.
+
+    vnstock reads this route into a frame keyed "years"/"quarters", so the
+    document is a series rather than a single record. The shape is not
+    pinned by any contract available here, so every plausible arrangement is
+    accepted and anything else yields {} - never a guess.
+    """
+    data = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(data, dict):
+        for key in ("quarters", "years"):
+            series = data.get(key)
+            if isinstance(series, list) and series:
+                for row in series:
+                    if isinstance(row, dict) and row:
+                        return row
+        return data if all(not isinstance(v, (list, dict)) for v in data.values()) else {}
+    if isinstance(data, list):
+        for row in data:
+            if isinstance(row, dict) and row:
+                return row
+    return {}
+
+
+def fetch_vietcap_ebit_margin(symbol: str) -> Optional[float]:
+    """EBIT margin, as a percentage, for one symbol. None when unavailable.
+
+    Never raises: transport failure, non-200, malformed JSON, an unexpected
+    body shape or an absent margin all return None, and the caller simply
+    keeps the operating line it already had (which is to say, none).
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry("GET", _VIETCAP_STATS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        return None
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return None
+    margin = _safe_float(_first_alias(record, _VIETCAP_EBIT_MARGIN_ALIASES))
+    if margin is None:
+        return None
+    # A margin outside this band is not a percentage - it is either a
+    # fraction the vendor labelled a percent, or a different quantity
+    # altogether. Either way it is discarded rather than reinterpreted.
+    if not (-100.0 <= margin <= 100.0):
+        return None
+    return margin
+
+
+def vietcap_stats_probe(reference_symbol: str = "FPT") -> bool:
+    """One request, before spending several hundred.
+
+    Four TCBS routes 404'd for the life of the project because the only
+    record of it was a warning inside a swallowed except. This prints the
+    status, the shape of the body and the field names, so a rename reads as
+    a rename and a wrong guess about the envelope reads as a wrong guess.
+    """
+    url = _VIETCAP_STATS_URL.format(sym=reference_symbol)
+    try:
+        resp = _HTTP_SESSION.get(url, timeout=10, verify=TLS_VERIFY)
+    except Exception as exc:
+        print(f"     vietcap statistics-financial  {type(exc).__name__}: {exc}")
+        return False
+    if resp.status_code >= 400:
+        print(f"     vietcap statistics-financial  HTTP {resp.status_code}")
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        print("     vietcap statistics-financial  HTTP 200, not JSON")
+        return False
+    envelope = body.get("data") if isinstance(body, dict) else body
+    shape = (f"dict keys {sorted(envelope)[:8]}" if isinstance(envelope, dict)
+             else f"list of {len(envelope)}" if isinstance(envelope, list)
+             else type(envelope).__name__)
+    record = _vietcap_latest_period(body)
+    print(f"     vietcap statistics-financial  HTTP 200, envelope: {shape}")
+    if not record:
+        print("       no period record found in it; leaving the route unused.")
+        return False
+    print(f"       latest-period fields: {sorted(record)[:16]}")
+    key = next((a for a in _VIETCAP_EBIT_MARGIN_ALIASES if record.get(a) is not None), None)
+    if key is None:
+        print("       ebit margin: none of the known aliases matched"
+              f" (ebit={record.get('ebit')!r}, ebitda={record.get('ebitda')!r},"
+              f" roic={record.get('roic')!r})")
+        return False
+    print(f"       ebit margin: {key} = {record.get(key)!r}")
+    return True
+
+
 def vietcap_probe(reference_symbol: str = "FPT") -> bool:
     """Reports whether the route answers, and with which fields.
 
@@ -2174,6 +2294,28 @@ _TV_REQUIRED_LINES = (
 )
 
 
+def _has_no_ebit_rung(entry: Optional[Dict[str, Any]]) -> bool:
+    """True when not one rung of the EBIT ladder can fire for this row.
+
+    Mirrors Triangle 7.5 exactly: a reported EBIT, pretax plus interest,
+    EBITDA less D&A, or revenue times a reported operating margin. A symbol
+    with any of them needs no vendor call; asking anyway spends a request to
+    learn nothing.
+    """
+    if not entry:
+        return True
+    if entry.get("ebit_ttm") is not None or entry.get("ebit_fq") is not None:
+        return False
+    if (entry.get("pretax_income_ttm") is not None
+            and entry.get("interest_expense_on_debt_ttm") is not None):
+        return False
+    if (entry.get("ebitda_ttm") is not None
+            and entry.get("depreciation_and_amortization_ttm") is not None):
+        return False
+    return not (entry.get("operating_margin_ttm") is not None
+                or entry.get("operating_margin_fq") is not None)
+
+
 def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
     """True when TradingView left at least one statement line empty.
 
@@ -2444,6 +2586,61 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             # symbol, and no data is taken from the result - the next round
             # writes a parser against markup that has actually been read.
             probe_html_share_sources()
+
+    # -----------------------------------------------------------------
+    # The operating line, for the symbols whose ladder has no rung to
+    # stand on.
+    #
+    # EBIT is the largest blocking driver in the universe (755 symbols) and
+    # the only one the valuation engine cannot derive - the operating line
+    # comes out of Triangle 7.5 or it does not exist. The census showed all
+    # four of its rungs empty for those symbols: TradingView serves the EBIT
+    # family to about 760 symbols and thin coverage to the rest.
+    #
+    # Vietcap answered for 564 of 564 when asked for share counts, and its
+    # statistics-financial route carries an EBIT margin. A margin, not the
+    # EBIT beside it: see _VIETCAP_EBIT_MARGIN_ALIASES for why an absolute
+    # figure of unstated unit is refused. Multiplied by revenue we already
+    # hold, it feeds the rung the ladder already has, which propagates
+    # revenue's own tier and refuses outright where revenue is a sector
+    # stand-in.
+    # -----------------------------------------------------------------
+    needs_margin = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
+        and _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get("total_revenue_ttm")
+        ) is not None
+    ]
+    if needs_margin:
+        print(f"  🔎 {len(needs_margin)} symbols have no EBIT rung but do have"
+              " revenue; probing Vietcap statistics-financial...")
+        if not vietcap_stats_probe():
+            print("     no usable EBIT margin on that route; skipping the fetch.")
+            needs_margin = []
+
+        def _margin_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_ebit_margin(sym)
+            except Exception:
+                logger.debug("Vietcap margin fetch failed for %s", sym, exc_info=True)
+                return sym, None
+
+        margin_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_margin_worker, s) for s in needs_margin]
+            for fut in as_completed(futures):
+                sym, margin = fut.result()
+                if margin is None:
+                    continue
+                # Written under TradingView's own column name so the ladder
+                # reads it through the rung already in place and already
+                # tested, rather than through a second code path.
+                tv_batch.setdefault(sym, {})["operating_margin_ttm"] = margin
+                margin_filled += 1
+        if needs_margin:
+            print(f"  ✓ Vietcap answered an EBIT margin for {margin_filled}"
+                  f"/{len(needs_margin)} of them")
 
     unified_stocks = {}
     missing_symbols = []
