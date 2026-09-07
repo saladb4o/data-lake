@@ -2532,7 +2532,33 @@ class ValuationEngine:
         cfo = res.resolve("cfo", ("cfo", "cfo_ttm"), impute=lambda: net_income * 1.1)
         cfo_per_share = safe_div(cfo, shares, 0.0)
         pat_per_share = safe_div(net_income, shares, 0.0)
-        fcf = res.resolve("fcf", ("fcf",), impute=lambda: cfo * 0.7)
+        # capex is resolved here rather than three hundred lines below,
+        # where it used to sit, because free cash flow is defined in terms
+        # of it and a dependency has to carry a tier before anything can
+        # depend on it.
+        total_capex = res.resolve("capex", ("capex", "capex_ttm"),
+                                  derive=(("ebitda", "ebit"), lambda: ebitda - ebit),
+                                  impute=lambda: ebitda - ebit)
+        # FCF = CFO - capex.
+        #
+        # This had no derivation at all: it went straight to cfo * 0.7, was
+        # marked imputed, and took p_fcf and rule_of_40_growth down with it
+        # for every symbol in the universe - fcf is the single most common
+        # blocking driver in the audit, at 1,317 of 1,522.
+        #
+        # The inputs were there the whole time. cfo and capex are both
+        # emitted as tiered absolute lines upstream, and upstream even
+        # computes the subtraction itself - but publishes it as "fcf_ttm",
+        # in billions, and nothing reads that key. Computing it here from
+        # the two lines keeps it in dong like everything around it.
+        #
+        # abs() on capex because the sign convention varies by vendor; no
+        # clamp at zero, because a company that outspends its operating cash
+        # flow has negative free cash flow and that is a reading, not a gap.
+        fcf = res.resolve("fcf", ("fcf",),
+                          derive=(("cfo", "capex"),
+                                  lambda: cfo - abs(total_capex)),
+                          impute=lambda: cfo * 0.7)
         fcf_per_share = safe_div(fcf, shares, 0.0)
         affo = res.resolve("affo", ("affo",), impute=lambda: net_income * 0.9)
         dividend_per_share = res.resolve("dividend_per_share", ("dividend_per_share",),
@@ -2742,9 +2768,6 @@ class ValuationEngine:
         add_model("acquirers_multiple_ev_ebit", "Acquirer's Multiple (EV/EBIT)", "absolute", m14,
                   drivers=('ebit', 'revenue', 'debt', 'cash', 'shares'))
 
-        total_capex = res.resolve("capex", ("capex", "capex_ttm"),
-                                  derive=(("ebitda", "ebit"), lambda: ebitda - ebit),
-                                  impute=lambda: ebitda - ebit)
         prev_rev = res.resolve("prev_revenue", ("prev_revenue",),
                                impute=lambda: revenue * (1.0 - g_stage1))
         gross_ppe = res.resolve("gross_ppe", ("gross_ppe_fq", "ppe_gross", "fixed_assets"),
