@@ -557,20 +557,42 @@ class InputResolver:
         prices) rather than a real observation (profit, cash flow).
         """
         found = self._lookup(keys)
+        payload_is_imputed = found is not None and self.upstream_says_imputed(keys)
         if found is not None and not (require_positive and found <= 0):
             # A number the upstream layer back-solved from market cap is an
             # assumption, not a reading, no matter that it is present here.
-            self.provenance[field] = (
-                IMPUTED if self.upstream_says_imputed(keys) else REAL
-            )
-            return found
+            if not payload_is_imputed:
+                self.provenance[field] = REAL
+                return found
+            # ...but it must not shoulder aside a derivation from lines that
+            # ARE observed. This used to return here unconditionally, so a
+            # field carrying a tier-1 sector stand-in never reached the
+            # `derive` branch below - and a company whose net income and
+            # share count were both reported still had its EPS recorded as
+            # invented, because a worse number happened to occupy the key.
+            # The same short-circuit silently disabled the derivations for
+            # market cap, BVPS, tangible BVPS, EBITDA, capex and FCF.
+            #
+            # Fall through and let the derivation be attempted. It is taken
+            # only when every dependency is itself REAL or DERIVED, so this
+            # can only ever replace an assumption with arithmetic over
+            # observations; where the dependencies are no better, the payload
+            # value is kept below, marked imputed exactly as before.
 
         if derive is not None:
             deps, fn = derive
-            value = fn()
-            if math.isfinite(value) and not (require_positive and value <= 0):
-                self.provenance[field] = DERIVED if self.trustworthy(*deps) else IMPUTED
-                return value
+            if not (payload_is_imputed and not self.trustworthy(*deps)):
+                value = fn()
+                if math.isfinite(value) and not (require_positive and value <= 0):
+                    self.provenance[field] = (
+                        DERIVED if self.trustworthy(*deps) else IMPUTED
+                    )
+                    return value
+
+        if found is not None and not (require_positive and found <= 0):
+            # The payload had a value, the derivation could not better it.
+            self.provenance[field] = IMPUTED
+            return found
 
         if impute is None:
             self.provenance[field] = IMPUTED
@@ -2602,8 +2624,17 @@ class ValuationEngine:
         # where it used to sit, because free cash flow is defined in terms
         # of it and a dependency has to carry a tier before anything can
         # depend on it.
+        #
+        # This carried derive=(("ebitda", "ebit"), lambda: ebitda - ebit).
+        # EBITDA - EBIT is depreciation and amortisation, not capital
+        # expenditure; equating them is the steady-state maintenance-capex
+        # assumption, which is a modelling choice about a company's
+        # reinvestment, not arithmetic over its filings. Declaring it a
+        # derivation recorded it as DERIVED - trusted - and let free cash
+        # flow be published for companies whose cash flow statement says
+        # nothing about what they spent. It survives below as the impute,
+        # where it is marked imputed and refused, which is what it is.
         total_capex = res.resolve("capex", ("capex", "capex_ttm"),
-                                  derive=(("ebitda", "ebit"), lambda: ebitda - ebit),
                                   impute=lambda: ebitda - ebit)
         # FCF = CFO - capex.
         #

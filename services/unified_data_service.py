@@ -2547,6 +2547,65 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         ):
             print(f"       {label:<40} {_have(*columns):>5}")
 
+    # -----------------------------------------------------------------
+    # EBIT ladder census.
+    #
+    # EBIT is now the single largest blocking driver in the universe: it
+    # gates six of the 22 models, and the coverage audit reports it short
+    # for 755 symbols. Unlike every other blocked driver it has no
+    # derivation inside the valuation engine - the operating line either
+    # comes out of the upstream ladder or it does not exist - so the whole
+    # of that 755 is decided by the four rungs in Triangle 7.5.
+    #
+    # Which rung is failing is not inferable from the coverage report, and
+    # the four call for entirely different remedies: a missing pretax or
+    # interest column is a vendor request, a missing operating margin is a
+    # column to add to the TradingView query, and rows where none of the
+    # ingredients exist are simply empty and no ladder will reach them.
+    # Guessing between those has been wrong every time it was tried, so
+    # count them. This changes no behaviour.
+    # -----------------------------------------------------------------
+    no_ebit = [
+        sym for sym, rec in unified_stocks.items()
+        if "ebit" not in (rec.get("field_provenance") or {})
+    ]
+    print(f"\n  📊 EBIT witness: {len(unified_stocks) - len(no_ebit)}"
+          f"/{len(unified_stocks)} symbols have one, {len(no_ebit)} do not.")
+    if no_ebit:
+        def _rung(*columns: str) -> int:
+            return sum(
+                1 for sym in no_ebit
+                if all((tv_batch.get(sym) or {}).get(c) is not None for c in columns)
+            )
+
+        print(f"     Ladder rungs on those {len(no_ebit)} rows"
+              " (each needs every column listed):")
+        for label, columns in (
+            ("1. reported EBIT", ("ebit_ttm",)),
+            ("2a. pretax income", ("pretax_income_ttm",)),
+            ("2b. interest expense", ("interest_expense_on_debt_ttm",)),
+            ("2. pretax + interest", ("pretax_income_ttm",
+                                      "interest_expense_on_debt_ttm")),
+            ("3. reported EBITDA and D&A", ("ebitda_ttm",
+                                            "depreciation_and_amortization_ttm")),
+            ("4a. operating margin", ("operating_margin_ttm",)),
+            ("4. revenue x operating margin", ("total_revenue_ttm",
+                                               "operating_margin_ttm")),
+            ("-- net income (for reference)", ("net_income_ttm",)),
+            ("-- income tax (for reference)", ("income_tax_ttm",)),
+        ):
+            print(f"       {label:<40} {_rung(*columns):>5}")
+        vnd_ebit = sum(
+            1 for sym in no_ebit
+            if (vnd_by_symbol.get(sym) or {}).get("ebit_ttm") is not None
+        )
+        vnd_any = sum(1 for sym in no_ebit if vnd_by_symbol.get(sym))
+        print(f"     VNDIRECT answered for {vnd_any} of them;"
+              f" {vnd_ebit} of those carried an ebit_ttm.")
+        print("     (The VNDIRECT overlay carries no pretax or interest line"
+              " at all, so rung 2 is unreachable for a backfilled symbol"
+              " however the vendor reports it.)")
+
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
     # "percentiles" block; see services/quant_scoring.py for semantics.
