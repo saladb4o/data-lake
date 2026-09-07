@@ -320,12 +320,24 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         return {}
         
     val_lookup = {}
+    # The vendor names its own line items in every row it sends. Reading the
+    # name from the payload rather than from data/financial_models.json
+    # matters: nothing in this repository writes that file and data/*.json is
+    # gitignored, so the catalogue the item-code census was going to consult
+    # may simply not exist wherever the sync runs - and a census that prints
+    # 30 codes with no names against them answers nothing.
+    name_lookup: Dict[int, str] = {}
     for it in raw_items:
         fdate = it.get('fiscalDate')
         c = int(it.get('itemCode', 0))
         if c not in val_lookup:
             val_lookup[c] = {}
         val_lookup[c][fdate] = it.get('numericValue')
+        if c not in name_lookup:
+            label = (it.get('itemName') or it.get('itemVnName')
+                     or it.get('itemEnName') or "")
+            if isinstance(label, str) and label.strip():
+                name_lookup[c] = label.strip()
 
     # Detect entity form
     latest_d = distinct_dates[0]
@@ -428,6 +440,9 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         # codes that ARE present, against the itemName catalogue, is what
         # settles which line to read. Not published downstream.
         "available_item_codes": sorted(val_lookup.keys()),
+        # {itemCode: the vendor's own name for it}, taken from the rows just
+        # parsed. Diagnostic only; never read as a number.
+        "item_code_names": name_lookup,
         "source": "VNDIRECT_FINFO"
     }
     
@@ -2627,18 +2642,31 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             for code in (vnd_by_symbol.get(sym) or {}).get("available_item_codes", ()):
                 code_census[code] += 1
         if code_census:
+            # The vendor's own names, carried on the rows it sent. The
+            # local catalogue is consulted only as a second opinion: nothing
+            # in this repository writes data/financial_models.json and
+            # data/*.json is gitignored, so it may not exist here at all.
+            vendor_names: Dict[int, str] = {}
+            for sym in no_ebit:
+                for code, label in ((vnd_by_symbol.get(sym) or {})
+                                    .get("item_code_names") or {}).items():
+                    vendor_names.setdefault(int(code), label)
             try:
                 from services.stock_service import _FINANCIAL_MODELS_BY_CODE
             except Exception:
                 _FINANCIAL_MODELS_BY_CODE = {}
+            print(f"     (vendor named {len(vendor_names)} of these codes;"
+                  f" the local catalogue holds"
+                  f" {len(_FINANCIAL_MODELS_BY_CODE)} definitions)")
 
             def _name_of(code: int) -> str:
-                metas = _FINANCIAL_MODELS_BY_CODE.get(code) or []
-                for meta in metas:
+                if code in vendor_names:
+                    return vendor_names[code]
+                for meta in _FINANCIAL_MODELS_BY_CODE.get(code) or []:
                     label = (meta.get("name_vn") or meta.get("name_en") or "").strip()
                     if label:
                         return label
-                return "(no name in the itemName catalogue)"
+                return "(unnamed by vendor and absent from the local catalogue)"
 
             # 2xxxx is the income statement in the VAS chart of accounts;
             # that is where EBIT, pretax income and interest expense live.

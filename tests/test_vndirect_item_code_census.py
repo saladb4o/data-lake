@@ -82,3 +82,46 @@ def test_the_census_writes_nothing_back():
             f"the census assigns into {forbidden} - it is a measurement, "
             "not a source of valuation inputs"
         )
+
+
+class TestTheNamesComeFromThePayload:
+    """The census was going to name item codes out of data/financial_models.json.
+
+    Nothing in this repository writes that file and data/*.json is gitignored,
+    so it may not exist wherever the sync runs - and a census that prints
+    thirty codes with no names against them answers nothing. The vendor names
+    its own line items in every row it sends; read them from there.
+    """
+
+    def test_the_parser_takes_the_name_from_the_row(self):
+        src = inspect.getsource(uds.fetch_vndirect_financials)
+        assert "name_lookup" in src
+        assert "it.get('itemName')" in src
+        assert '"item_code_names": name_lookup' in src
+
+    def test_the_census_prefers_the_vendor_name_over_the_local_catalogue(self):
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        block = src[src.index("def _name_of"):]
+        block = block[:block.index("return \"(unnamed")]
+        vendor = block.index("vendor_names[code]")
+        catalogue = block.index("_FINANCIAL_MODELS_BY_CODE")
+        assert vendor < catalogue, (
+            "the local catalogue must be the second opinion, not the first"
+        )
+
+    def test_a_missing_catalogue_is_not_fatal(self):
+        """The import is guarded: an absent catalogue degrades the census,
+        it does not stop the sync."""
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        block = src[src.index("vendor_names: Dict"):src.index("def _name_of")]
+        assert "try:" in block and "except Exception:" in block
+
+    def test_the_names_are_never_read_as_numbers(self):
+        src = inspect.getsource(uds.sync_unified_screener_universe)
+        start = src.index("vendor_names: Dict")
+        end = src.index("Compute Empirical Percentiles")
+        block = src[start:end]
+        for forbidden in ("_safe_float", "float(", "unified_stocks["):
+            assert forbidden not in block, (
+                f"{forbidden} in the naming block - these are labels, not data"
+            )
