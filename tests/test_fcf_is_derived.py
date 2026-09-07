@@ -106,3 +106,35 @@ class TestCapexOrdering:
         rec = _record()
         models = ValuationEngine().calculate_all_models("TST", rec)
         assert models  # the run completed without a double-resolve raising
+
+
+class TestCapexIsNotDepreciation:
+    """capex carried derive=(("ebitda", "ebit"), lambda: ebitda - ebit).
+
+    EBITDA minus EBIT is depreciation and amortisation. Equating it with
+    capital expenditure is the steady-state maintenance-capex assumption -
+    a claim about how much a company reinvests, not a line from its
+    filings. Recorded as a derivation it read as trusted, and free cash
+    flow was published for companies whose cash flow statement reports
+    nothing about what they spent.
+    """
+
+    def test_capex_is_imputed_when_the_cash_flow_statement_omits_it(self):
+        rec = _record(capital_expenditures_ttm=None)
+        rec.pop("capex", None)
+        ValuationEngine().calculate_all_models("TST", rec)
+
+    def test_fcf_is_refused_when_only_da_could_stand_in_for_capex(self):
+        # Everything else reported; capex alone absent. D&A is derivable
+        # (46e12 - 40e12), so the old code would have called capex derived
+        # and published a fair value off it.
+        rec = _record(capital_expenditures_ttm=None)
+        rec.pop("capex", None)
+        m = _model(rec, "p_fcf")
+        assert "fcf" in (m.diagnostics or {}).get("imputed_drivers", []) or \
+            "capex" in (m.diagnostics or {}).get("imputed_drivers", [])
+
+    def test_a_reported_capex_is_still_used(self):
+        engine = ValuationEngine()
+        engine.calculate_all_models("TST", _record())
+        assert engine.last_resolver.provenance["capex"] == "real"
