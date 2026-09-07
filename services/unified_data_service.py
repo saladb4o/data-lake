@@ -744,6 +744,140 @@ def fetch_vietcap_ebit_margin(symbol: str) -> Optional[float]:
     return margin
 
 
+#: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
+#: const.py names this host as its _GRAPHQL_URL, and a third-party crawler
+#: (github.com/cnhson/DataCrawl) issues exactly this query against it.
+_VIETCAP_GRAPHQL_URL = "https://trading.vietcap.com.vn/data-mt/graphql"
+
+_VIETCAP_RATIO_QUERY = """fragment Ratios on CompanyFinancialRatio {
+  yearReport
+  lengthReport
+  revenue
+  netProfit
+  roe
+  roic
+  roa
+  ev
+  issueShare
+  eps
+  pe
+  pb
+  ebit
+}
+query Query($ticker: String!, $period: String!) {
+  CompanyFinancialRatio(ticker: $ticker, period: $period) {
+    ratio {
+      ...Ratios
+    }
+  }
+}"""
+
+
+def _vietcap_ratio_rows(payload: Any) -> List[Dict[str, Any]]:
+    """The ratio rows out of a GraphQL response, newest first.
+
+    Returns [] for any shape that is not the documented one rather than
+    reaching into it speculatively.
+    """
+    if not isinstance(payload, dict):
+        return []
+    node = ((payload.get("data") or {}).get("CompanyFinancialRatio") or {})
+    rows = node.get("ratio") if isinstance(node, dict) else None
+    if not isinstance(rows, list):
+        return []
+    clean = [r for r in rows if isinstance(r, dict) and r]
+    clean.sort(
+        key=lambda r: (
+            _safe_float(r.get("yearReport")) or 0.0,
+            _safe_float(r.get("lengthReport")) or 0.0,
+        ),
+        reverse=True,
+    )
+    return clean
+
+
+def fetch_vietcap_ebit_margin_graphql(symbol: str) -> Optional[float]:
+    """EBIT margin as a percentage, computed inside one vendor record.
+
+    This route reports EBIT and revenue as absolute figures side by side,
+    and that adjacency is the whole point: whatever unit the vendor keeps
+    them in, it is the same unit for both, so their ratio carries no unit
+    at all. The scale question that makes a bare EBIT unusable simply does
+    not arise, and no assumption stands in for the answer.
+
+    A ratio outside [-1, 1] means the two figures are not what they are
+    labelled - a company does not earn more operating profit than revenue -
+    so it is discarded rather than reinterpreted.
+
+    Never raises. Any failure returns None and the caller keeps the
+    operating line it had.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "POST", _VIETCAP_GRAPHQL_URL, timeout=12,
+        json={
+            "query": _VIETCAP_RATIO_QUERY,
+            "variables": {"ticker": symbol, "period": "Q"},
+        },
+    )
+    if resp is None:
+        return None
+    try:
+        rows = _vietcap_ratio_rows(resp.json())
+    except ValueError:
+        return None
+    for row in rows:
+        ebit = _safe_float(row.get("ebit"))
+        revenue = _safe_float(row.get("revenue"))
+        if ebit is None or revenue is None or revenue <= 0:
+            continue
+        ratio = ebit / revenue
+        if not (-1.0 <= ratio <= 1.0):
+            continue
+        return ratio * 100.0
+    return None
+
+
+def vietcap_graphql_probe(reference_symbol: str = "FPT") -> bool:
+    """One request, before spending several hundred."""
+    try:
+        resp = _HTTP_SESSION.post(
+            _VIETCAP_GRAPHQL_URL, timeout=12, verify=TLS_VERIFY,
+            json={
+                "query": _VIETCAP_RATIO_QUERY,
+                "variables": {"ticker": reference_symbol, "period": "Q"},
+            },
+        )
+    except Exception as exc:
+        print(f"     vietcap graphql ratio         {type(exc).__name__}: {exc}")
+        return False
+    if resp.status_code >= 400:
+        print(f"     vietcap graphql ratio         HTTP {resp.status_code}")
+        return False
+    try:
+        body = resp.json()
+    except ValueError:
+        print("     vietcap graphql ratio         HTTP 200, not JSON")
+        return False
+    if isinstance(body, dict) and body.get("errors"):
+        print(f"     vietcap graphql ratio         HTTP 200, GraphQL errors:"
+              f" {str(body['errors'])[:160]}")
+        return False
+    rows = _vietcap_ratio_rows(body)
+    print(f"     vietcap graphql ratio         HTTP 200, {len(rows)} ratio rows")
+    if not rows:
+        return False
+    row = rows[0]
+    print(f"       newest row fields: {sorted(row)[:16]}")
+    ebit, revenue = _safe_float(row.get("ebit")), _safe_float(row.get("revenue"))
+    print(f"       ebit={ebit!r} revenue={revenue!r} roic={row.get('roic')!r}")
+    if ebit is None or revenue is None or revenue <= 0:
+        print("       no usable ebit/revenue pair on the newest row.")
+        return False
+    print(f"       implied EBIT margin: {ebit / revenue * 100.0:.2f}%")
+    return True
+
+
 def vietcap_stats_probe(reference_symbol: str = "FPT") -> bool:
     """One request, before spending several hundred.
 
@@ -2615,16 +2749,31 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     if needs_margin:
         print(f"  🔎 {len(needs_margin)} symbols have no EBIT rung but do have"
               " revenue; probing Vietcap statistics-financial...")
-        if not vietcap_stats_probe():
-            print("     no usable EBIT margin on that route; skipping the fetch.")
+        # Two independent routes to the same number. The GraphQL one is
+        # preferred: it reports EBIT and revenue side by side, so the margin
+        # is computed inside a single vendor record and carries no unit
+        # assumption whatsoever. statistics-financial states a margin
+        # directly and stands behind it.
+        use_graphql = vietcap_graphql_probe()
+        use_stats = vietcap_stats_probe()
+        if not (use_graphql or use_stats):
+            print("     neither route yielded an EBIT margin; skipping the fetch.")
             needs_margin = []
 
         def _margin_worker(sym: str):
-            try:
-                return sym, fetch_vietcap_ebit_margin(sym)
-            except Exception:
-                logger.debug("Vietcap margin fetch failed for %s", sym, exc_info=True)
-                return sym, None
+            for enabled, fetch in ((use_graphql, fetch_vietcap_ebit_margin_graphql),
+                                   (use_stats, fetch_vietcap_ebit_margin)):
+                if not enabled:
+                    continue
+                try:
+                    margin = fetch(sym)
+                except Exception:
+                    logger.debug("Vietcap margin fetch failed for %s via %s",
+                                 sym, fetch.__name__, exc_info=True)
+                    continue
+                if margin is not None:
+                    return sym, margin
+            return sym, None
 
         margin_filled = 0
         with ThreadPoolExecutor(max_workers=6) as executor:

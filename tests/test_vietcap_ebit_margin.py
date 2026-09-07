@@ -137,3 +137,84 @@ class TestWhichSymbolsAreAsked:
     ])
     def test_a_symbol_with_no_rung_is_asked(self, entry):
         assert uds._has_no_ebit_rung(entry) is True
+
+
+class TestTheGraphqlRoute:
+    """Vietcap's GraphQL ratio service reports EBIT and revenue side by side.
+
+    That adjacency is the whole point. Whatever unit the vendor keeps them
+    in, it is the same unit for both, so their ratio carries no unit at all
+    and the scale question that makes a bare EBIT unusable never arises.
+    """
+
+    @staticmethod
+    def _body(rows):
+        return {"data": {"CompanyFinancialRatio": {"ratio": rows}}}
+
+    def test_the_margin_is_the_ratio_of_two_fields_in_one_record(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([{"yearReport": 2025, "lengthReport": 2,
+                         "ebit": 8.0e11, "revenue": 1.0e13}])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") == pytest.approx(8.0)
+
+    def test_the_unit_cancels(self, monkeypatch):
+        """The same company reported in billions must give the same margin."""
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([{"yearReport": 2025, "lengthReport": 2,
+                         "ebit": 800.0, "revenue": 10000.0}])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") == pytest.approx(8.0)
+
+    def test_the_newest_period_wins(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([
+                {"yearReport": 2023, "lengthReport": 4, "ebit": 1.0, "revenue": 100.0},
+                {"yearReport": 2025, "lengthReport": 2, "ebit": 9.0, "revenue": 100.0},
+                {"yearReport": 2025, "lengthReport": 1, "ebit": 5.0, "revenue": 100.0},
+            ])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") == pytest.approx(9.0)
+
+    def test_a_loss_is_carried_through(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([{"yearReport": 2025, "lengthReport": 2,
+                         "ebit": -2.5e11, "revenue": 1.0e12}])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") == pytest.approx(-25.0)
+
+    def test_an_impossible_ratio_is_discarded(self, monkeypatch):
+        """A company does not earn more operating profit than revenue. Such a
+        pair is not what it is labelled, so it is dropped - not rescaled."""
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([{"yearReport": 2025, "lengthReport": 2,
+                         "ebit": 5.0e12, "revenue": 1.0e9}])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") is None
+
+    def test_a_later_usable_row_is_taken_when_the_newest_is_not(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([
+                {"yearReport": 2025, "lengthReport": 2, "ebit": None, "revenue": 100.0},
+                {"yearReport": 2024, "lengthReport": 4, "ebit": 7.0, "revenue": 100.0},
+            ])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") == pytest.approx(7.0)
+
+    @pytest.mark.parametrize("revenue", [0.0, -5.0, None])
+    def test_a_revenue_that_cannot_divide_is_skipped(self, revenue, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            self._body([{"yearReport": 2025, "lengthReport": 2,
+                         "ebit": 5.0, "revenue": revenue}])))
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") is None
+
+    @pytest.mark.parametrize("body", [
+        {}, {"data": {}}, {"data": {"CompanyFinancialRatio": {}}},
+        {"data": {"CompanyFinancialRatio": {"ratio": "nope"}}},
+        {"errors": [{"message": "boom"}]},
+        None, [1, 2, 3],
+    ])
+    def test_an_unrecognised_body_yields_nothing(self, body):
+        assert uds._vietcap_ratio_rows(body) == []
+
+    def test_transport_failure(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: None)
+        assert uds.fetch_vietcap_ebit_margin_graphql("TST") is None
+
+    def test_the_query_asks_for_both_halves_of_the_ratio(self):
+        for field in ("ebit", "revenue", "roic", "yearReport", "lengthReport"):
+            assert field in uds._VIETCAP_RATIO_QUERY
