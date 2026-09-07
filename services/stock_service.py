@@ -778,6 +778,25 @@ def sync_universe_from_vnstock(force: bool = False) -> Dict[str, Any]:
         load_master_universe()
         return {"status": "warning", "message": "Using local cached universe", **get_symbols_stats()}
 
+    # Report what these two payloads actually contain.
+    #
+    # Eight fields are read from each record and the rest is discarded
+    # unexamined. That matters right now because 558 symbols cannot be
+    # valued for want of a single number - the share count - and these are
+    # the only two vendors already proven reachable from CI: they are what
+    # builds the 1,522-symbol universe in the first place. TradingView omits
+    # the count for those symbols, VNDIRECT does not carry one, and TCBS
+    # answers 404 for them. If either payload below happens to carry a
+    # listed-share field, it covers the whole universe in two requests
+    # rather than 558.
+    #
+    # Printing the key names is not a guess about the answer, and costs one
+    # line in the log.
+    for _label, _rows in (("Vietcap", vci_data), ("KBS", kbs_data)):
+        if isinstance(_rows, list) and _rows and isinstance(_rows[0], dict):
+            print(f"  🔑 {_label} record fields ({len(_rows)} rows): "
+                  f"{sorted(_rows[0].keys())}")
+
     master_dict = {}
     for item in vci_data:
         sym = item.get('symbol', '').upper().strip()
