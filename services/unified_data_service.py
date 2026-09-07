@@ -587,21 +587,70 @@ def reconstruct_financial_triangles(
     has_any_real_fundamental = has_real_vnd or has_real_tv or has_real_vn or has_real_s0
 
     # -------------------------------------------------------------
-    # 1. 4-Level Shares Outstanding Witness
+    # 1. Shares Outstanding Witness
+    #
+    # This ladder decides more than it looks like it does. Because a derived
+    # field inherits the worst tier of its inputs, an invented share count
+    # drags the market cap to tier 0, and the market cap drags every
+    # valuation model down with it - even for a company whose revenue,
+    # equity and net income all arrived reported. Measured over the whole
+    # universe, 565 of 1,522 symbols were refused with exactly that shape:
+    # full VNDIRECT statements at tier 3, and a fabricated share count.
+    #
+    # Two rungs were missing. TradingView is asked for both share columns
+    # (see TV_COLUMNS) but only the diluted one was ever read. And where a
+    # vendor reports a total and its per-share twin, the count it used can
+    # be recovered by dividing one by the other - price / pe is the vendor's
+    # own EPS, price / pb its own book value per share. That is
+    # triangulation between two reported witnesses, not a back-solve from
+    # price alone, so it is tier 2 and capped by the tier of the price that
+    # fed it.
     # -------------------------------------------------------------
     shares_dil = _safe_float(tv_data.get("diluted_shares_outstanding_fq"))
+    shares_tot = _safe_float(tv_data.get("total_shares_outstanding_fq"))
     net_inc_raw = _safe_float(tv_data.get("net_income_ttm") or tv_data.get("net_income_fy"))
     eps_raw = _safe_float(tv_data.get("earnings_per_share_basic_ttm") or vn_data.get("eps"))
-    
-    if shares_dil and shares_dil > 0:
+    equity_raw = _safe_float(tv_data.get("total_equity_fq"))
+
+    def _per_share(multiple: Any) -> Optional[float]:
+        """The per-share figure a reported multiple implies at this price."""
+        m = _safe_float(multiple)
+        if price > 0 and m and m > 0:
+            return price / m
+        return None
+
+    eps_implied = _per_share(tv_data.get("price_earnings_ttm") or vn_data.get("pe"))
+    bvps_implied = _per_share(tv_data.get("price_book_fq") or vn_data.get("pb"))
+
+    #: No listed company has fewer shares than this. A rung that produces
+    #: less has divided by a stale or nonsense multiple, and passing it on
+    #: would be worse than falling through to the next witness.
+    MIN_PLAUSIBLE_SHARES = 100_000.0
+
+    def _ratio(total: Optional[float], per_share: Optional[float]) -> Optional[float]:
+        if not total or total <= 0 or not per_share or per_share <= 0:
+            return None
+        count = total / per_share
+        return count if count >= MIN_PLAUSIBLE_SHARES else None
+
+    if shares_dil and shares_dil >= MIN_PLAUSIBLE_SHARES:
         shares_out = shares_dil
         field_provenance["shares"] = 3
-    elif net_inc_raw and eps_raw and eps_raw > 0 and net_inc_raw > 0:
-        shares_out = round(net_inc_raw / eps_raw)
+    elif shares_tot and shares_tot >= MIN_PLAUSIBLE_SHARES:
+        shares_out = shares_tot
+        field_provenance["shares"] = 3
+    elif _ratio(net_inc_raw, eps_raw):
+        shares_out = round(_ratio(net_inc_raw, eps_raw))
         field_provenance["shares"] = 2
     elif raw_mcap > 0 and price > 0:
         shares_out = round(raw_mcap / price)
         # Price may be the invented fallback -> poison this derivation too.
+        field_provenance["shares"] = min(2, price_tier)
+    elif _ratio(net_inc_raw, eps_implied):
+        shares_out = round(_ratio(net_inc_raw, eps_implied))
+        field_provenance["shares"] = min(2, price_tier)
+    elif _ratio(equity_raw, bvps_implied):
+        shares_out = round(_ratio(equity_raw, bvps_implied))
         field_provenance["shares"] = min(2, price_tier)
     else:
         shares_out = 50_000_000

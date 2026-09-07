@@ -62,6 +62,14 @@ def test_lock_is_not_poisoned_for_subsequent_readers(lake_dir):
 
     lake = DiskDataLake()
     assert _save_with_timeout(lake, fn, "TCB", {"x": 2})
+    # Writes are debounced by a 2s daemon timer. Leaving it pending lets the
+    # flush land after monkeypatch has restored GOOGLE_DRIVE_DATA_DIR, at
+    # which point the path resolver falls back to the repo's own data/ and
+    # the file is written there instead of into tmp_path. That leak only
+    # surfaces under a test order where the suite is still running 2s later,
+    # so it failed CI while passing locally. Force the write out here, as
+    # the other two tests in this file already do.
+    lake.flush()
 
     result = {}
     done = threading.Event()
