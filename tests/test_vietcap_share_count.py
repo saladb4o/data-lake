@@ -220,3 +220,37 @@ class _Resp2:
         self.text = text
         self.headers = headers
         self.status_code = status
+
+
+class TestTheWitnessMustBeAbleToTestify:
+    """The seven symbols the first Vietcap run still left at tier 0.
+
+    Each carried market_cap_basic and no close. The market cap counted as a
+    witness, so they were excluded from the vendor pass that would have
+    given them the number outright - and then the rung that reads a market
+    cap divides it by a price, which never came. A witness that cannot
+    testify kept them refused.
+    """
+
+    def test_a_market_cap_without_a_price_does_not_count_as_a_witness(self):
+        assert uds._needs_share_count(
+            {"market_cap_basic": 1.2e14, "total_equity_fq": 4.0e11}
+        ) is True
+
+    def test_a_market_cap_with_a_price_still_counts(self):
+        assert uds._needs_share_count(
+            {"market_cap_basic": 1.2e14, "close": 20_000.0}
+        ) is False
+
+    def test_a_stated_count_is_a_witness_with_or_without_a_price(self):
+        assert uds._needs_share_count({"diluted_shares_outstanding_fq": 1.0e8}) is False
+        assert uds._needs_share_count({"total_shares_outstanding_fq": 1.0e8}) is False
+
+    def test_the_reported_eps_pair_needs_no_price(self):
+        assert uds._needs_share_count(
+            {"net_income_ttm": 5.0e10, "earnings_per_share_basic_ttm": 3_400.0}
+        ) is False
+
+    def test_an_empty_or_absent_row_needs_the_count(self):
+        assert uds._needs_share_count(None) is True
+        assert uds._needs_share_count({}) is True

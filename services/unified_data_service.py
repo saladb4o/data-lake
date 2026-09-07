@@ -2108,10 +2108,12 @@ def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
 #: The TradingView columns any one of which yields a share count. A row
 #: carrying none of them sends the symbol to the fabricated 50,000,000 and
 #: takes its market cap, and therefore every valuation model, to tier 0.
+#: Columns that state the count outright. A market cap is deliberately not
+#: among them: it is a witness only in company with a price, because the
+#: rung that reads it divides one by the other.
 _TV_SHARE_WITNESSES = (
     "diluted_shares_outstanding_fq",
     "total_shares_outstanding_fq",
-    "market_cap_basic",
 )
 
 
@@ -2120,6 +2122,14 @@ def _needs_share_count(tv_entry: Optional[Dict[str, Any]]) -> bool:
     if not tv_entry:
         return True
     if any(tv_entry.get(key) is not None for key in _TV_SHARE_WITNESSES):
+        return False
+    # A market cap pins the count only when divided by a price. Counting it
+    # as a witness on its own excluded seven symbols from the vendor pass
+    # that carries the number outright, and then left them at tier 0 anyway
+    # because no price ever arrived. A witness that cannot testify is not
+    # a witness.
+    if (tv_entry.get("market_cap_basic") is not None
+            and tv_entry.get("close") is not None):
         return False
     # A reported total and its per-share twin also pin the count down.
     return not (
