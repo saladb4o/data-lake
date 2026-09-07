@@ -3295,44 +3295,71 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                     print(f"       {code:<8} {med:>+9.3f} x revenue"
                           f"   (n={len(ratios)})")
 
-                # One reading of the codes, stated as identities so the log
-                # can refute it. Under this reading 22200 is the operating
-                # line - profit from the core business - and 22070 is
-                # interest expense, which together are rung 2 of the EBIT
-                # ladder for every symbol VNDIRECT answers for.
-                identities = (
-                    ("gross profit   21900 = 21001 - 21500",
-                     lambda r: (r.get(21900), (r.get(21001), r.get(21500)),
-                                lambda a, b: a - b)),
-                    ("operating line 22200 = 21900 + 22051 - 22052"
-                     " - 22100 - 22110",
-                     lambda r: (r.get(22200),
-                                (r.get(21900), r.get(22051), r.get(22052),
-                                 r.get(22100), r.get(22110)),
-                                lambda g, fi, fe, sell, adm:
-                                    g + fi - fe - sell - adm)),
-                    ("pretax         22500 = 22200 + 22230",
-                     lambda r: (r.get(22500), (r.get(22200), r.get(22230)),
-                                lambda a, b: a + b)),
-                    ("after tax      22900 = 22500 - 22509 - 22510",
-                     lambda r: (r.get(22900),
-                                (r.get(22500), r.get(22509), r.get(22510)),
-                                lambda p, t1, t2: p - t1 - t2)),
-                )
-                print("     Identity hit rates under one reading of the codes"
-                      " (within 1% of the stated line):")
-                for label, build in identities:
-                    hits = tried = 0
-                    for row in by_code_rows:
-                        stated, parts, fn = build(row)
-                        if stated is None or any(p is None for p in parts):
+                # The first version of this stated one reading of the
+                # numbering as four identities. Every one of them came back
+                # at 0.0% - the reading was wrong, and it was wrong in the
+                # log rather than in a published valuation, which is what
+                # the identities were for.
+                #
+                # What the ratio table above did establish: 21000 and 21001
+                # sit at 1.000 x revenue (the anchor, as expected), 22100
+                # at 0.859 and 23100 at 0.144, and 0.859 + 0.144 = 1.003.
+                # That is cost of goods and gross profit, found by what the
+                # numbers do rather than by any name.
+                #
+                # So stop proposing readings. For every code, search the
+                # other codes for a pair that reproduces it by addition or
+                # subtraction, and print the best fit with its hit rate.
+                # A relation that holds for hundreds of companies is the
+                # statement's own structure; one that holds for a handful
+                # is coincidence, and the rate says which it is.
+                strong = [
+                    c for c in income_codes
+                    if len(shape.get(c) or []) >= 200
+                ][:20]
+                # Column-major, once: the search reads each code's values
+                # tens of thousands of times, and row.get() per read turns
+                # a diagnostic into a minute of the sync's runtime.
+                cols = {
+                    c: [row.get(c) for row in by_code_rows] for c in strong
+                }
+                print("     Best arithmetic fit found for each code, searched"
+                      " rather than assumed (>= 200 companies):")
+                for target in strong:
+                    best = None
+                    tvals = cols[target]
+                    for a in strong:
+                        if a == target:
                             continue
-                        tried += 1
-                        scale = max(abs(stated), 1.0)
-                        if abs(fn(*parts) - stated) / scale <= 0.01:
-                            hits += 1
-                    rate = (100.0 * hits / tried) if tried else 0.0
-                    print(f"       {label:<58} {rate:5.1f}%  (n={tried})")
+                        avals = cols[a]
+                        for b in strong:
+                            if b in (target, a):
+                                continue
+                            bvals = cols[b]
+                            for sign, op in ((-1.0, "-"), (1.0, "+")):
+                                # a + b is b + a; only search it once.
+                                if sign > 0 and b < a:
+                                    continue
+                                hits = tried = 0
+                                for t, va, vb in zip(tvals, avals, bvals):
+                                    if t is None or va is None or vb is None:
+                                        continue
+                                    tried += 1
+                                    if abs((va + sign * vb) - t) <= 0.01 * max(abs(t), 1.0):
+                                        hits += 1
+                                if tried < 200:
+                                    continue
+                                rate = 100.0 * hits / tried
+                                if best is None or rate > best[0]:
+                                    best = (rate, a, op, b, tried)
+                    if best and best[0] >= 50.0:
+                        rate, a, op, b, tried = best
+                        print(f"       {target:<8} = {a} {op} {b}"
+                              f"   {rate:5.1f}%  (n={tried})")
+                    else:
+                        rate = best[0] if best else 0.0
+                        print(f"       {target:<8}   no pair reproduces it"
+                              f" (best {rate:.1f}%)")
 
     # Compute Empirical Percentiles & rank-based quintiles via the shared
     # scoring engine (M4). Mutates each record in place with a full
