@@ -108,3 +108,83 @@ def test_without_tcbs_the_same_row_is_still_refused():
     }
     rec = normalize_stock_data("TST", tv_data={"close": 20_000.0}, vndirect_data=vnd)
     assert rec["field_provenance"]["shares"] == 0
+
+
+# ---------------------------------------------------------------------------
+# The route the module used for the life of the project returns 404 for every
+# ticker, large caps included - so fetch_vnstock_financials() never returned
+# anything and the failure was swallowed into an empty dict. These pin the
+# replacement's shape without asserting which URL is correct, because that
+# cannot be checked from here.
+# ---------------------------------------------------------------------------
+
+from services.unified_data_service import (
+    _TCBS_FIELD_ALIASES,
+    _TCBS_ROUTES,
+    _shares_to_count,
+    _tcbs_first_record,
+)
+
+
+class TestShareCountUnits:
+    """A VN listed company has 1e5..2e10 shares, i.e. 0.1..2e4 millions.
+    The ranges do not overlap, so the unit is readable from the value."""
+
+    def test_whole_shares_pass_through(self):
+        assert _shares_to_count(6_258_000_000.0) == 6_258_000_000.0
+
+    def test_millions_are_scaled_up(self):
+        assert _shares_to_count(6_258.0) == 6_258 * 1e6
+
+    def test_the_gap_between_the_ranges_is_discarded(self):
+        assert _shares_to_count(70_000.0) is None
+
+    @pytest.mark.parametrize("bad", [None, 0, -5, "", "n/a"])
+    def test_nothing_is_not_something(self, bad):
+        assert _shares_to_count(bad) is None
+
+
+class TestPayloadShapes:
+    def test_a_document_is_taken_as_is(self):
+        assert _tcbs_first_record({"pe": 10.0}) == {"pe": 10.0}
+
+    def test_a_series_yields_its_first_row(self):
+        assert _tcbs_first_record([{"pe": 10.0}, {"pe": 9.0}]) == {"pe": 10.0}
+
+    def test_empty_rows_are_skipped(self):
+        assert _tcbs_first_record([{}, {"pe": 9.0}]) == {"pe": 9.0}
+
+    @pytest.mark.parametrize("junk", [None, [], {}, "", 3, [None, 1]])
+    def test_junk_yields_nothing(self, junk):
+        assert _tcbs_first_record(junk) == {}
+
+
+def test_every_route_candidate_is_templated():
+    assert _TCBS_ROUTES, "an empty candidate list would silently skip TCBS"
+    for template in _TCBS_ROUTES:
+        assert "{sym}" in template, template
+        assert template.startswith("https://"), template
+
+
+def test_the_dead_route_is_no_longer_tried_first():
+    """It 404s for every ticker; keeping it first would spend the probe's
+    first request proving that again."""
+    assert not _TCBS_ROUTES[0].endswith("/finance/{sym}/overview")
+
+
+def test_a_stated_share_count_outranks_one_divided_out_of_a_multiple():
+    """TCBS states outstandingShare. A stated figure is a witness; a count
+    recovered from price/pe is arithmetic over two of them."""
+    rec = normalize_stock_data(
+        "TST",
+        tv_data={"close": 20_000.0, "price_earnings_ttm": 10.0,
+                 "net_income_ttm": 200_000_000_000.0},
+        vnstock_data={"shares_outstanding": 80_000_000.0},
+    )
+    assert rec["shares_out"] == 80_000_000.0
+    assert rec["field_provenance"]["shares"] == 3
+
+
+def test_alias_table_covers_the_share_count():
+    assert "shares_outstanding" in _TCBS_FIELD_ALIASES
+    assert "outstandingShare" in _TCBS_FIELD_ALIASES["shares_outstanding"]
