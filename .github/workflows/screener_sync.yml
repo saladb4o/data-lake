@@ -22,6 +22,14 @@ on:
         description: 'Chạy audit độ phủ sau khi sync (true/false)'
         required: false
         default: 'true'
+      vendor_census:
+        description: 'Đo toàn bộ các nguồn dữ liệu (chậm, vài nghìn request)'
+        required: false
+        default: 'false'
+      census_limit:
+        description: 'Số mã cho mỗi nguồn khi census (0 = tất cả)'
+        required: false
+        default: '0'
   schedule:
     # 06:00 sáng thứ Hai giờ VN = 23:00 UTC Chủ Nhật, after the weekly BCTC run.
     - cron: '0 23 * * 0'
@@ -94,6 +102,32 @@ jobs:
             --show-blocked 20 --json "$DATA_LOCAL_DIR/coverage.json" \
             | tee "$GITHUB_STEP_SUMMARY"
 
+      # One large measurement instead of one workflow run per question.
+      #
+      # Every cycle of the coverage audit has cost a run to learn a single
+      # fact, and several of those facts turned out to be about the question
+      # rather than the data: TradingView columns requested at a period that
+      # does not exist, VNDIRECT item codes that appear in no payload, a
+      # reading of a numbering scheme that was wrong in all four parts. This
+      # step asks every open question at once - which vendor serves what,
+      # for which companies, under which field names, in which units - and
+      # answers none of them. It fetches, counts and prints.
+      #
+      # It writes no valuation input and cannot: it runs after the snapshot
+      # is already built and never reads back into it.
+      - name: Census the vendor routes
+        if: ${{ github.event.inputs.vendor_census == 'true' }}
+        continue-on-error: true
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: |
+          python scripts/vendor_census.py \
+            --limit "${{ github.event.inputs.census_limit || '0' }}" \
+            --workers 8 \
+            --json "$DATA_LOCAL_DIR/vendor_census.json"
+
       - name: Upload the snapshot
         uses: actions/upload-artifact@v4
         with:
@@ -101,5 +135,6 @@ jobs:
           path: |
             data/screener_snapshot.json
             data/coverage.json
+            data/vendor_census.json
           retention-days: 14
           if-no-files-found: error
