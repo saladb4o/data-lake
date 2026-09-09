@@ -92,15 +92,6 @@ jobs:
               sys.exit(f"refusing to publish a {len(stocks)}-symbol snapshot")
           PY
 
-      - name: Audit valuation coverage
-        if: ${{ github.event.inputs.audit_after != 'false' }}
-        env:
-          DATA_LOCAL_DIR: ${{ github.workspace }}/data
-          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
-        run: |
-          python scripts/audit_valuation_coverage.py \
-            --show-blocked 20 --json "$DATA_LOCAL_DIR/coverage.json" \
-            | tee "$GITHUB_STEP_SUMMARY"
 
       # One large measurement instead of one workflow run per question.
       #
@@ -137,6 +128,28 @@ jobs:
             --limit "${{ github.event.inputs.census_limit || '0' }}" \
             --workers 8 \
             --json "$DATA_LOCAL_DIR/vendor_census.json"
+
+      # The audit runs LAST, after the census, and that ordering is load-
+      # bearing rather than tidy. A job log can only be read from its tail,
+      # and the census prints several hundred lines; with the audit before
+      # it, the one number the whole exercise is measured by - the coverage
+      # headline - is pushed out of every readable region of the log. That
+      # happened on run 27 and cost a second run to recover a figure that
+      # had already been computed. Whatever is printed last is the only
+      # thing guaranteed to be readable, so the headline goes there.
+      #
+      # It reads the snapshot the sync wrote, exactly as the census does,
+      # and neither reads the other's output - so the order is free to
+      # choose on readability alone.
+      - name: Audit valuation coverage
+        if: ${{ github.event.inputs.audit_after != 'false' }}
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+        run: |
+          python scripts/audit_valuation_coverage.py \
+            --show-blocked 20 --json "$DATA_LOCAL_DIR/coverage.json" \
+            | tee "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the snapshot
         uses: actions/upload-artifact@v4

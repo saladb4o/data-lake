@@ -210,12 +210,31 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
     print("(core = shares, market cap, equity, debt, cash, revenue, net income,")
     print(" ebit. Sector-specific drivers such as affo/rwa/landbank are excluded:")
     print(" they are absent for almost every company by design.)")
+    # The outcome column is counted, not asserted.
+    #
+    # It used to print a flat "valued"/"REFUSED" derived from the tier alone,
+    # which is not a measurement but a restatement of TRUSTED_TIER - and it
+    # was wrong. The gate runs per driver per model, so a company whose
+    # weakest CORE driver is a tier-1 stand-in is still valued by any model
+    # that never asks for that driver. While refusals outnumbered the tier-1
+    # count the claim passed unnoticed; at 158 tier-1 symbols against 92
+    # refusals in total it became arithmetically impossible, which is the
+    # only reason it was caught.
+    #
+    # Printing the real split matters beyond tidiness: a jump in coverage
+    # has exactly two explanations, better data or a looser gate, and this
+    # column is where the difference shows. A hardcoded label cannot tell
+    # them apart; counted outcomes can.
+    by_tier_outcome = collections.defaultdict(lambda: [0, 0])
+    for r in rows:
+        by_tier_outcome[r["worst_tier"]][0 if r["active_models"] > 0 else 1] += 1
     for tier in (4, 3, 2, 1, 0):
         count = tiers.get(tier, 0)
         if not count:
             continue
-        gate = "valued" if tier >= TRUSTED_TIER else "REFUSED"
-        print(f"  tier {tier} {TIER_LABELS[tier]:<16} {count:>6}  {pct(count)}   {gate}")
+        ok, no = by_tier_outcome[tier]
+        outcome = f"{ok} valued, {no} refused" if no else "all valued"
+        print(f"  tier {tier} {TIER_LABELS[tier]:<16} {count:>6}  {pct(count)}   {outcome}")
     if tiers.get(None):
         print(f"  no provenance metadata     {tiers[None]:>6}  {pct(tiers[None])}   valued (nothing says otherwise)")
 

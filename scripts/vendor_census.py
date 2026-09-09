@@ -337,6 +337,13 @@ ROUTES = {
 }
 
 
+#: Room for the largest statement any route serves. Vietcap's balance
+#: sheet has 122 fields and its securities-form income statement 80; a cap
+#: below those drops real lines from the one table that exists to say which
+#: lines are real.
+_SURVEY_FIELD_CAP = 130
+
+
 def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
            cookies: Dict[str, str], workers: int,
            out: Dict[str, Any],
@@ -406,7 +413,21 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
         print(f"  {'field':<30}{'n':>6}{'nonzero':>9}"
               f"{'median value':>18}{'x revenue':>14}  what the vendor calls it")
         summary = {}
-        for key, count in field_counts.most_common(60):
+        # The cap was 60, and it truncated in silence. Vietcap's balance
+        # sheet carries 122 fields; the survey printed the first 60, the
+        # table simply stopped at bsa58, and nothing said so - which is how
+        # a run that was asked for total equity and long-term borrowings
+        # came back without either, looking complete. A limit that hides
+        # what it dropped is worse than no limit, because it answers a
+        # question it did not answer.
+        #
+        # So: enough room for the largest statement, and a line stating
+        # exactly what was left out whenever anything is.
+        shown = field_counts.most_common(_SURVEY_FIELD_CAP)
+        if len(field_counts) > len(shown):
+            print(f"  ({len(shown)} of {len(field_counts)} fields shown;"
+                  f" the rest are in the JSON)")
+        for key, count in shown:
             raw = sorted(raw_values.get(key) or [])
             med_raw = raw[len(raw) // 2] if raw else None
             nonzero = sum(1 for v in raw if v != 0.0)
