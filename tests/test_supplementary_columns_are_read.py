@@ -163,3 +163,61 @@ def test_the_vietcap_margin_probe_can_be_reached_without_tradingview_revenue():
     assert "total_revenue_ttm" in block, (
         "TradingView revenue must remain an accepted witness"
     )
+
+
+def test_the_latest_period_is_the_newest_not_the_first():
+    """The census caught this: rows[0] is not the latest period.
+
+    The function was written to take the first row on the assumption that
+    the vendor serves newest-first. Across 714 companies the median `year`
+    on that first row is 2018, so every margin this route ever returned was
+    a seven-year-old period wearing the name of the current one - the worst
+    kind of wrong, because it is a real number from a real filing and
+    nothing downstream can tell.
+    """
+    payload = {"data": {"quarters": [
+        {"yearReport": 2018, "lengthReport": 4, "ebit": 1.0},
+        {"yearReport": 2025, "lengthReport": 2, "ebit": 9.0},
+        {"yearReport": 2025, "lengthReport": 4, "ebit": 7.0},
+        {"yearReport": 2021, "lengthReport": 1, "ebit": 3.0},
+    ]}}
+    assert uds._vietcap_latest_period(payload)["ebit"] == 7.0
+
+    # A body carrying one flat record still has to come back.
+    assert uds._vietcap_latest_period(
+        {"data": {"yearReport": 2024, "ebit": 5.0}})["ebit"] == 5.0
+    # And rows with no period at all must not be lost.
+    assert uds._vietcap_latest_period({"data": [{"ebit": 2.0}]})["ebit"] == 2.0
+
+
+def test_an_operating_line_is_bounded_but_may_be_negative():
+    """A loss is data; a figure in the wrong unit is not.
+
+    Discarding a negative EBIT would silently turn a real loss into no data
+    at all, which the provenance gate would then fill with a sector median -
+    exactly the fabrication this engine exists to refuse.
+    """
+    assert uds._plausible_operating_line(-8.1e9) == -8.1e9
+    assert uds._plausible_operating_line(8.1e9) == 8.1e9
+    assert uds._plausible_operating_line(0) is None
+    assert uds._plausible_operating_line(12.5) is None        # not dong
+    assert uds._plausible_operating_line(1e16) is None        # > the exchange
+    assert uds._plausible_operating_line(None) is None
+    assert uds._plausible_operating_line("n/a") is None
+
+
+def test_the_reported_line_is_preferred_over_the_margin():
+    """Same request, strictly better provenance.
+
+    A margin must be multiplied by revenue and can be no better than that
+    revenue, so for a company whose revenue is a sector stand-in it is
+    refused. A reported EBIT is the vendor stating the line itself.
+    """
+    import inspect
+
+    src = inspect.getsource(uds)
+    body = src[src.index("def _margin_worker"):]
+    body = body[:body.index("margin_filled = 0")]
+    assert body.index("fetch_vietcap_operating_lines") < body.index(
+        "fetch_vietcap_ebit_margin"
+    ), "the margin is still tried before the reported line"

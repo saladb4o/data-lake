@@ -760,19 +760,42 @@ def _vietcap_latest_period(payload: Any) -> Dict[str, Any]:
     pinned by any contract available here, so every plausible arrangement is
     accepted and anything else yields {} - never a guess.
     """
+    def _newest(series: List[Any]) -> Dict[str, Any]:
+        rows = [r for r in series if isinstance(r, dict) and r]
+        if not rows:
+            return {}
+        # Sort, never take the first. This function was written to take
+        # rows[0] under the assumption that the vendor serves newest-first,
+        # and the census disproved it outright: across 714 companies the
+        # median `year` on the first row is 2018. Every margin this route
+        # has ever returned was a seven-year-old period wearing the name of
+        # the latest one - the worst kind of wrong, because it is a real
+        # number from a real filing and nothing downstream can tell.
+        #
+        # Rows with no period at all sort last rather than being dropped:
+        # a single-record body still has to be returnable.
+        def key(row: Dict[str, Any]) -> Tuple[float, float]:
+            year = _safe_float(row.get("yearReport") or row.get("year"))
+            period = _safe_float(
+                row.get("lengthReport") or row.get("quarter")
+                or row.get("lengthReportYear")
+            )
+            return (year if year is not None else float("-inf"),
+                    period if period is not None else float("-inf"))
+
+        return max(rows, key=key)
+
     data = payload.get("data") if isinstance(payload, dict) else payload
     if isinstance(data, dict):
-        for key in ("quarters", "years"):
-            series = data.get(key)
+        for key_name in ("quarters", "years"):
+            series = data.get(key_name)
             if isinstance(series, list) and series:
-                for row in series:
-                    if isinstance(row, dict) and row:
-                        return row
+                newest = _newest(series)
+                if newest:
+                    return newest
         return data if all(not isinstance(v, (list, dict)) for v in data.values()) else {}
     if isinstance(data, list):
-        for row in data:
-            if isinstance(row, dict) and row:
-                return row
+        return _newest(data)
     return {}
 
 
@@ -800,6 +823,62 @@ def fetch_vietcap_ebit_margin(symbol: str) -> Optional[float]:
     if not (-100.0 <= margin <= 100.0):
         return None
     return margin
+
+
+#: An operating line in raw dong, as this route serves it. The census
+#: measured both the coverage and the unit: ebit answers for 660 of the 720
+#: companies with no operating line at a median of 8.12e9, ebitda for 659 at
+#: 1.55e10, and dividing each by the revenue already held in dong gives
+#: 0.0405 and 0.0766 - the first of which equals the ebitMargin the same
+#: record reports independently. Two witnesses to the same unit.
+_VIETCAP_EBIT_ALIASES = ("ebit",)
+_VIETCAP_EBITDA_ALIASES = ("ebitda",)
+
+#: A VN listed company's operating line, in dong. Below a million the figure
+#: is in some other unit or is noise; above 1e15 it is larger than the whole
+#: exchange. Negative is ordinary and must survive - a loss-making company
+#: has an EBIT, and discarding it would silently turn a real loss into no
+#: data at all.
+_OPERATING_LINE_FLOOR = 1e6
+_OPERATING_LINE_CEILING = 1e15
+
+
+def _plausible_operating_line(value: Any) -> Optional[float]:
+    """The value if it can be an operating line in dong, else None."""
+    num = _safe_float(value)
+    if num is None or num == 0.0:
+        return None
+    return num if _OPERATING_LINE_FLOOR <= abs(num) <= _OPERATING_LINE_CEILING else None
+
+
+def fetch_vietcap_operating_lines(symbol: str) -> Dict[str, float]:
+    """EBIT and EBITDA in dong for one symbol; {} when unavailable.
+
+    Preferred over the margin route wherever it answers, for a reason that
+    is about provenance rather than convenience. A margin has to be
+    multiplied by revenue, so the result can be no better than the revenue -
+    it inherits that tier, and for a company whose revenue is a sector
+    stand-in it is refused outright. A reported EBIT is the vendor stating
+    the line itself, which is tier 3 on its own and needs nothing else.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry("GET", _VIETCAP_STATS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+    out: Dict[str, float] = {}
+    ebit = _plausible_operating_line(_first_alias(record, _VIETCAP_EBIT_ALIASES))
+    if ebit is not None:
+        out["ebit"] = ebit
+    ebitda = _plausible_operating_line(_first_alias(record, _VIETCAP_EBITDA_ALIASES))
+    if ebitda is not None:
+        out["ebitda"] = ebitda
+    return out
 
 
 #: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
@@ -3113,6 +3192,22 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             needs_margin = []
 
         def _margin_worker(sym: str):
+            # The reported line first, the margin only as a fallback. The
+            # census settled the order: this route states ebit and ebitda
+            # outright in dong for 660 and 659 of these companies. A
+            # reported line is tier 3 on its own; a margin has to be
+            # multiplied by revenue and can be no better than that revenue,
+            # which for a sector stand-in means refused. Same request,
+            # strictly better answer.
+            if use_stats:
+                try:
+                    lines = fetch_vietcap_operating_lines(sym)
+                except Exception:
+                    logger.debug("Vietcap operating lines failed for %s", sym,
+                                 exc_info=True)
+                    lines = {}
+                if lines:
+                    return sym, lines
             for enabled, fetch in ((use_graphql, fetch_vietcap_ebit_margin_graphql),
                                    (use_stats, fetch_vietcap_ebit_margin)):
                 if not enabled:
@@ -3124,24 +3219,36 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                                  sym, fetch.__name__, exc_info=True)
                     continue
                 if margin is not None:
-                    return sym, margin
+                    return sym, {"margin": margin}
             return sym, None
 
         margin_filled = 0
+        line_filled = 0
+        ebitda_filled = 0
         with ThreadPoolExecutor(max_workers=6) as executor:
             futures = [executor.submit(_margin_worker, s) for s in needs_margin]
             for fut in as_completed(futures):
-                sym, margin = fut.result()
-                if margin is None:
+                sym, answer = fut.result()
+                if not answer:
                     continue
-                # Written under TradingView's own column name so the ladder
-                # reads it through the rung already in place and already
+                # Written under TradingView's own column names so the ladder
+                # reads them through the rungs already in place and already
                 # tested, rather than through a second code path.
-                tv_batch.setdefault(sym, {})["operating_margin_ttm"] = margin
-                margin_filled += 1
+                row = tv_batch.setdefault(sym, {})
+                if "ebit" in answer:
+                    row["ebit_ttm"] = answer["ebit"]
+                    line_filled += 1
+                if "ebitda" in answer:
+                    row["ebitda_ttm"] = answer["ebitda"]
+                    ebitda_filled += 1
+                if "margin" in answer:
+                    row["operating_margin_ttm"] = answer["margin"]
+                    margin_filled += 1
         if needs_margin:
-            print(f"  ✓ Vietcap answered an EBIT margin for {margin_filled}"
-                  f"/{len(needs_margin)} of them")
+            print(f"  ✓ Vietcap answered for {len(needs_margin)} asked:"
+                  f" {line_filled} reported an EBIT outright,"
+                  f" {ebitda_filled} an EBITDA,"
+                  f" {margin_filled} only a margin")
 
     unified_stocks = {}
     missing_symbols = []
