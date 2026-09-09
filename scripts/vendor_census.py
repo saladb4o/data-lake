@@ -288,6 +288,7 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
         answered = 0
         field_counts: "collections.Counter[str]" = collections.Counter()
         ratios: Dict[str, List[float]] = {}
+        raw_values: Dict[str, List[float]] = {}
         raw_first: Dict[str, Any] = {}
 
         def work(sym: str):
@@ -312,6 +313,7 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
                     if num is None:
                         continue
                     field_counts[key] += 1
+                    raw_values.setdefault(key, []).append(num)
                     if known_rev and known_rev > 0:
                         ratios.setdefault(key, []).append(num / known_rev)
 
@@ -322,22 +324,39 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
             out.setdefault("routes", {})[route_name] = {"answered": 0}
             continue
         print(f"  first row keys: {sorted(raw_first)[:24]}")
-        print(f"  {'field':<34}{'n':>6}   median x revenue (revenue in dong,")
-        print(f"  {'':<34}{'':>6}   from the snapshot, so the ratio also")
-        print(f"  {'':<34}{'':>6}   states this route's unit)")
+        # Three numbers per field, because the ratio to revenue alone
+        # cannot answer the question this survey exists to answer.
+        #
+        # The first run made that plain. Vietcap answered for 688 of the
+        # 720 companies with no operating line, and every ratio field -
+        # ebitMargin and roic among them, the two blocking drivers - was
+        # printed as +0.000000. That is arithmetic, not data: a margin of
+        # 0.12 divided by a revenue of 1e11 is 1e-12, and so is a margin of
+        # zero. The route that might close most of the coverage gap was
+        # indistinguishable from a route sending nothing but zeros.
+        #
+        # So: the median of the raw value says what the vendor actually
+        # sends and in what unit; the non-zero count separates a field
+        # genuinely populated for n companies from one padded with zeros
+        # for all of them - the bank-only fields came back at the same 688
+        # as the rest, which is exactly that padding; and the ratio to
+        # revenue stays, because it is what locates an absolute line.
+        print(f"  {'field':<30}{'n':>6}{'nonzero':>9}"
+              f"{'median value':>18}{'x revenue':>14}")
         summary = {}
         for key, count in field_counts.most_common(60):
+            raw = sorted(raw_values.get(key) or [])
+            med_raw = raw[len(raw) // 2] if raw else None
+            nonzero = sum(1 for v in raw if v != 0.0)
             series = sorted(ratios.get(key) or [])
-            if series:
-                med = series[len(series) // 2]
-                # An operating line sits between net margin and gross
-                # margin; a revenue field sits at 1.0 or at a clean power
-                # of ten away from it, which is what names the unit.
-                print(f"  {key:<34}{count:>6}   {med:>+14.6f}")
-                summary[key] = {"n": count, "median_ratio": med}
-            else:
-                print(f"  {key:<34}{count:>6}   (no revenue to compare)")
-                summary[key] = {"n": count, "median_ratio": None}
+            med = series[len(series) // 2] if series else None
+            print(f"  {key:<30}{count:>6}{nonzero:>9}"
+                  f"{(f'{med_raw:+.6g}' if med_raw is not None else '-'):>18}"
+                  f"{(f'{med:+.6f}' if med is not None else '-'):>14}")
+            summary[key] = {
+                "n": count, "nonzero": nonzero,
+                "median_value": med_raw, "median_ratio": med,
+            }
         out.setdefault("routes", {})[route_name] = {
             "answered": answered, "of": len(symbols), "fields": summary,
             # One real row, verbatim. The aggregates say how often a field

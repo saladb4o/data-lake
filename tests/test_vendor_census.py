@@ -193,3 +193,29 @@ class TestItPicksTheCompaniesThatAreBlocked:
             for s in ("FFF", "GGG", "HHH")
         ])
         assert census.pick_symbols(2)[0] == ["FFF", "GGG"]
+
+
+def test_a_field_of_zeros_is_distinguishable_from_a_populated_one():
+    """The defect the first census run hid.
+
+    Vietcap answered for 688 of 720 companies and every ratio field was
+    printed as +0.000000, because a margin of 0.12 over a revenue of 1e11
+    is 1e-12 and so is a margin of zero. The two cases must be told apart
+    in the output, or the survey cannot say whether the route that might
+    close the coverage gap sends data or padding.
+    """
+    import collections
+
+    populated = [0.12, 0.09, 0.15, 0.0, 0.11]
+    padded = [0.0] * 5
+
+    for series, expect_nonzero in ((populated, 4), (padded, 0)):
+        raw = sorted(series)
+        assert sum(1 for v in raw if v != 0.0) == expect_nonzero
+        # The ratio against a revenue in dong collapses both to zero at
+        # six decimal places; only the raw median and the non-zero count
+        # separate them.
+        ratios = sorted(v / 1e11 for v in series)
+        assert f"{ratios[len(ratios) // 2]:+.6f}" == "+0.000000"
+
+    assert f"{sorted(populated)[len(populated) // 2]:+.6g}" != "+0"
