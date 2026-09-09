@@ -2654,9 +2654,24 @@ _VND_BACKFILL_KEYS = (
 )
 
 #: The TradingView fields whose absence makes a symbol worth a VNDIRECT call.
+#: A TradingView row missing any of these sends the symbol to VNDIRECT.
+#:
+#: The cash-flow pair was absent from this list for the whole life of the
+#: overlay, and the audit measured what that cost: fcf blocks 306 symbols
+#: and cfo 166, together the two largest remaining drivers, while the
+#: VNDIRECT payload has carried cfo_ttm and capex_ttm all along. A company
+#: whose TradingView row held all six income and balance lines but no cash
+#: flow was never asked - the one vendor that could answer was skipped
+#: because the other six questions had already been answered.
+#:
+#: Adding them widens the overlay towards asking every company rather than
+#: only the visibly incomplete ones. That is the intended direction: a
+#: second opinion on a line already held is not waste, it is the only way
+#: two sources can ever disagree in front of us.
 _TV_REQUIRED_LINES = (
     "total_revenue_ttm", "net_income_ttm", "ebit_ttm",
     "total_assets_fq", "total_equity_fq", "total_debt_fq",
+    "cash_f_operating_activities_ttm", "capital_expenditures_ttm",
 )
 
 

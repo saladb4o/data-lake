@@ -272,6 +272,17 @@ ROUTES = {
     "vietcap income-statement": lambda s, c: _vietcap_statement_rows(
         s, "INCOME_STATEMENT", c),
     "vietcap statistics-financial": lambda s, c: _vietcap_stats_rows(s, c),
+    # The cash-flow statement, because the blockers changed shape. Reading
+    # the operating line Vietcap reports moved ebitda from 632 blocked
+    # symbols to 148 and ebit from 715 to 200; fcf at 306 and cfo at 166
+    # are now the two largest, and no route measured so far serves either.
+    # statistics-financial carries priceToCashFlow for 661 companies, which
+    # with a market cap whose unit is confirmed would imply a cash flow -
+    # but "price to cash flow" does not say which cash flow, and a guess
+    # about which line a ratio refers to is exactly the kind of assumption
+    # this census exists to replace. So ask the statement itself.
+    "vietcap cash-flow": lambda s, c: _vietcap_statement_rows(
+        s, "CASH_FLOW", c),
     "kbs finance-info KQKD": lambda s, c: _kbs_rows(s),
 }
 

@@ -65,6 +65,12 @@ class TestBackfillPredicate:
             TV_NO_STATEMENTS,
             total_revenue_ttm=149e12, net_income_ttm=34.5e12, ebit_ttm=40e12,
             total_assets_fq=178e12, total_equity_fq=74e12, total_debt_fq=85.824e12,
+            # The cash-flow pair joined the required set once the audit
+            # measured that fcf and cfo were the two largest blocking
+            # drivers while VNDIRECT had carried both lines all along. A
+            # row is "full coverage" only if it needs nothing at all.
+            cash_f_operating_activities_ttm=28e12,
+            capital_expenditures_ttm=-12e12,
         )
         assert _needs_vndirect_backfill(full) is False
 
@@ -158,6 +164,12 @@ class TestSyncPassesItThrough:
             TV_NO_STATEMENTS,
             total_revenue_ttm=149e12, net_income_ttm=34.5e12, ebit_ttm=40e12,
             total_assets_fq=178e12, total_equity_fq=74e12, total_debt_fq=85.824e12,
+            # The cash-flow pair joined the required set once the audit
+            # measured that fcf and cfo were the two largest blocking
+            # drivers while VNDIRECT had carried both lines all along. A
+            # row is "full coverage" only if it needs nothing at all.
+            cash_f_operating_activities_ttm=28e12,
+            capital_expenditures_ttm=-12e12,
         )
         monkeypatch.setattr(
             uds, "fetch_tradingview_batch_by_tickers",

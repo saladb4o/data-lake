@@ -221,3 +221,25 @@ def test_the_reported_line_is_preferred_over_the_margin():
     assert body.index("fetch_vietcap_operating_lines") < body.index(
         "fetch_vietcap_ebit_margin"
     ), "the margin is still tried before the reported line"
+
+
+def test_a_row_with_no_cash_flow_is_sent_to_the_overlay():
+    """The gap that left fcf and cfo as the two largest blockers.
+
+    The VNDIRECT payload has carried cfo_ttm and capex_ttm all along, but
+    the overlay only fired when one of six income or balance lines was
+    missing. A company whose TradingView row held all six and no cash flow
+    was never asked: the one vendor that could answer was skipped because
+    the other six questions had already been answered.
+    """
+    complete_except_cash = {
+        "total_revenue_ttm": 1e11, "net_income_ttm": 3e9, "ebit_ttm": 4e9,
+        "total_assets_fq": 9e11, "total_equity_fq": 5e11,
+        "total_debt_fq": 2e11,
+    }
+    assert uds._needs_vndirect_backfill(complete_except_cash)
+
+    fully_complete = dict(complete_except_cash)
+    fully_complete["cash_f_operating_activities_ttm"] = 5e9
+    fully_complete["capital_expenditures_ttm"] = -1e9
+    assert not uds._needs_vndirect_backfill(fully_complete)
