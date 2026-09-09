@@ -2856,7 +2856,7 @@ class ValuationEngine:
             current_price=price,
         )
         add_model("rule_of_40_growth", "Rule of 40 / Rule of X Valuation", "absolute", m13,
-                  drivers=('sps', 'revenue', 'fcf', 'debt', 'cash'))
+                  drivers=('sps', 'revenue', 'fcf', 'debt', 'cash', 'shares'))
 
         m14 = self.models_suite.model_14_acquirers_multiple(
             ebit=ebit, revenue=revenue, net_debt=net_debt, shares_out=shares,
@@ -2887,7 +2887,7 @@ class ValuationEngine:
             current_price=price,
         )
         add_model("buffett_owners_earnings", "Warren Buffett Owner's Earnings DCF", "absolute", m15,
-                  drivers=('net_income', 'ebitda', 'ebit', 'cfo', 'revenue'))
+                  drivers=('net_income', 'ebitda', 'ebit', 'cfo', 'revenue', 'shares'))
 
         # --- 7 SECTOR-SPECIFIC MODELS ---
         m16 = self.models_suite.model_16_pharma_rnpv(
@@ -2902,7 +2902,7 @@ class ValuationEngine:
             book_equity=bvps * shares, roe=roe, ke=wacc_res.cost_of_equity, shares_out=shares, current_price=price
         )
         add_model("bank_equity_cash_flow", "Banking Equity Cash Flow & Basel II CAR", "sector", m17,
-                  drivers=('net_income', 'bvps', 'roe', 'rwa'))
+                  drivers=('net_income', 'bvps', 'roe', 'rwa', 'shares'))
 
         landbank_clean = res.resolve("landbank", ("landbank_fq",), impute=lambda: mcap * 0.2)
         m18 = self.models_suite.model_18_reit_affo_dcf(
@@ -2910,7 +2910,7 @@ class ValuationEngine:
             total_debt=debt, shares_out=shares, current_price=price
         )
         add_model("reit_affo_dcf", "REIT / Real Estate AFFO & RNAV", "sector", m18,
-                  drivers=('ebit', 'cash', 'debt', 'landbank'))
+                  drivers=('ebit', 'cash', 'debt', 'landbank', 'shares'))
 
         regulated_asset_base = res.resolve(
             "regulated_asset_base", ("regulated_asset_base", "rab"),
@@ -2921,7 +2921,7 @@ class ValuationEngine:
             wacc=wacc_res.wacc, g_terminal=DEFAULT_TERMINAL_G
         )
         add_model("telecom_unbundled_sotp", "Unbundled SOTP & Regulated Asset Base", "sector", m19,
-                  drivers=('regulated_asset_base', 'ebitda', 'debt', 'cash'))
+                  drivers=('regulated_asset_base', 'ebitda', 'debt', 'cash', 'shares'))
 
         m20 = self.models_suite.model_20_industrial_apv(
             ebit=ebit, total_debt=debt, cash_and_equiv=cash, shares_out=shares,
@@ -2929,7 +2929,7 @@ class ValuationEngine:
             z_score=risk_res.altman_z_score, current_price=price
         )
         add_model("industrial_apv", "Adjusted Present Value (APV)", "sector", m20,
-                  drivers=('ebit', 'debt', 'cash'))
+                  drivers=('ebit', 'debt', 'cash', 'shares'))
 
         invested_capital = res.resolve(
             "invested_capital", ("invested_capital", "capital_employed"),
@@ -2940,7 +2940,7 @@ class ValuationEngine:
             net_debt=net_debt, shares_out=shares, current_price=price
         )
         add_model("consumer_eva_mva", "Economic Value Added (EVA & MVA)", "sector", m21,
-                  drivers=('ebit', 'invested_capital'))
+                  drivers=('ebit', 'invested_capital', 'shares'))
 
         m22 = self.models_suite.model_22_utilities_3stage_ddm(
             dividend_per_share=dividend_per_share, ke=wacc_res.cost_of_equity, current_price=price

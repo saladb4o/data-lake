@@ -131,3 +131,103 @@ class TestPriceIsRequiredByEveryModel:
                 cfo_per_share=1500.0, pat_per_share=1200.0,
                 current_price=float("nan"),
             )
+
+
+class TestEveryPerShareModelDeclaresItsShareCount:
+    """A model that divides by shares must name shares as one of its drivers.
+
+    add_model() suppresses a model only when a driver it *declares* was
+    invented, so an undeclared input is never checked. Seven models computed
+    ``fair_value = equity_value / shares`` while declaring only the drivers
+    above the division line, and the share count is not an incidental input
+    there: the output is inversely proportional to it. Worse, the suite floors
+    it at ``max(shares_out, 1.0)``, so a company with no reported share count
+    was valued at its entire equity value per share and published as ACTIVE.
+
+    The universe reaches these models through the sector map - industrial,
+    consumer, telecom, REIT and bank companies - so this was not a corner of
+    the engine nobody visits. Six sibling models on the same code path
+    (ev_ebitda, dcf_2stage_mckinsey, greenwald_epv, acquirers_multiple_ev_ebit,
+    p_affo, rim) already declared it, which is what makes the omission an
+    oversight rather than a judgement.
+    """
+
+    PER_SHARE_MODELS = (
+        "rule_of_40_growth", "buffett_owners_earnings", "bank_equity_cash_flow",
+        "reit_affo_dcf", "telecom_unbundled_sotp", "industrial_apv",
+        "consumer_eva_mva",
+    )
+
+    @staticmethod
+    def _no_share_count() -> dict:
+        """Full statements, no share count - the one gap under test."""
+        return {
+            "symbol": "NOSH", "price": 20_000.0, "sector_code": "VNIND",
+            "revenue": 5e12, "prev_revenue": 4.5e12, "net_income": 4e11,
+            "ebit": 6e11, "ebitda": 8e11, "cfo": 7e11, "capital_expenditures": 2e11,
+            "equity": 3e12, "debt": 1e12, "cash": 5e11, "total_assets": 6e12,
+            "roe": 13.0, "roic": 9.0,
+        }
+
+    def test_no_per_share_model_is_active_without_a_share_count(self):
+        result = ValuationEngine().get_comprehensive_valuation(
+            "NOSH", self._no_share_count())
+        by_id = {m.model_id: m for m in result.models}
+        offenders = [
+            mid for mid in self.PER_SHARE_MODELS
+            if mid in by_id and by_id[mid].active
+        ]
+        assert offenders == [], (
+            "these models published a fair value divided by an invented share "
+            f"count: {offenders}"
+        )
+
+    def test_they_name_shares_among_their_imputed_drivers(self):
+        result = ValuationEngine().get_comprehensive_valuation(
+            "NOSH", self._no_share_count())
+        for model in result.models:
+            if model.model_id not in self.PER_SHARE_MODELS:
+                continue
+            if model.status != "INSUFFICIENT_DATA":
+                continue
+            assert "shares" in model.diagnostics.get("imputed_drivers", []), (
+                f"{model.model_id} was suppressed without naming shares")
+
+    def test_a_real_share_count_puts_them_back(self):
+        """The guard must cost nothing when the share count is reported."""
+        payload = dict(self._no_share_count(), shares_out=300e6)
+        result = ValuationEngine().get_comprehensive_valuation("NOSH", payload)
+        by_id = {m.model_id: m for m in result.models}
+        suppressed_on_shares = [
+            mid for mid in self.PER_SHARE_MODELS
+            if mid in by_id
+            and "shares" in (by_id[mid].diagnostics.get("imputed_drivers") or [])
+        ]
+        assert suppressed_on_shares == []
+
+
+class TestAnOptionalRefinementIsNotADriver:
+    """gross_ppe stays undeclared, and that is deliberate.
+
+    buffett_owners_earnings reads it only inside ``if revenue > 0 and
+    gross_ppe > 0``, to refine maintenance capex, and falls back to a ratio
+    when it is absent. Declaring it would refuse the whole model over an input
+    it does not need - the opposite failure to the one above, and one that
+    costs coverage rather than trust. The distinction is whether the output is
+    a function of the input or merely improved by it.
+    """
+
+    def test_missing_gross_ppe_does_not_suppress_owners_earnings(self):
+        payload = {
+            "symbol": "NOPPE", "price": 20_000.0, "sector_code": "VNIND",
+            "shares_out": 300e6, "revenue": 5e12, "prev_revenue": 4.5e12,
+            "net_income": 4e11, "ebit": 6e11, "ebitda": 8e11, "cfo": 7e11,
+            "capital_expenditures": 2e11, "equity": 3e12, "debt": 1e12,
+            "cash": 5e11, "total_assets": 6e12, "roe": 13.0, "roic": 9.0,
+        }
+        result = ValuationEngine().get_comprehensive_valuation("NOPPE", payload)
+        model = next(
+            (m for m in result.models if m.model_id == "buffett_owners_earnings"),
+            None)
+        assert model is not None
+        assert "gross_ppe" not in (model.diagnostics.get("imputed_drivers") or [])
