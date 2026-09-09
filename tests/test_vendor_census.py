@@ -265,3 +265,24 @@ def test_the_catalogue_survives_a_route_that_refuses():
     for symbol, _form in census.REFERENCE_SYMBOLS:
         assert symbol in out["vietcap_catalogue"]
     census.print_field_catalogue(out)
+
+
+def test_the_catalogue_dump_does_not_bury_the_measurement():
+    """A job log can only be read from its tail.
+
+    The catalogue is about fourteen hundred lines. Printed first it hid the
+    survey; moved to last it hid the survey and the coverage headline both.
+    Reordering a wall of text does not help - a dump that size does not add
+    information to a tail-only channel, it removes it. So the full listing
+    lives in the JSON, the names the survey actually used are inline in its
+    table, and stdout gets counts.
+    """
+    import inspect
+
+    src = inspect.getsource(census.print_field_catalogue)
+    assert "row['vi']" not in src and 'row["vi"]' not in src, (
+        "the per-field dump is back in stdout"
+    )
+    assert "fields" in src, "the per-report counts should stay"
+    # The names must still reach the reader through the survey.
+    assert "vendor_name" in inspect.getsource(census.survey)

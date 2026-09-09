@@ -182,8 +182,16 @@ def print_field_catalogue(out: Dict[str, Any]) -> None:
     print("\n" + "=" * 74)
     print(" 7. VIETCAP FIELD CATALOGUE  (/financial-statement/metrics)")
     print("=" * 74)
-    print("The vendor naming its own fields. Printed last only because it is")
-    print("long; the survey above already carries these names inline.\n")
+    print("Counts only. The full catalogue - every field, Vietnamese and")
+    print("English - is in the JSON, and every field the survey actually")
+    print("saw is named inline in the table above.\n")
+    print("Dumping all fourteen hundred rows here was the mistake this")
+    print("replaces. A job log can only be read from its tail, so a dump")
+    print("that size does not add information to the log - it removes it,")
+    print("by pushing everything above it out of reach. Printing it first")
+    print("hid the survey; printing it last hid the survey and the coverage")
+    print("headline both. The fix is not to reorder a wall of text but to")
+    print("stop emitting it where it cannot be read.\n")
     for symbol, form in REFERENCE_SYMBOLS:
         per_symbol = catalogue.get(symbol)
         if not isinstance(per_symbol, dict):
@@ -200,9 +208,6 @@ def print_field_catalogue(out: Dict[str, Any]) -> None:
             if not isinstance(rows, list):
                 continue
             print(f"     {report}: {len(rows)} fields")
-            for row in rows:
-                print(f"       {row['field']:<28} {row['vi'][:38]:<38}"
-                      f" {row['en'][:34]}")
 
 
 # --------------------------------------------------------------------------
