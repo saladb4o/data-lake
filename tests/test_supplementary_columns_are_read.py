@@ -273,3 +273,27 @@ class TestVietcapCashFlowReachesTheLadder:
                    capital_expenditures_ttm=-24e9)
         assert tri["fcf_ttm"] is not None
         assert tri["field_provenance"]["fcf_ttm"] >= 2
+
+
+class TestVietcapIncomeLinesReachTheLadder:
+    """Revenue is a CORE driver, so unlike the cash-flow pair these move the
+    tier table rather than only the blocking counts."""
+
+    def test_a_reported_eps_is_trusted_outright(self):
+        tri = _tri(earnings_per_share_basic_ttm=1033.0)
+        assert tri["eps"] == pytest.approx(1033.0)
+        assert tri["field_provenance"]["eps"] == 3
+
+    def test_a_reported_eps_beats_the_price_over_pe_reconstruction(self):
+        derived = _tri()["field_provenance"]["eps"]
+        reported = _tri(earnings_per_share_basic_ttm=1033.0)
+        assert reported["field_provenance"]["eps"] > derived
+
+    def test_a_reported_revenue_is_trusted_outright(self):
+        tri = _tri(total_revenue_ttm=1.54e11)
+        assert tri["field_provenance"]["revenue"] == 3
+
+    def test_a_reconstructed_ebit_lands_on_the_ebit_rung(self):
+        tri = _tri(ebit_ttm=7.06e9)
+        assert tri["ebit"] == pytest.approx(7.06e9, rel=1e-6)
+        assert tri["field_provenance"]["ebit"] >= 3

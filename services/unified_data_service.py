@@ -943,6 +943,103 @@ def fetch_vietcap_cash_flow(symbol: str) -> Dict[str, float]:
     return out
 
 
+#: The income-statement rows, named by the vendor rather than inferred.
+#:
+#: The census printed Vietcap's own label beside every code, and this
+#: statement turned out to carry, for 196-199 of the 200 companies that
+#: answered, every core line the gate was refusing them for:
+#:
+#:   isa3   "Doanh thu thuan"          / "Net sales"
+#:   isa20  "Lai/(lo) thuan sau thue"  / "Net profit/(loss) after tax"
+#:   isa23  "Lai co ban tren co phieu" / "EPS basic (VND)"
+#:   isa11  "Lai/(lo) tu HDKD"         / "Operating profit/(loss)"
+#:   isa8   "Chi phi lai vay"          / "Interest expenses"
+#:
+#: The census reported isa3 at 2.224x the revenue already held for these
+#: companies, which read at first like a misparsed revenue. It is not. The
+#: census divides by the revenue in the snapshot for symbols whose ebit tier
+#: is below 2 - which is very largely the tier-1 group, whose revenue is a
+#: sector median standing in for a number nobody had. A stand-in smaller
+#: than the truth is what a median looks like from the point of view of the
+#: companies above it. So isa3 is not contradicting a revenue we hold; it is
+#: supplying one we never had.
+#:
+#: That distinction decides how much this is worth. Revenue is a CORE
+#: driver, so unlike the cash-flow pair this does move the tier table: a
+#: company whose revenue goes from sector stand-in to vendor reported clears
+#: eps, sps, net_margin, roic and ebit in one step.
+_VIETCAP_IS_REVENUE_ALIASES = ("isa3",)
+_VIETCAP_IS_NET_INCOME_ALIASES = ("isa20",)
+_VIETCAP_IS_OPERATING_PROFIT_ALIASES = ("isa11",)
+_VIETCAP_IS_INTEREST_ALIASES = ("isa8",)
+
+#: EPS is in dong per share, not in dong, so the operating-line bound does
+#: not apply to it. A VN listed share earning less than one dong or more
+#: than a million is not an earnings figure.
+_VIETCAP_IS_EPS_ALIASES = ("isa23",)
+_EPS_FLOOR = 1.0
+_EPS_CEILING = 1e6
+
+
+def _plausible_eps(value: Any) -> Optional[float]:
+    """The value if it can be an EPS in dong per share, else None.
+
+    Zero is dropped rather than kept: the census found this column padded
+    with zeros for the companies that do not report it, so a zero here says
+    "not stated", not "earned nothing". A genuine loss arrives negative and
+    survives.
+    """
+    num = _safe_float(value)
+    if num is None or num == 0.0:
+        return None
+    return num if _EPS_FLOOR <= abs(num) <= _EPS_CEILING else None
+
+
+def fetch_vietcap_income_statement(symbol: str) -> Dict[str, float]:
+    """Core income-statement lines in dong for one symbol; {} when absent.
+
+    EBIT is reconstructed rather than read, because Vietnamese accounting
+    standards do not publish one. isa11 is operating profit after financial
+    expense, so adding back the interest expense isa8 - which the statement
+    states separately, and states negative - gives earnings before interest.
+    It is only offered when both halves are present; half a reconstruction
+    is not a smaller version of it.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATEMENT_URL.format(sym=symbol),
+        params={"section": "INCOME_STATEMENT"}, timeout=10,
+    )
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+
+    out: Dict[str, float] = {}
+    for key, aliases in (
+        ("revenue", _VIETCAP_IS_REVENUE_ALIASES),
+        ("net_income", _VIETCAP_IS_NET_INCOME_ALIASES),
+        ("operating_profit", _VIETCAP_IS_OPERATING_PROFIT_ALIASES),
+    ):
+        value = _plausible_operating_line(_first_alias(record, aliases))
+        if value is not None:
+            out[key] = value
+
+    eps = _plausible_eps(_first_alias(record, _VIETCAP_IS_EPS_ALIASES))
+    if eps is not None:
+        out["eps"] = eps
+
+    interest = _plausible_operating_line(
+        _first_alias(record, _VIETCAP_IS_INTEREST_ALIASES))
+    if "operating_profit" in out and interest is not None:
+        out["ebit"] = out["operating_profit"] + abs(interest)
+    return out
+
+
 #: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
 #: const.py names this host as its _GRAPHQL_URL, and a third-party crawler
 #: (github.com/cnhson/DataCrawl) issues exactly this query against it.
@@ -3326,6 +3423,69 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                   f" {line_filled} reported an EBIT outright,"
                   f" {ebitda_filled} an EBITDA,"
                   f" {margin_filled} only a margin")
+
+    # The income statement, asked first because it feeds the core.
+    #
+    # 205 symbols are refused on a tier-1 core driver - a sector median
+    # standing in for a number nobody had - and that is now the largest
+    # remaining pool by a distance. The census found this route answering
+    # for 200 of 203 such companies with net sales, net profit, a reported
+    # EPS in dong per share, and an operating profit, each under the
+    # vendor's own name.
+    #
+    # Unlike the cash-flow pair, these are CORE drivers, so a company moved
+    # here moves the tier table itself and clears eps, sps, net_margin,
+    # roic and ebit together.
+    #
+    # Nothing already held is overwritten. A value present in tv_batch came
+    # from TradingView, which is a vendor stating its own figure; replacing
+    # it with a second vendor's would not raise the tier and would silently
+    # decide a disagreement neither of them knows about. This fills holes
+    # only.
+    needs_income = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get("total_revenue_ttm")
+        ) is None
+        and _safe_float(
+            (vnd_by_symbol.get(sym.upper().strip()) or {}).get("revenue_ttm")
+        ) is None
+    ]
+    if needs_income and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_income)} symbols have no revenue from any"
+              " source; probing Vietcap income-statement...")
+
+        def _income_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_income_statement(sym)
+            except Exception:
+                logger.debug("Vietcap income statement failed for %s", sym,
+                             exc_info=True)
+                return sym, {}
+
+        #: answer key -> TradingView column the ladder already reads.
+        _INCOME_COLUMNS = (
+            ("revenue", "total_revenue_ttm"),
+            ("net_income", "net_income_ttm"),
+            ("eps", "earnings_per_share_basic_ttm"),
+            ("ebit", "ebit_ttm"),
+        )
+        income_filled = {name: 0 for _, name in _INCOME_COLUMNS}
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_income_worker, s) for s in needs_income]
+            for fut in as_completed(futures):
+                sym, answer = fut.result()
+                if not answer:
+                    continue
+                row = tv_batch.setdefault(sym, {})
+                for key, column in _INCOME_COLUMNS:
+                    if key in answer and _safe_float(row.get(column)) is None:
+                        row[column] = answer[key]
+                        income_filled[column] += 1
+        print(f"  ✓ Vietcap income statement answered for {len(needs_income)}"
+              " asked: "
+              + ", ".join(f"{n} {income_filled[n]}"
+                          for _, n in _INCOME_COLUMNS))
 
     # The cash-flow statement, asked separately and gated separately.
     #

@@ -325,6 +325,14 @@ ROUTES = {
     # this census exists to replace. So ask the statement itself.
     "vietcap cash-flow": lambda s, c: _vietcap_statement_rows(
         s, "CASH_FLOW", c),
+    # The balance sheet, measured but not yet acted on. cash blocks 121
+    # symbols and debt 120, and both live here. No code reads this route
+    # yet and none will until this census prints the vendor's own name
+    # beside each bsa code - the income statement is being wired in the
+    # same change precisely because its names were already read, and
+    # guessing which bsa code is debt would undo the reason that worked.
+    "vietcap balance-sheet": lambda s, c: _vietcap_statement_rows(
+        s, "BALANCE_SHEET", c),
     "kbs finance-info KQKD": lambda s, c: _kbs_rows(s),
 }
 
