@@ -1121,6 +1121,73 @@ def fetch_vietcap_income_statement(symbol: str) -> Dict[str, float]:
     return out
 
 
+#: The balance-sheet rows, named by the vendor rather than inferred.
+#:
+#: The census printed Vietcap's own label beside all 122 codes, and only one
+#: of them is wired here:
+#:
+#:   bsa2  "Tien va tuong duong tien" / "Cash and cash equivalents"
+#:
+#: which it reports for 71 of the 73 companies the gate is still refusing.
+#: cash is a CORE driver and the second-largest blocking driver at 150
+#: symbols, so this is a tier-table change rather than a cosmetic one.
+#:
+#: DEBT IS DELIBERATELY NOT WIRED, AND THE REASON CHANGED ON READING.
+#:
+#: This route was left unread for two runs on the grounds that debt could not
+#: be defined without the vendor's names for the borrowing lines. The names
+#: arrived - bsa56 "Vay ngan han" / short-term borrowings, bsa71 "Vay dai han"
+#: / long-term borrowings - and they do not help: bsa56 carries a figure for
+#: 25 of 73 companies and bsa71 for 17. Summing them would produce a real debt
+#: for about a third of this group and a zero for the rest, and a zero here is
+#: not "no borrowings", it is "not stated". That distinction is invisible
+#: downstream: zero is a valid number, it passes the provenance gate at the
+#: vendor's own tier, and it lowers enterprise value for every company it
+#: touches. Missing data is refused; a fabricated zero is answered, wrongly.
+#:
+#: The near-complete line beside them is bsa54 "NO PHAI TRA" / Liabilities, at
+#: 72 of 73 - but that is TOTAL liabilities, trade payables, taxes and wages
+#: included, and the models spend debt on enterprise value as
+#: market_cap + debt - cash. Substituting it would overstate EV for every
+#: company that buys on credit, which is most of them. It belongs to the
+#: resolver's separate total_liabilities field, not to this one.
+#:
+#: So the obstacle was never the missing name. It was missing data wearing a
+#: missing name, and reading the names is what told the two apart.
+_VIETCAP_BS_CASH_ALIASES = ("bsa2",)
+
+
+def fetch_vietcap_balance_sheet(symbol: str) -> Dict[str, float]:
+    """Cash and cash equivalents in dong; {} when unavailable.
+
+    Same plausibility bound and same latest-period rule as the other two
+    statements, for the same reasons: a figure below a million dong is in
+    some other unit, and this vendor does not serve newest-first.
+
+    Only cash is returned. See the note above for why debt is not.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATEMENT_URL.format(sym=symbol),
+        params={"section": "BALANCE_SHEET"}, timeout=10,
+    )
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+
+    out: Dict[str, float] = {}
+    cash = _plausible_operating_line(
+        _first_alias(record, _VIETCAP_BS_CASH_ALIASES))
+    if cash is not None:
+        out["cash"] = cash
+    return out
+
+
 #: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
 #: const.py names this host as its _GRAPHQL_URL, and a third-party crawler
 #: (github.com/cnhson/DataCrawl) issues exactly this query against it.
@@ -3701,6 +3768,63 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
         print(f"  ✓ Vietcap cash flow answered for {len(needs_cash_flow)}"
               f" asked: {cfo_filled} an operating cash flow,"
               f" {capex_filled} a capex")
+
+    # Cash, from the balance sheet the census finally named.
+    #
+    # cash is a CORE driver and blocks 150 symbols, second only to
+    # dividend_per_share, and no route asked for it: the balance sheet was
+    # added to the census two runs ago and deliberately left unread until the
+    # vendor's own labels arrived. bsa2 "Tien va tuong duong tien" / "Cash and
+    # cash equivalents" carries a figure for 71 of the 73 companies still
+    # being refused.
+    #
+    # It is written to cash_n_cash_equivalents_fq rather than to
+    # cash_n_short_term_invest_fq, which the ladder tries first. The two are
+    # not the same quantity - the first column is cash, the second is cash
+    # PLUS short-term investments, which this vendor states separately as
+    # bsa5 - and writing a narrower figure into the wider column would report
+    # a number that is quietly missing a leg. The narrow column is read as
+    # the fallback it is.
+    #
+    # The gate asks for both columns, not one. A symbol holding the wide
+    # column already has a cash figure and does not need this.
+    needs_cash = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "cash_n_short_term_invest_fq")
+        ) is None
+        and _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "cash_n_cash_equivalents_fq")
+        ) is None
+    ]
+    if needs_cash and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_cash)} symbols have no cash figure; probing"
+              " Vietcap balance-sheet...")
+
+        def _cash_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_balance_sheet(sym)
+            except Exception:
+                logger.debug("Vietcap balance sheet failed for %s", sym,
+                             exc_info=True)
+                return sym, {}
+
+        cash_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_cash_worker, s) for s in needs_cash]
+            for fut in as_completed(futures):
+                sym, answer = fut.result()
+                if not answer:
+                    continue
+                row = tv_batch.setdefault(sym, {})
+                if "cash" in answer and _safe_float(
+                        row.get("cash_n_cash_equivalents_fq")) is None:
+                    row["cash_n_cash_equivalents_fq"] = answer["cash"]
+                    cash_filled += 1
+        print(f"  ✓ Vietcap balance sheet answered for {len(needs_cash)}"
+              f" asked: {cash_filled} a cash figure")
 
     unified_stocks = {}
     missing_symbols = []
