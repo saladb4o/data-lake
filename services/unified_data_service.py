@@ -881,6 +881,68 @@ def fetch_vietcap_operating_lines(symbol: str) -> Dict[str, float]:
     return out
 
 
+#: Vietcap's financial-statement route, the same one the census reads.
+#: statistics-financial states ratios and a handful of summary lines; this
+#: one states the statement itself, row by row, under the vendor's own VAS
+#: codes.
+_VIETCAP_STATEMENT_URL = (
+    "https://iq.vietcap.com.vn/api/iq-insight-service"
+    "/v1/company/{sym}/financial-statement"
+)
+
+#: The two cash-flow rows, named by the vendor rather than inferred.
+#:
+#: The census printed Vietcap's own label beside every code, and these two
+#: read:
+#:
+#:   cfa18  "Luu chuyen tien te rong tu cac hoat dong san xuat kinh doanh"
+#:          / "Net cash inflows/(outflows) from operating activities"
+#:   cfa19  "Tien chi de mua sam, xay dung TSCD va cac tai san dai han khac"
+#:          / "Purchase of fixed assets and other long term assets"
+#:
+#: which is operating cash flow and capital expenditure, stated. An earlier
+#: pass had noticed that cfa18 is non-zero for all 198 companies, positive,
+#: at +7.6% of revenue, and cfa19 negative for 165 at -3.2% - the shape of
+#: CFO and capex. That shape was deliberately not acted on, because shape is
+#: what the census exists to stop anyone acting on. These names are.
+_VIETCAP_CFO_ALIASES = ("cfa18",)
+_VIETCAP_CAPEX_ALIASES = ("cfa19",)
+
+
+def fetch_vietcap_cash_flow(symbol: str) -> Dict[str, float]:
+    """Operating cash flow and capex in dong; {} when unavailable.
+
+    Same plausibility bound and same latest-period rule as the operating
+    lines, for the same reasons: a figure below a million dong is in some
+    other unit, and the vendor does not serve newest-first.
+
+    Capex keeps whatever sign the vendor gave it. Every consumer downstream
+    takes abs() of it, so the sign carries no meaning here and inverting it
+    would only invent one.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATEMENT_URL.format(sym=symbol),
+        params={"section": "CASH_FLOW"}, timeout=10,
+    )
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+    out: Dict[str, float] = {}
+    cfo = _plausible_operating_line(_first_alias(record, _VIETCAP_CFO_ALIASES))
+    if cfo is not None:
+        out["cfo"] = cfo
+    capex = _plausible_operating_line(_first_alias(record, _VIETCAP_CAPEX_ALIASES))
+    if capex is not None:
+        out["capex"] = capex
+    return out
+
+
 #: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
 #: const.py names this host as its _GRAPHQL_URL, and a third-party crawler
 #: (github.com/cnhson/DataCrawl) issues exactly this query against it.
@@ -3264,6 +3326,63 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                   f" {line_filled} reported an EBIT outright,"
                   f" {ebitda_filled} an EBITDA,"
                   f" {margin_filled} only a margin")
+
+    # The cash-flow statement, asked separately and gated separately.
+    #
+    # Reading Vietcap's reported operating line moved ebit and ebitda off
+    # the top of the blocking table and left fcf (304 symbols) and cfo (166)
+    # as the two largest, with no route serving either. VNDIRECT's cash flow
+    # was already wired and answers for almost none of them - widening the
+    # required-lines set to include the pair moved fcf by two symbols, which
+    # is what "the path works, the vendor simply has nothing" looks like.
+    #
+    # This is a different gate from the EBIT one on purpose. A company can
+    # have a perfectly good operating line and no cash flow at all, so
+    # reusing needs_margin would ask the wrong companies and skip the right
+    # ones.
+    needs_cash_flow = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "cash_f_operating_activities_ttm")
+        ) is None
+    ]
+    if needs_cash_flow and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_cash_flow)} symbols have no operating cash"
+              " flow; probing Vietcap financial-statement...")
+
+        def _cash_flow_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_cash_flow(sym)
+            except Exception:
+                logger.debug("Vietcap cash flow failed for %s", sym,
+                             exc_info=True)
+                return sym, {}
+
+        cfo_filled = 0
+        capex_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_cash_flow_worker, s)
+                       for s in needs_cash_flow]
+            for fut in as_completed(futures):
+                sym, answer = fut.result()
+                if not answer:
+                    continue
+                # TradingView's column names again, so the ladder reads these
+                # through the rungs already in place rather than a second
+                # code path. Neither is overwritten if already present: this
+                # gate only fires where CFO is absent, but capex may not be.
+                row = tv_batch.setdefault(sym, {})
+                if "cfo" in answer:
+                    row["cash_f_operating_activities_ttm"] = answer["cfo"]
+                    cfo_filled += 1
+                if "capex" in answer and _safe_float(
+                        row.get("capital_expenditures_ttm")) is None:
+                    row["capital_expenditures_ttm"] = answer["capex"]
+                    capex_filled += 1
+        print(f"  ✓ Vietcap cash flow answered for {len(needs_cash_flow)}"
+              f" asked: {cfo_filled} an operating cash flow,"
+              f" {capex_filled} a capex")
 
     unified_stocks = {}
     missing_symbols = []

@@ -243,3 +243,33 @@ def test_a_row_with_no_cash_flow_is_sent_to_the_overlay():
     fully_complete["cash_f_operating_activities_ttm"] = 5e9
     fully_complete["capital_expenditures_ttm"] = -1e9
     assert not uds._needs_vndirect_backfill(fully_complete)
+
+
+class TestVietcapCashFlowReachesTheLadder:
+    """The thirteenth instance of the same defect shape, pre-empted.
+
+    fetch_vietcap_cash_flow writes cfa18 and cfa19 into the batch under
+    TradingView's own column names. These tests assert the ladder actually
+    reads them there - that the wiring is a wire and not a write to a key
+    nothing looks up.
+    """
+
+    def test_an_operating_cash_flow_is_read_and_trusted(self):
+        tri = _tri(cash_f_operating_activities_ttm=76e9)
+        assert tri["cfo"] == pytest.approx(76e9, rel=1e-6)
+        assert tri["field_provenance"]["cfo"] >= 3
+
+    def test_a_capex_is_read_whatever_its_sign(self):
+        """Vietcap states capex as money spent, so it arrives negative. Every
+        consumer takes abs(), so both signs must land on the same number."""
+        spent = _tri(cash_f_operating_activities_ttm=76e9,
+                     capital_expenditures_ttm=-24e9)
+        gross = _tri(cash_f_operating_activities_ttm=76e9,
+                     capital_expenditures_ttm=24e9)
+        assert spent["fcf_ttm"] == pytest.approx(gross["fcf_ttm"])
+
+    def test_the_pair_produces_a_free_cash_flow(self):
+        tri = _tri(cash_f_operating_activities_ttm=76e9,
+                   capital_expenditures_ttm=-24e9)
+        assert tri["fcf_ttm"] is not None
+        assert tri["field_provenance"]["fcf_ttm"] >= 2
