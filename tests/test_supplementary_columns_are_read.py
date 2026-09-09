@@ -133,3 +133,33 @@ def test_every_supplementary_column_is_actually_read():
             f"{col} is requested from the vendor and never read out of the "
             "payload: the request is paid for and the answer discarded"
         )
+
+
+def test_the_vietcap_margin_probe_can_be_reached_without_tradingview_revenue():
+    """The gate that made a working route unreachable.
+
+    A company with no EBIT rung is, overwhelmingly, a company TradingView
+    carries nothing for - its revenue arrives from VNDIRECT. Selecting the
+    probe's symbols on TradingView's revenue alone therefore excluded
+    exactly the companies the probe exists for, and the census measured the
+    cost: Vietcap reports a non-zero EBIT margin for 615 of the 720
+    companies with no operating line and none was asked.
+
+    This pins the selection expression itself, since the probe's own body
+    needs a network. The rung is sound either way: it multiplies the margin
+    by whatever revenue the triangle resolves, and that resolution already
+    reads the VNDIRECT overlay.
+    """
+    import inspect
+
+    src = inspect.getsource(uds)
+    block = src[src.index("needs_margin = ["):]
+    block = block[:block.index("]")]
+
+    assert "_has_no_ebit_rung" in block
+    assert "vnd_by_symbol" in block and "revenue_ttm" in block, (
+        "the probe still selects on TradingView revenue alone"
+    )
+    assert "total_revenue_ttm" in block, (
+        "TradingView revenue must remain an accepted witness"
+    )

@@ -3075,9 +3075,28 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     needs_margin = [
         sym.upper().strip() for sym in master_symbols_map
         if _has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
-        and _safe_float(
-            (tv_batch.get(sym.upper().strip()) or {}).get("total_revenue_ttm")
-        ) is not None
+        # Revenue from either source, because the rung multiplies the
+        # margin by whatever revenue the triangle resolves - and that
+        # resolution already reads the VNDIRECT overlay.
+        #
+        # Gating on TradingView's revenue alone made this probe unreachable
+        # for exactly the companies it was built for. A company with no
+        # EBIT rung is, overwhelmingly, a company TradingView carries
+        # nothing for; its revenue arrives from VNDIRECT, which by this
+        # point is sitting in vnd_by_symbol. The census measured what that
+        # cost: Vietcap reports a non-zero EBIT margin for 615 of the 720
+        # companies with no operating line, at a median of 4%, and not one
+        # of them was ever asked.
+        and (
+            _safe_float(
+                (tv_batch.get(sym.upper().strip()) or {}).get(
+                    "total_revenue_ttm")
+            ) is not None
+            or _safe_float(
+                (vnd_by_symbol.get(sym.upper().strip()) or {}).get(
+                    "revenue_ttm")
+            ) is not None
+        )
     ]
     if needs_margin:
         print(f"  🔎 {len(needs_margin)} symbols have no EBIT rung but do have"
