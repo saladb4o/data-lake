@@ -2622,6 +2622,12 @@ def recover_item_code_relations(
     to justify itself alone. It recovers that same relation with
     coefficients of 1.000 and a 100% hit rate.
 
+    A fourth correction came from the first run against real payloads
+    rather than a synthetic statement: a candidate column that is
+    negligible at the target's scale is dropped before selection. See the
+    comment at that step - it is the difference between a search and a
+    curve fit.
+
     Returns (target, [(code, coefficient)], hit rate as a percentage, n).
     Coefficients are returned as found: one that is not close to a whole
     number is itself the finding, because no line of a statement is 0.83 of
@@ -2667,6 +2673,34 @@ def recover_item_code_relations(
             pool.pop()
         if matrix is None:
             continue
+
+        # Drop candidates that are negligible at the target's scale before
+        # any of them can be selected.
+        #
+        # This is not tidiness, it is a defect the first real run exposed.
+        # 23001 is a fraction of a millionth of the statement's scale for
+        # every company that reports it, and least squares handed it
+        # coefficients of 724675, 893536 and -644184 across five different
+        # targets. A column that small cannot explain a statement line; it
+        # can only act as a free parameter with no cost, absorbing whatever
+        # the real terms left over. Every relation it appeared in was noise
+        # wearing the shape of an answer.
+        #
+        # The test is scale, not centre. A column whose *median* is zero is
+        # ordinary - most companies report no other income - and 23900 is
+        # median-zero while participating in two exact relations. So this
+        # asks how large the column ever gets: if its 95th percentile is
+        # below a ten-thousandth of the target's typical magnitude, it has
+        # no accounting content at this scale and is removed from the pool
+        # rather than left available to be fitted.
+        scale = float(np.median(np.abs(y)))
+        if scale > 0:
+            big_enough = (
+                np.percentile(np.abs(matrix), 95, axis=0) >= 1e-4 * scale
+            )
+            if 3 <= int(big_enough.sum()) < len(pool):
+                pool = [c for c, k in zip(pool, big_enough) if k]
+                matrix = matrix[:, big_enough]
 
         selected: List[int] = []
         resid = y.copy()
