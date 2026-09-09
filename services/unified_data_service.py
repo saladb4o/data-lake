@@ -747,6 +747,10 @@ _VIETCAP_STATS_URL = (
 #: A margin is a ratio. Multiplied by revenue we already hold, in units we
 #: already know, it yields EBIT in our units with no unit assumption at all,
 #: through the rung the ladder already has and already tests.
+#:
+#: "No unit assumption" was too strong: a ratio still has a scale, and this
+#: vendor states it as a fraction while the consumer expects a percent. The
+#: scaling is done in the fetch, not here - see fetch_vietcap_ebit_margin.
 _VIETCAP_EBIT_MARGIN_ALIASES = (
     "ebitMargin", "ebit_margin",
 )
@@ -814,12 +818,38 @@ def fetch_vietcap_ebit_margin(symbol: str) -> Optional[float]:
         record = _vietcap_latest_period(resp.json())
     except ValueError:
         return None
-    margin = _safe_float(_first_alias(record, _VIETCAP_EBIT_MARGIN_ALIASES))
+    # Scaled inside the conversion, not after it. _safe_float rounds to two
+    # decimals, which is harmless for a figure in dong and destroys a
+    # fraction: 0.084 becomes 0.08 before anything can multiply it, and a
+    # 0.4% margin becomes zero. Its `scale` parameter exists for exactly
+    # this and multiplies before rounding, so 0.084 -> 8.4.
+    margin = _safe_float(
+        _first_alias(record, _VIETCAP_EBIT_MARGIN_ALIASES), scale=100.0)
     if margin is None:
         return None
-    # A margin outside this band is not a percentage - it is either a
-    # fraction the vendor labelled a percent, or a different quantity
-    # altogether. Either way it is discarded rather than reinterpreted.
+    # This route states the margin as a FRACTION, and said so all along.
+    #
+    # The band check below was written to catch a fraction wearing the name
+    # of a percent, and could not: 0.04 sits comfortably inside -100..100,
+    # so the guard passed every fraction it existed to stop. The consumer
+    # then computes revenue * (margin / 100), which for a real 4% margin
+    # yields an EBIT a hundred times too small - tier 2, through the gate,
+    # and indistinguishable downstream from a small company. Missing data
+    # is refused; this was answered, wrongly.
+    #
+    # Two independent witnesses fix the unit, neither of them a guess:
+    #
+    #   - The census measured ebit and revenue separately on this same
+    #     record and ebit/revenue = 0.0405, while the record's own
+    #     ebitMargin reads 0.04. A ratio of two dong figures is a fraction
+    #     by construction, so the field beside it carrying the same number
+    #     is a fraction too.
+    #   - fetch_vietcap_ebit_margin_graphql, feeding the SAME column from
+    #     the SAME vendor, computes ebit/revenue*100 and returns a percent.
+    #     One consumer was being fed two units under one name.
+    #
+    # So it is scaled at the boundary, and the band is applied after
+    # scaling where it can finally reject something.
     if not (-100.0 <= margin <= 100.0):
         return None
     return margin
@@ -851,6 +881,51 @@ def _plausible_operating_line(value: Any) -> Optional[float]:
     return num if _OPERATING_LINE_FLOOR <= abs(num) <= _OPERATING_LINE_CEILING else None
 
 
+#: Return on invested capital, as this route states it.
+#:
+#: roic is the single largest blocking driver at 185 symbols and the most
+#: common reason in the refused list - APT, BT6, DFF and DAG are refused on
+#: roic alone, BOT, DSG, DTC and FTM on roic and fcf. Every one of them is
+#: tier-3 on its core data. They are not short of a vendor; they were short
+#: of a question nobody asked.
+#:
+#: Because the ladder read only TradingView's return_on_invested_capital_fq,
+#: and this route reports roic for 629 of 720 measured companies, named, at
+#: a median of 0.06 - measured, named, and connected to nothing. That is the
+#: fourteenth instance of this shape in the audit.
+#:
+#: Stated as a FRACTION, like every ratio on this record: the census read
+#: roe 0.08, roa 0.05, ebitMargin 0.04 alongside it, and ebitMargin was
+#: proved a fraction against ebit/revenue on the same record. The consumer
+#: wants a percentage in -100..100, so it is scaled through _safe_float's
+#: own `scale`, which multiplies before rounding - rounding first would turn
+#: 0.084 into 0.08 and a 0.4% return into nothing at all.
+_VIETCAP_ROIC_ALIASES = ("roic",)
+
+
+def fetch_vietcap_roic(symbol: str) -> Optional[float]:
+    """ROIC as a percentage for one symbol; None when unavailable.
+
+    Never raises; every failure shape yields None.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        return None
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return None
+    roic = _safe_float(_first_alias(record, _VIETCAP_ROIC_ALIASES), scale=100.0)
+    if roic is None or roic == 0.0:
+        return None
+    # The same band the consumer applies. A return outside it is not a
+    # return on capital that this vendor measured; it is discarded rather
+    # than reinterpreted.
+    return roic if -100.0 <= roic <= 100.0 else None
+
+
 def fetch_vietcap_operating_lines(symbol: str) -> Dict[str, float]:
     """EBIT and EBITDA in dong for one symbol; {} when unavailable.
 
@@ -878,6 +953,12 @@ def fetch_vietcap_operating_lines(symbol: str) -> Dict[str, float]:
     ebitda = _plausible_operating_line(_first_alias(record, _VIETCAP_EBITDA_ALIASES))
     if ebitda is not None:
         out["ebitda"] = ebitda
+    # roic comes off the record already in hand. The same request that
+    # answers for the operating line answers for the return on capital, so
+    # taking it here costs nothing and spares these symbols a second call.
+    roic = _safe_float(_first_alias(record, _VIETCAP_ROIC_ALIASES), scale=100.0)
+    if roic is not None and roic != 0.0 and -100.0 <= roic <= 100.0:
+        out["roic"] = roic
     return out
 
 
@@ -3327,7 +3408,18 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # -----------------------------------------------------------------
     needs_margin = [
         sym.upper().strip() for sym in master_symbols_map
-        if _has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
+        # An EBIT rung is not the only thing this route answers for.
+        #
+        # Gating on the EBIT rung alone made the probe unreachable for every
+        # company that has an operating line and no EBITDA - and Vietcap
+        # reports an EBITDA for 659 of the 720 measured. ebitda blocked 134
+        # symbols after the route serving it was already being called, for
+        # companies it was never asked about. Same shape as the fcf gate
+        # below: a question narrower than the thing it was built to fix.
+        if (_has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
+            or _safe_float(
+                (tv_batch.get(sym.upper().strip()) or {}).get("ebitda_ttm")
+            ) is None)
         # Revenue from either source, because the rung multiplies the
         # margin by whatever revenue the triangle resolves - and that
         # resolution already reads the VNDIRECT overlay.
@@ -3409,20 +3501,71 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 # reads them through the rungs already in place and already
                 # tested, rather than through a second code path.
                 row = tv_batch.setdefault(sym, {})
-                if "ebit" in answer:
+                # Now that this probe also serves companies that already
+                # have an operating line - asked for their EBITDA - it must
+                # not overwrite the line they came with.
+                if "ebit" in answer and _safe_float(
+                        row.get("ebit_ttm")) is None:
                     row["ebit_ttm"] = answer["ebit"]
                     line_filled += 1
-                if "ebitda" in answer:
+                if "ebitda" in answer and _safe_float(
+                        row.get("ebitda_ttm")) is None:
                     row["ebitda_ttm"] = answer["ebitda"]
                     ebitda_filled += 1
-                if "margin" in answer:
+                if "margin" in answer and _safe_float(
+                        row.get("operating_margin_ttm")) is None:
                     row["operating_margin_ttm"] = answer["margin"]
                     margin_filled += 1
+                if "roic" in answer and _safe_float(
+                        row.get("return_on_invested_capital_fq")) is None:
+                    row["return_on_invested_capital_fq"] = answer["roic"]
         if needs_margin:
             print(f"  ✓ Vietcap answered for {len(needs_margin)} asked:"
                   f" {line_filled} reported an EBIT outright,"
                   f" {ebitda_filled} an EBITDA,"
                   f" {margin_filled} only a margin")
+
+    # ROIC, on its own gate, because the existing one asks the wrong
+    # question for it.
+    #
+    # needs_margin selects symbols with no EBIT rung. A company with a
+    # perfectly good operating line and no return on capital is invisible to
+    # it, and that is most of the 185 symbols roic blocks - they are tier-3
+    # companies refused, or stripped of models, over one derived ratio. Four
+    # of the first twenty refusals are blocked by roic alone.
+    #
+    # Symbols already asked above arrive here with the column filled, so
+    # this gate naturally covers only the remainder.
+    needs_roic = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "return_on_invested_capital_fq")
+        ) is None
+    ]
+    if needs_roic and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_roic)} symbols have no ROIC; probing Vietcap"
+              " statistics-financial...")
+
+        def _roic_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_roic(sym)
+            except Exception:
+                logger.debug("Vietcap roic failed for %s", sym, exc_info=True)
+                return sym, None
+
+        roic_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_roic_worker, s) for s in needs_roic]
+            for fut in as_completed(futures):
+                sym, roic = fut.result()
+                if roic is None:
+                    continue
+                tv_batch.setdefault(sym, {})[
+                    "return_on_invested_capital_fq"] = roic
+                roic_filled += 1
+        print(f"  ✓ Vietcap answered a ROIC for {roic_filled} of"
+              f" {len(needs_roic)} asked")
 
     # The income statement, asked first because it feeds the core.
     #
@@ -3500,11 +3643,25 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # have a perfectly good operating line and no cash flow at all, so
     # reusing needs_margin would ask the wrong companies and skip the right
     # ones.
+    # Either half missing, not just the first.
+    #
+    # As first written this gate asked "has no operating cash flow", and a
+    # company holding a CFO but no capex was never asked - while fcf, which
+    # is cfo minus capex, needs both. The gate asked a question narrower
+    # than the thing it was built to fix, so fcf stayed the second-largest
+    # blocker at 149 symbols after the route that answers it was wired.
+    #
+    # Same defect shape as the one this audit keeps finding, and this one
+    # was introduced by the audit rather than found by it.
     needs_cash_flow = [
         sym.upper().strip() for sym in master_symbols_map
         if _safe_float(
             (tv_batch.get(sym.upper().strip()) or {}).get(
                 "cash_f_operating_activities_ttm")
+        ) is None
+        or _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "capital_expenditures_ttm")
         ) is None
     ]
     if needs_cash_flow and vietcap_stats_probe():
@@ -3533,7 +3690,8 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                 # code path. Neither is overwritten if already present: this
                 # gate only fires where CFO is absent, but capex may not be.
                 row = tv_batch.setdefault(sym, {})
-                if "cfo" in answer:
+                if "cfo" in answer and _safe_float(
+                        row.get("cash_f_operating_activities_ttm")) is None:
                     row["cash_f_operating_activities_ttm"] = answer["cfo"]
                     cfo_filled += 1
                 if "capex" in answer and _safe_float(

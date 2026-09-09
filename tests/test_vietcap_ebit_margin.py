@@ -29,26 +29,57 @@ class TestTheUnitTrap:
         assert "ebitda" not in aliases
         assert all("argin" in a or "_margin" in a for a in aliases)
 
-    @pytest.mark.parametrize("margin", [-500.0, 101.0, -100.5, 1e9])
-    def test_a_value_outside_the_percentage_band_is_discarded(self, margin, monkeypatch):
-        """Not reinterpreted, not rescaled - discarded. A number that is not
-        a percentage is not evidence about one."""
+    # These three were rewritten, not adjusted. As first written they
+    # asserted that this route sends a percentage and that the value passes
+    # through untouched - and they passed, which is why the hundred-fold
+    # error survived a green suite. They encoded the assumption instead of
+    # the measurement, because they were written before the census measured
+    # the unit at all.
+    #
+    # What the census established: ebit/revenue on this same record is
+    # 0.0405 while the record's own ebitMargin reads 0.04. A ratio of two
+    # dong figures is a fraction, so the field beside it is a fraction. The
+    # consumer divides by 100, so the fetch multiplies by 100.
+
+    @pytest.mark.parametrize("margin", [-5.0, 1.01, -1.005, 1e9])
+    def test_a_fraction_outside_the_band_is_discarded(self, margin, monkeypatch):
+        """Not reinterpreted, not rescaled twice - discarded. A company does
+        not earn more operating profit than revenue."""
         monkeypatch.setattr(uds, "_request_with_retry",
                             lambda *a, **k: _Resp({"data": {"ebitMargin": margin}}))
         assert uds.fetch_vietcap_ebit_margin("TST") is None
 
-    @pytest.mark.parametrize("margin", [-100.0, -12.5, 0.0, 8.4, 100.0])
-    def test_a_plausible_percentage_is_kept(self, margin, monkeypatch):
+    @pytest.mark.parametrize("fraction,percent", [
+        (-1.0, -100.0), (-0.125, -12.5), (0.0, 0.0), (0.084, 8.4), (1.0, 100.0),
+    ])
+    def test_a_fraction_is_returned_as_a_percentage(self, fraction, percent,
+                                                    monkeypatch):
         monkeypatch.setattr(uds, "_request_with_retry",
-                            lambda *a, **k: _Resp({"data": {"ebitMargin": margin}}))
-        assert uds.fetch_vietcap_ebit_margin("TST") == margin
+                            lambda *a, **k: _Resp({"data": {"ebitMargin": fraction}}))
+        assert uds.fetch_vietcap_ebit_margin("TST") == pytest.approx(percent)
 
     def test_a_negative_margin_survives(self, monkeypatch):
         """A loss-making company has a negative operating margin. Clamping it
         at zero would publish a profit nobody earned."""
         monkeypatch.setattr(uds, "_request_with_retry",
-                            lambda *a, **k: _Resp({"data": {"ebitMargin": -31.0}}))
-        assert uds.fetch_vietcap_ebit_margin("TST") == -31.0
+                            lambda *a, **k: _Resp({"data": {"ebitMargin": -0.31}}))
+        assert uds.fetch_vietcap_ebit_margin("TST") == pytest.approx(-31.0)
+
+    def test_both_routes_agree_on_the_unit(self, monkeypatch):
+        """The bug in one sentence: two fetches fed one column two units.
+
+        statistics-financial states 0.04; the GraphQL route computes
+        ebit/revenue*100 and states 4.0. Whichever answers, the consumer
+        must receive the same number for the same company."""
+        monkeypatch.setattr(uds, "_request_with_retry",
+                            lambda *a, **k: _Resp({"data": {"ebitMargin": 0.04}}))
+        from_stats = uds.fetch_vietcap_ebit_margin("TST")
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            {"data": {"CompanyFinancialRatio": {"ratio": [
+                {"yearReport": 2025, "lengthReport": 2,
+                 "ebit": 4.0e9, "revenue": 1.0e11}]}}}))
+        from_graphql = uds.fetch_vietcap_ebit_margin_graphql("TST")
+        assert from_stats == pytest.approx(from_graphql)
 
 
 class _Resp:
@@ -218,3 +249,52 @@ class TestTheGraphqlRoute:
     def test_the_query_asks_for_both_halves_of_the_ratio(self):
         for field in ("ebit", "revenue", "roic", "yearReport", "lengthReport"):
             assert field in uds._VIETCAP_RATIO_QUERY
+
+
+class TestRoic:
+    """roic: the largest blocking driver, and never once asked for.
+
+    The ladder read only TradingView's return_on_invested_capital_fq while
+    this route reports roic for 629 of 720 measured companies, named, at a
+    median of 0.06. Four of the first twenty refusals are blocked by roic
+    alone - tier-3 companies refused over one derived ratio.
+    """
+
+    def test_a_fraction_is_returned_as_a_percentage(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry",
+                            lambda *a, **k: _Resp({"data": {"roic": 0.084}}))
+        assert uds.fetch_vietcap_roic("TST") == pytest.approx(8.4)
+
+    def test_precision_survives_the_scaling(self, monkeypatch):
+        """_safe_float rounds to two decimals. Scaling after the conversion
+        would turn 0.084 into 0.08 and a 0.4% return into nothing; its own
+        `scale` multiplies first."""
+        monkeypatch.setattr(uds, "_request_with_retry",
+                            lambda *a, **k: _Resp({"data": {"roic": 0.004}}))
+        assert uds.fetch_vietcap_roic("TST") == pytest.approx(0.4)
+
+    def test_a_negative_return_survives(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry",
+                            lambda *a, **k: _Resp({"data": {"roic": -0.15}}))
+        assert uds.fetch_vietcap_roic("TST") == pytest.approx(-15.0)
+
+    @pytest.mark.parametrize("value", [0.0, 5.0, -3.0, None, "n/a"])
+    def test_an_unusable_roic_is_dropped(self, value, monkeypatch):
+        """Zero is this vendor's padding for "not stated", and a fraction
+        above 1 is not a return on capital it measured."""
+        monkeypatch.setattr(uds, "_request_with_retry",
+                            lambda *a, **k: _Resp({"data": {"roic": value}}))
+        assert uds.fetch_vietcap_roic("TST") is None
+
+    def test_transport_failure(self, monkeypatch):
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: None)
+        assert uds.fetch_vietcap_roic("TST") is None
+
+    def test_it_rides_along_on_the_operating_line_request(self, monkeypatch):
+        """One request already fetches this record; taking roic from it
+        spares those symbols a second call."""
+        monkeypatch.setattr(uds, "_request_with_retry", lambda *a, **k: _Resp(
+            {"data": {"ebit": 8.12e9, "ebitda": 1.55e10, "roic": 0.06}}))
+        out = uds.fetch_vietcap_operating_lines("TST")
+        assert out["roic"] == pytest.approx(6.0)
+        assert out["ebit"] == pytest.approx(8.12e9)
