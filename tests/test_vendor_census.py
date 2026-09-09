@@ -219,3 +219,49 @@ def test_a_field_of_zeros_is_distinguishable_from_a_populated_one():
         assert f"{ratios[len(ratios) // 2]:+.6f}" == "+0.000000"
 
     assert f"{sorted(populated)[len(populated) // 2]:+.6g}" != "+0"
+
+
+def test_the_catalogue_is_collected_before_the_survey_and_printed_after():
+    """Ordering the output by how much it is worth reading.
+
+    GitHub serves only the tail of a job log. The field catalogue runs to
+    about fourteen hundred lines, so printing it first put the survey, the
+    relations and the coverage headline in a region of the log the API will
+    not return - three separate reads were spent this afternoon discovering
+    that the answer was in a part of the log that could not be fetched. The
+    catalogue is still collected first, because the survey needs its names
+    to label the fields it prints.
+    """
+    import inspect
+
+    src = inspect.getsource(census.main)
+    assert src.index("collect_field_catalogue") < src.index("survey(")
+    assert src.index("survey(") < src.index("print_field_catalogue")
+
+
+def test_a_field_code_is_printed_with_the_vendor_s_name_for_it():
+    """cfa18 means nothing; the vendor has always been willing to say so.
+
+    Guessing which line a number is - by its magnitude, its sign, its ratio
+    to revenue - has been the most expensive mistake in this audit. The
+    catalogue removes the need to guess, so the survey must carry it.
+    """
+    import inspect
+
+    src = inspect.getsource(census.survey)
+    assert "names" in inspect.signature(census.survey).parameters
+    assert "vendor_name" in src, "the JSON drops the name"
+    assert "what the vendor calls it" in src, "the header drops the name"
+
+
+def test_the_catalogue_survives_a_route_that_refuses():
+    """A census that raises on a 500 measures nothing at all."""
+    out = {}
+    names = census.collect_field_catalogue({}, out)
+    assert isinstance(names, dict)
+    assert isinstance(out["vietcap_catalogue"], dict)
+    # Egress is blocked here, so every reference symbol records why rather
+    # than vanishing.
+    for symbol, _form in census.REFERENCE_SYMBOLS:
+        assert symbol in out["vietcap_catalogue"]
+    census.print_field_catalogue(out)

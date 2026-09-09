@@ -127,25 +127,29 @@ def _shape(payload: Any, depth: int = 0) -> str:
 # --------------------------------------------------------------------------
 # 1. The field catalogue
 # --------------------------------------------------------------------------
-def dump_field_catalogue(cookies: Dict[str, str], out: Dict[str, Any]) -> None:
-    print("\n" + "=" * 74)
-    print(" 1. VIETCAP FIELD CATALOGUE  (/financial-statement/metrics)")
-    print("=" * 74)
-    print("This is the thing that has been missing all along: the vendor")
-    print("naming its own fields. One request per company form.\n")
+def collect_field_catalogue(cookies: Dict[str, str],
+                            out: Dict[str, Any]) -> Dict[str, str]:
+    """Fetch the vendor's own field names. Returns {field: "vi | en"}.
+
+    Collected before the survey because the survey prints field codes -
+    cfa18, bsa2, iss47 - that mean nothing on their own, and the vendor has
+    been willing to name every one of them all along. Printed after the
+    survey, by print_field_catalogue, because it runs to fourteen hundred
+    lines and would push everything worth acting on out of the tail of the
+    log, which is the only part of a job log that can be read back.
+    """
     catalogue: Dict[str, Any] = {}
+    names: Dict[str, str] = {}
     for symbol, form in REFERENCE_SYMBOLS:
         url = f"{VIETCAP_BASE}/{symbol}/financial-statement/metrics"
         status, body = _get_json(url, cookies=cookies)
         if status != 200 or not isinstance(body, dict):
-            print(f"  {symbol} ({form}): HTTP {status}, {_shape(body)}")
+            catalogue[symbol] = {"error": f"HTTP {status}, {_shape(body)}"}
             continue
         data = body.get("data")
         if not isinstance(data, dict):
-            print(f"  {symbol} ({form}): no data block, {_shape(body)}")
+            catalogue[symbol] = {"error": f"no data block, {_shape(body)}"}
             continue
-        total = sum(len(v) for v in data.values() if isinstance(v, list))
-        print(f"  {symbol} ({form}): {total} fields across {len(data)} reports")
         per_symbol: Dict[str, List[Dict[str, str]]] = {}
         for report, fields in data.items():
             if not isinstance(fields, list):
@@ -154,18 +158,51 @@ def dump_field_catalogue(cookies: Dict[str, str], out: Dict[str, Any]) -> None:
             for f in fields:
                 if not isinstance(f, dict):
                     continue
-                rows.append({
+                row = {
                     "field": str(f.get("field") or ""),
                     "vi": str(f.get("titleVi") or f.get("fullTitleVi") or ""),
                     "en": str(f.get("titleEn") or f.get("fullTitleEn") or ""),
-                })
+                }
+                rows.append(row)
+                # First name wins. The four reference symbols are four
+                # charts of accounts and a code can repeat across them; the
+                # non-financial company is asked first and is the form most
+                # of the exchange uses.
+                if row["field"] and row["field"] not in names:
+                    names[row["field"]] = f"{row['vi']} | {row['en']}".strip(" |")
             per_symbol[report] = rows
+        catalogue[symbol] = per_symbol
+    out["vietcap_catalogue"] = catalogue
+    return names
+
+
+def print_field_catalogue(out: Dict[str, Any]) -> None:
+    """The full catalogue, last, because of its size."""
+    catalogue = out.get("vietcap_catalogue") or {}
+    print("\n" + "=" * 74)
+    print(" 7. VIETCAP FIELD CATALOGUE  (/financial-statement/metrics)")
+    print("=" * 74)
+    print("The vendor naming its own fields. Printed last only because it is")
+    print("long; the survey above already carries these names inline.\n")
+    for symbol, form in REFERENCE_SYMBOLS:
+        per_symbol = catalogue.get(symbol)
+        if not isinstance(per_symbol, dict):
+            print(f"  {symbol} ({form}): not collected")
+            continue
+        if "error" in per_symbol:
+            print(f"  {symbol} ({form}): {per_symbol['error']}")
+            continue
+        total = sum(len(v) for v in per_symbol.values()
+                    if isinstance(v, list))
+        print(f"  {symbol} ({form}): {total} fields across "
+              f"{len(per_symbol)} reports")
+        for report, rows in per_symbol.items():
+            if not isinstance(rows, list):
+                continue
             print(f"     {report}: {len(rows)} fields")
             for row in rows:
                 print(f"       {row['field']:<28} {row['vi'][:38]:<38}"
                       f" {row['en'][:34]}")
-        catalogue[symbol] = per_symbol
-    out["vietcap_catalogue"] = catalogue
 
 
 # --------------------------------------------------------------------------
@@ -289,7 +326,8 @@ ROUTES = {
 
 def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
            cookies: Dict[str, str], workers: int,
-           out: Dict[str, Any]) -> None:
+           out: Dict[str, Any],
+           names: Optional[Dict[str, str]] = None) -> None:
     print("\n" + "=" * 74)
     print(f" 3-5. PER-ROUTE SURVEY OVER {len(symbols)} SYMBOLS WITH NO"
           " OPERATING LINE")
@@ -353,7 +391,7 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
         # as the rest, which is exactly that padding; and the ratio to
         # revenue stays, because it is what locates an absolute line.
         print(f"  {'field':<30}{'n':>6}{'nonzero':>9}"
-              f"{'median value':>18}{'x revenue':>14}")
+              f"{'median value':>18}{'x revenue':>14}  what the vendor calls it")
         summary = {}
         for key, count in field_counts.most_common(60):
             raw = sorted(raw_values.get(key) or [])
@@ -361,12 +399,20 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
             nonzero = sum(1 for v in raw if v != 0.0)
             series = sorted(ratios.get(key) or [])
             med = series[len(series) // 2] if series else None
+            # The vendor's own name for the field, inline. A table of
+            # cfa18 / bsa2 / iss47 forces the reader to guess which line is
+            # which from its magnitude, and guessing which line a number is
+            # has been the single most expensive mistake in this audit.
+            # Vietcap names every one of these codes and always has.
+            label = (names or {}).get(key, "")
             print(f"  {key:<30}{count:>6}{nonzero:>9}"
                   f"{(f'{med_raw:+.6g}' if med_raw is not None else '-'):>18}"
-                  f"{(f'{med:+.6f}' if med is not None else '-'):>14}")
+                  f"{(f'{med:+.6f}' if med is not None else '-'):>14}"
+                  f"  {label[:60]}")
             summary[key] = {
                 "n": count, "nonzero": nonzero,
                 "median_value": med_raw, "median_ratio": med,
+                "vendor_name": label or None,
             }
         out.setdefault("routes", {})[route_name] = {
             "answered": answered, "of": len(symbols), "fields": summary,
@@ -510,15 +556,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     cookies = _handshake_cookies()
     print(f"handshake returned {len(cookies)} cookies")
 
-    dump_field_catalogue(cookies, out)
+    # The catalogue is collected first because the survey needs its names,
+    # but printed last because it is 1400 lines long. GitHub serves only the
+    # tail of a job log, so anything upstream of a dump that size cannot be
+    # read at all - three separate reads were spent this afternoon
+    # discovering that the answer was in a part of the log the API will not
+    # return. Ordering the output by how much it is worth reading is not
+    # cosmetic; it decides whether a measurement can be acted on.
+    names = collect_field_catalogue(cookies, out)
     probe_routes(cookies, out)
 
     if not args.skip_survey:
         symbols, revenue = pick_symbols(args.limit or None)
         print(f"\n{len(symbols)} symbols have no trustworthy operating line;"
               f" revenue known for {len(revenue)} of them")
-        survey(symbols, revenue, cookies, args.workers, out)
+        survey(symbols, revenue, cookies, args.workers, out, names)
         vndirect_relations(symbols, args.workers, out)
+
+    print_field_catalogue(out)
 
     if args.json:
         os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
