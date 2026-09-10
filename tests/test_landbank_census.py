@@ -152,7 +152,8 @@ class TestTheReportSeparatesTheThreeFaults:
                      "item_code_names": {}}},
             {"landbank": ["NLG"], "bank_loans": []},
         )
-        assert report["landbank"]["per_code"][11420] == 1
+        assert report["landbank"]["per_code"][11420]["present"] == 1
+        assert report["landbank"]["per_code"][11420]["nonzero"] == 1
         assert report["landbank"]["missing"] == 0
 
     def test_a_route_that_answered_nothing_is_not_reported_as_an_absent_line(
@@ -189,7 +190,49 @@ class TestTheReportSeparatesTheThreeFaults:
                      "item_code_names": {}}},
             {"landbank": [], "bank_loans": ["VCB"]},
         )
-        assert report["bank_loans"]["per_code"][112000] == 1
+        assert report["bank_loans"]["per_code"][112000]["present"] == 1
+
+    def test_a_code_present_but_always_zero_is_not_called_right(self,
+                                                                monkeypatch):
+        # The first run's actual result: 12510 present for every developer,
+        # every value zero, no land bank anywhere. Counting presence alone
+        # reported "the codes are right" and closed a question that was
+        # still open. A line the vendor emits for everyone and populates
+        # for no one is not the line.
+        report = self._run(
+            monkeypatch,
+            {"KDH": {"balance_sheet_fq_by_code": {12510: 0.0,
+                                                  12700: 5.0e12,
+                                                  11400: 3.5e12},
+                     "item_code_names": {}}},
+            {"landbank": ["KDH"], "bank_loans": []},
+        )
+        assert report["landbank"]["per_code"][12510]["present"] == 1
+        assert report["landbank"]["per_code"][12510]["nonzero"] == 0
+        # and it is examined rather than declared solved
+        assert report["landbank"]["missing"] == 1
+        assert 11400 in report["landbank"]["codes_present"]
+
+    def test_the_codes_present_are_ranked_by_size_not_by_frequency(
+            self, monkeypatch, capsys):
+        # Every bank carried every code in the first run, so ranking by
+        # frequency printed an arbitrary forty in which the largest asset
+        # line - the loan book, the whole point - did not appear. The
+        # vendor names none of these codes; magnitude is the only handle.
+        # The large line goes in LAST, so a frequency ranking - every code
+        # here is carried by the one company - leaves it outside the cap
+        # and the test fails against the ordering that actually shipped.
+        sheet = {12700: 100.0}
+        sheet.update({20000 + i: 0.01 for i in range(60)})
+        sheet[19001] = 70.0
+        self._run(
+            monkeypatch,
+            {"VCB": {"balance_sheet_fq_by_code": sheet, "item_code_names": {}}},
+            {"landbank": [], "bank_loans": ["VCB"]},
+        )
+        printed = capsys.readouterr().out
+        lines = [ln for ln in printed.splitlines() if ln.strip().startswith("19001")]
+        assert lines, "the largest line was not printed"
 
     def test_a_fetched_line_that_never_reaches_the_record_is_visible(
             self, monkeypatch, capsys):

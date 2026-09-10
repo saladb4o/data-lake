@@ -570,6 +570,20 @@ _TOTAL_ASSET_CODES = (12700, 10000, 11000, 100000, 130000)
 _CODE_REPORT_CAP = 40
 
 
+def _cell(entry: Dict[str, Any], code: int) -> Optional[float]:
+    """One balance-sheet figure, whichever way the keys were serialised.
+
+    A payload read back from JSON has string keys and one straight off the
+    fetch has integer keys; a lookup that assumed either would report the
+    line absent for half the runs.
+    """
+    sheet = entry.get("balance_sheet_fq_by_code") or {}
+    value = sheet.get(code)
+    if value is None:
+        value = sheet.get(str(code))
+    return value
+
+
 def pick_line_symbols(limit: Optional[int]) -> Dict[str, List[str]]:
     """The companies whose valuation needs a land bank or a loan book.
 
@@ -675,23 +689,30 @@ def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
             report[group] = {"answered": 0, "of": len(symbols)}
             continue
 
+        # Present and non-zero, separately, because they answer different
+        # questions and the first run conflated them: 12510 came back
+        # present for 112 of 112 developers and the section reported "the
+        # codes are right", while every value was zero and not one land
+        # bank reached the record. A line item the vendor emits for every
+        # company and populates for none is not the line. The survey in
+        # section 5 already learned this - "the non-zero count separates a
+        # field genuinely populated from one padded with zeros" - and this
+        # section was written without it.
         per_code = {}
         for code in codes:
-            have = [s for s in answered
-                    if fetched[s]["balance_sheet_fq_by_code"].get(str(code))
-                    is not None
-                    or fetched[s]["balance_sheet_fq_by_code"].get(code)
-                    is not None]
-            per_code[code] = len(have)
-            print(f"  {len(have):>5} of {len(answered)} carry {code}")
+            have = [s for s in answered if _cell(fetched[s], code) is not None]
+            live = [s for s in have if _cell(fetched[s], code) != 0.0]
+            per_code[code] = {"present": len(have), "nonzero": len(live)}
+            print(f"  {len(have):>5} of {len(answered)} carry {code}, "
+                  f"{len(live)} of those non-zero")
 
+        # Missing means no code carries a usable figure. A zero is not a
+        # land bank, and the service will not publish one either - it
+        # requires `> 0` - so a company whose only answer is zero belongs
+        # in the group whose balance sheet gets examined.
         missing = [
             s for s in answered
-            if not any(
-                fetched[s]["balance_sheet_fq_by_code"].get(str(c)) is not None
-                or fetched[s]["balance_sheet_fq_by_code"].get(c) is not None
-                for c in codes
-            )
+            if not any(_cell(fetched[s], c) for c in codes)
         ]
         # The count the sync publishes, for the same companies. If the
         # vendor carries the code and the record still has no line, the
@@ -710,8 +731,8 @@ def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
             "per_code": per_code, "missing": len(missing),
         }
         if not missing:
-            print("  Every company that answered carries one of the codes,"
-                  " so the codes are right\n")
+            print("  Every company that answered carries one of the codes"
+                  " with a non-zero value, so the codes are right\n")
             continue
 
         # What those companies do have. Frequency says which lines exist
@@ -721,6 +742,7 @@ def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
         # fraction of a developer's. The vendor's own name settles it.
         freq: "collections.Counter[int]" = collections.Counter()
         shares: Dict[int, List[float]] = {}
+        raw_values: Dict[int, List[float]] = {}
         names: Dict[int, str] = {}
         for sym in missing:
             sheet = fetched[sym]["balance_sheet_fq_by_code"]
@@ -732,6 +754,7 @@ def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
                 if value is None:
                     continue
                 freq[code] += 1
+                raw_values.setdefault(code, []).append(value)
                 if total:
                     shares.setdefault(code, []).append(value / total)
                 if code not in names:
@@ -739,20 +762,36 @@ def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
                     if label:
                         names[code] = str(label)
 
-        shown = freq.most_common(_CODE_REPORT_CAP)
+        # Ranked by size on the balance sheet, not by how many companies
+        # carry the code. The first run ranked by frequency, every code was
+        # carried by all 41 banks, and the forty that got printed were an
+        # arbitrary slice in which the largest asset line - the one that
+        # would be the loan book - did not appear at all. The vendor names
+        # none of these codes, so magnitude is the only handle there is,
+        # and a table sorted by anything else throws it away.
+        def _median(code):
+            series = sorted(shares.get(code) or [])
+            return series[len(series) // 2] if series else None
+
+        ranked = sorted(
+            freq,
+            key=lambda c: (-abs(_median(c) or 0.0), -freq[c]),
+        )
+        shown = ranked[:_CODE_REPORT_CAP]
         if len(freq) > len(shown):
-            print(f"  ({len(shown)} of {len(freq)} codes shown;"
-                  f" the rest are in the JSON)")
-        print(f"  {'code':<10}{'n':>6}{'median x assets':>18}"
+            print(f"  ({len(shown)} of {len(freq)} codes shown, largest"
+                  f" first; the rest are in the JSON)")
+        print(f"  {'code':<10}{'n':>6}{'nonzero':>9}{'median x assets':>18}"
               f"  what the vendor calls it")
         rows = {}
-        for code, count in shown:
-            series = sorted(shares.get(code) or [])
-            med = series[len(series) // 2] if series else None
-            print(f"  {code:<10}{count:>6}"
+        for code in shown:
+            count = freq[code]
+            med = _median(code)
+            live = sum(1 for v in (raw_values.get(code) or []) if v != 0.0)
+            print(f"  {code:<10}{count:>6}{live:>9}"
                   f"{(f'{med:+.4f}' if med is not None else '-'):>18}"
-                  f"  {names.get(code, '')[:44]}")
-            rows[code] = {"n": count, "median_share": med,
+                  f"  {names.get(code, '')[:38]}")
+            rows[code] = {"n": count, "nonzero": live, "median_share": med,
                           "vendor_name": names.get(code)}
         report[group]["codes_present"] = rows
         print()
