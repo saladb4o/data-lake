@@ -21,8 +21,20 @@ from scripts import vendor_census as census
 
 
 class TestTheComparison:
-    def test_equal_figures_agree(self):
-        assert census._agreement(100.0, 100.0) == "agree"
+    def test_an_identical_figure_is_a_copy_not_a_corroboration(self):
+        """The same float twice is the overlay having copied it.
+
+        Where TradingView has no column, the overlay writes VNDIRECT's
+        number into the record, so the census then compares the vendor
+        with itself. da scored 464 of 464 "agree" on the first run - which
+        read as perfect corroboration and meant TradingView has no D&A
+        column at all. A copy counted as agreement inflates confidence in
+        exactly the fields nothing can check.
+        """
+        assert census._agreement(100.0, 100.0) == "identical"
+
+    def test_two_sources_that_merely_concur_are_kept_separate(self):
+        assert census._agreement(1000.0, 1001.0) == "agree"
 
     def test_a_rounding_difference_still_agrees(self):
         # Vendors round and restate; an exact-match test would report the
@@ -45,8 +57,25 @@ class TestTheComparison:
         assert census._agreement(None, 5.0) is None
         assert census._agreement(5.0, None) is None
 
-    def test_two_zeros_agree_rather_than_dividing_by_zero(self):
-        assert census._agreement(0.0, 0.0) == "agree"
+    def test_two_zeros_do_not_divide_by_zero(self):
+        assert census._agreement(0.0, 0.0) == "identical"
+
+    def test_a_sign_convention_is_not_a_disagreement(self):
+        # Fixed by negating, not by picking a vendor.
+        assert census._agreement(100.0, -100.0) == "sign"
+
+    def test_a_short_history_extrapolated_is_this_pipelines_doing(self):
+        # _sum_ttm scales by 4/n. A vendor figure that is the record's
+        # times 4/n is not a contradiction; it is a different window, and
+        # counting it as one would send a run hunting a vendor bug.
+        assert census._agreement(100.0, 400.0, quarters=1) == "annualised"
+        assert census._agreement(100.0, 200.0, quarters=2) == "annualised"
+
+    def test_the_quarter_count_has_to_come_from_the_payload(self):
+        # 4/2 is 2.0. A company that genuinely earned twice as much would
+        # be explained away as an artefact if any doubling counted.
+        assert census._agreement(100.0, 200.0, quarters=4) == "differ"
+        assert census._agreement(100.0, 200.0) == "differ"
 
     def test_a_zero_against_a_number_is_a_disagreement(self):
         # One vendor saying nil and the other saying a billion is the most

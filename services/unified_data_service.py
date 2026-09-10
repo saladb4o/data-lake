@@ -546,6 +546,15 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         "bank_loans_fq": bank_loans,
         "bank_loan_loss_fq": bank_loan_loss,
         "latest_fiscal_date": latest_d,
+        # How many quarters the TTM figures were built from, and which.
+        # _sum_ttm annualises by 4/len when the vendor sent fewer than
+        # four, so a figure here can be an annual RATE extrapolated from a
+        # single quarter rather than a year of trading. Without the count
+        # there is no way to tell those apart downstream, and a comparison
+        # against another vendor's true twelve months cannot say whether a
+        # gap is a disagreement or a different window.
+        "ttm_quarter_count": len(ttm_dates),
+        "ttm_dates": list(ttm_dates),
         "company_form": detected_form,
         # The itemCodes this payload actually carries. Kept so the sync can
         # census them without a second round of requests: the EBIT extractor
@@ -596,6 +605,20 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         # publishes.
         "cash_flow_ttm_by_code": {
             c: _sum_ttm([c]) for c in val_lookup if 30000 <= c < 40000
+        },
+        # The same statement read as a balance rather than as a flow.
+        #
+        # Two of its lines are stocks, not flows: cash at the start of the
+        # period and cash at the end. Summing four quarters of a closing
+        # balance produces roughly four times the balance and means
+        # nothing, so the TTM export above cannot be compared against the
+        # cash line on the balance sheet - and that comparison is the one
+        # piece of independent evidence available here, because the two
+        # statements are filed separately and have to meet at that number.
+        # Diagnostic only; never read as a number by anything that
+        # publishes.
+        "cash_flow_fq_by_code": {
+            c: _latest([c]) for c in val_lookup if 30000 <= c < 40000
         },
         # {itemCode: the vendor's own name for it}, taken from the rows just
         # parsed. Diagnostic only; never read as a number.

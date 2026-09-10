@@ -1286,12 +1286,39 @@ _BILLION = 1e9
 
 
 def _agreement(held: Optional[float],
-               vendor: Optional[float]) -> Optional[str]:
-    """How one pair of figures relates: agree, scaled, or differ.
+               vendor: Optional[float],
+               quarters: Optional[int] = None) -> Optional[str]:
+    """How one pair of figures relates.
 
-    Returns None when either side is absent, because a missing figure is
-    not a disagreement - and counting it as one is what would make a
-    sparse vendor look like a contradictory one.
+    Six verdicts, not three, and the first one is the reason the first
+    version of this table could not be read at all.
+
+    identical   The two are the same float. That is not two vendors
+                agreeing - it is the overlay having copied this vendor's
+                number into the record because the other vendor had none,
+                so the comparison is the vendor against itself and carries
+                no information. da scored 464 of 464 "agree" on the first
+                run, which read as perfect corroboration and in fact meant
+                TradingView has no D&A column at all. Counting a copy as
+                agreement inflates exactly the fields nobody can check.
+
+    agree       Within tolerance but not the same number: two sources that
+                measured separately and concur. This is the only bucket
+                that is evidence of anything.
+
+    scaled      Apart by a factor of a billion. A unit, not a dispute.
+
+    sign        Same magnitude, opposite sign. A convention, not a
+                dispute, and it is fixed by negating rather than by
+                choosing a vendor.
+
+    annualised  The vendor figure is the record's times 4/n for the n
+                quarters it was built from. _sum_ttm extrapolates a short
+                history to an annual rate; a full twelve months elsewhere
+                will not match it, and that is this pipeline's doing
+                rather than a vendor's.
+
+    differ      None of the above. A genuine contradiction.
     """
     if held is None or vendor is None:
         return None
@@ -1299,26 +1326,54 @@ def _agreement(held: Optional[float],
         held, vendor = float(held), float(vendor)
     except (TypeError, ValueError):
         return None
-    if held == 0.0 and vendor == 0.0:
+    if held == vendor:
+        return "identical"
+    if held == 0.0 or vendor == 0.0:
+        return "differ"
+
+    def _close(a: float, b: float) -> bool:
+        base = max(abs(a), abs(b))
+        return bool(base) and abs(a - b) / base <= _AGREE
+
+    if _close(held, vendor):
         return "agree"
-    for scale, label in ((1.0, "agree"), (_BILLION, "scaled"),
-                         (1.0 / _BILLION, "scaled")):
-        base = max(abs(held), abs(vendor * scale))
-        if base and abs(held - vendor * scale) / base <= _AGREE:
-            return label
+    if _close(held, vendor * _BILLION) or _close(held, vendor / _BILLION):
+        return "scaled"
+    if _close(held, -vendor):
+        return "sign"
+    # Checked against the quarter count the payload reports rather than
+    # against every ratio that might look like one: 4/2 is 2.0, and a
+    # company that genuinely earned twice as much would otherwise be
+    # explained away as an artefact of this pipeline.
+    if quarters and 1 <= quarters < 4:
+        if _close(vendor, held * (4.0 / quarters)):
+            return "annualised"
     return "differ"
+
+
+_VERDICTS = ("identical", "agree", "scaled", "sign", "annualised", "differ")
 
 
 def vendor_disagreement(symbols: List[str], workers: int,
                         out: Dict[str, Any]) -> None:
-    """How often the two vendors give different answers for one field.
+    """How often the two vendors give different answers, and why.
 
-    The population is deliberately the companies the cascade actually
-    resolved - a company VNDIRECT alone supplied would agree with itself
-    and pad the agreement rate towards a conclusion that nothing is wrong.
+    The first version of this counted three outcomes and could not be
+    read. It scored da at 464 agreements out of 464 - which looked like
+    perfect corroboration and meant the opposite: TradingView has no D&A
+    column, so the overlay had copied VNDIRECT's own number into the
+    record and the census was comparing a vendor with itself. A copy and
+    a corroboration are not the same evidence, and lumping them together
+    inflates confidence in exactly the fields nothing can check.
+
+    So the verdicts are split, and the ones that are artefacts of this
+    pipeline - a unit, a sign convention, a short history extrapolated to
+    an annual rate - are separated from a real contradiction. What is
+    left in DIFFER is the part that needs a third witness, and section 10
+    goes and gets one.
     """
     print("\n" + "=" * 74)
-    print(" 9. WHERE THE TWO VENDORS DISAGREE")
+    print(" 9. WHERE THE TWO VENDORS DISAGREE, AND WHY")
     print("=" * 74)
     print(f"  {len(symbols)} companies whose record holds a vendor-reported"
           f" figure\n")
@@ -1340,18 +1395,23 @@ def vendor_disagreement(symbols: List[str], workers: int,
                 fetched[sym] = entry
 
     print(f"  {len(fetched)} of {len(symbols)} returned a payload\n")
-    print("  field            compared   agree   scaled   DIFFER   worst")
-    print("  " + "-" * 66)
+    print("  identical = the overlay copied this vendor's number, so the")
+    print("  comparison is the vendor against itself and says nothing.")
+    print("  Only 'agree' is corroboration.\n")
+    print("  field           compared  ident  agree scaled   sign  annl"
+          "  DIFFER   worst")
+    print("  " + "-" * 72)
 
     report: Dict[str, Any] = {"population": len(symbols),
                               "answered": len(fetched), "fields": {}}
 
     for field, (_prov, vnd_key) in OVERLAY_PAIRS.items():
-        tally = {"agree": 0, "scaled": 0, "differ": 0}
+        tally = {name: 0 for name in _VERDICTS}
         worst = (0.0, "")
         for sym, entry in fetched.items():
             record = held.get(sym) or {}
-            verdict = _agreement(record.get(field), entry.get(vnd_key))
+            verdict = _agreement(record.get(field), entry.get(vnd_key),
+                                 entry.get("ttm_quarter_count"))
             if verdict is None:
                 continue
             tally[verdict] += 1
@@ -1366,17 +1426,171 @@ def vendor_disagreement(symbols: List[str], workers: int,
         # nothing was compared, and the reason is either that the field is
         # never vendor-reported or that this table names it wrongly.
         note = "  NOTHING COMPARED" if not compared else ""
-        print(f"  {field:<16} {compared:>8} {tally['agree']:>7}"
-              f" {tally['scaled']:>8} {tally['differ']:>8}"
-              f"   {share:>5.1f}% {worst[1]}{note}")
+        print(f"  {field:<15} {compared:>8} {tally['identical']:>6}"
+              f" {tally['agree']:>6} {tally['scaled']:>6}"
+              f" {tally['sign']:>6} {tally['annualised']:>5}"
+              f" {tally['differ']:>7}   {share:>5.1f}% {worst[1]}{note}")
         report["fields"][field] = dict(tally, compared=compared)
 
-    print("\n  A field that differs often is one where the cascade is"
-          " publishing")
-    print("  one vendor's number while another vendor says something else,"
-          " and")
-    print("  nothing in the pipeline can currently tell which is right.")
     out["vendor_disagreement"] = report
+
+
+# --------------------------------------------------------------------------
+# 10. A third witness, where one exists
+# --------------------------------------------------------------------------
+#: Cash at the end of the period, on the cash flow statement, and cash on
+#: the balance sheet. Two statements filed separately that have to meet at
+#: this number.
+_CASH_AT_END = 37000
+_BALANCE_SHEET_CASH = 11100
+
+#: The three section totals whose sum is the net change in cash. The
+#: vendor's own triple closed for 150 of 150 companies, so substituting a
+#: figure from elsewhere into it is a test of whether that figure is the
+#: same quantity the statement is talking about.
+_NET_CHANGE, _CFO, _CFI, _CFF = 35000, 32000, 33000, 34000
+
+
+def third_witness(symbols: List[str], workers: int,
+                  out: Dict[str, Any]) -> None:
+    """Which vendor is right, where anything independent can say.
+
+    Section 9 says how often the two disagree. It cannot say who is
+    wrong, and neither can a bigger sample of the same two opinions - the
+    census has been going in that circle for several runs. What breaks it
+    is evidence neither vendor controls:
+
+      cash    The cash flow statement ends at a closing balance and the
+              balance sheet carries the same figure. They are filed
+              separately, so a vendor whose two statements meet at that
+              number is internally coherent, and whichever of the two
+              published figures matches the balance sheet is the one
+              describing this company's cash.
+
+      cfo     The three section totals sum to the net change in cash, and
+              the vendor's own three did so for 150 of 150 companies.
+              Substituting the record's operating cash flow into that sum
+              asks whether it is even the same quantity. A figure that
+              breaks an identity the rest of the statement keeps is not a
+              second opinion about the same number - it is a different
+              number.
+
+    This decides nothing on its own about which vendor to believe in
+    general. It decides it per field, on evidence, which is the only way
+    that question has ever been answerable here.
+    """
+    print("\n" + "=" * 74)
+    print(" 10. A THIRD WITNESS")
+    print("=" * 74)
+
+    held = _held_overlay_fields()
+    fetched: Dict[str, Dict[str, Any]] = {}
+
+    def work(sym: str):
+        try:
+            return sym, fetch_vndirect_financials(sym) or {}
+        except Exception:
+            return sym, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in symbols]):
+            sym, entry = fut.result()
+            if entry:
+                fetched[sym] = entry
+
+    report: Dict[str, Any] = {"answered": len(fetched)}
+
+    # ---- cash -----------------------------------------------------------
+    coherent = pair = record_wins = vendor_wins = neither = 0
+    for sym, entry in fetched.items():
+        sheet_cash = _cell_of(entry, "balance_sheet_fq_by_code",
+                              _BALANCE_SHEET_CASH)
+        flow_cash = _cell_of(entry, "cash_flow_fq_by_code", _CASH_AT_END)
+        if sheet_cash is None or flow_cash is None:
+            continue
+        pair += 1
+        if _agreement(flow_cash, sheet_cash) in ("identical", "agree"):
+            coherent += 1
+        record_cash = (held.get(sym) or {}).get("cash")
+        if record_cash is None:
+            continue
+        # The balance sheet is the witness; the two candidates are the
+        # record's published cash and what the vendor reports as cash_fq.
+        record_ok = _agreement(record_cash, sheet_cash) in ("identical",
+                                                            "agree")
+        vendor_ok = _agreement(entry.get("cash_fq"), sheet_cash) in (
+            "identical", "agree")
+        if record_ok and not vendor_ok:
+            record_wins += 1
+        elif vendor_ok and not record_ok:
+            vendor_wins += 1
+        elif not record_ok and not vendor_ok:
+            neither += 1
+
+    print("\n  cash: the two statements have to meet at the closing balance")
+    print("  " + "-" * 70)
+    if pair:
+        print(f"  {coherent} of {pair} companies - the vendor's cash flow"
+              f" statement ends at the")
+        print(f"  same number its own balance sheet carries"
+              f" ({100.0 * coherent / pair:.1f}%).")
+        decided = record_wins + vendor_wins
+        print(f"  Where the record and the vendor disagree, the balance"
+              f" sheet backs:")
+        print(f"    the record   {record_wins:>5}")
+        print(f"    the vendor   {vendor_wins:>5}")
+        print(f"    neither      {neither:>5}"
+              f"   (both wrong, or the line is something else)")
+        if decided:
+            print(f"  Of the {decided} it can decide, the vendor is right"
+                  f" {100.0 * vendor_wins / decided:.1f}% of the time.")
+    else:
+        print("  NOTHING COMPARED - neither statement carried both lines.")
+    report["cash"] = {"pairs": pair, "coherent": coherent,
+                      "record_wins": record_wins,
+                      "vendor_wins": vendor_wins, "neither": neither}
+
+    # ---- cfo ------------------------------------------------------------
+    tested = vendor_closes = record_closes = 0
+    for sym, entry in fetched.items():
+        parts = [_cell_of(entry, "cash_flow_ttm_by_code", c)
+                 for c in (_NET_CHANGE, _CFO, _CFI, _CFF)]
+        if any(p is None for p in parts):
+            continue
+        net, cfo, cfi, cff = (float(p) for p in parts)
+        record_cfo = (held.get(sym) or {}).get("cfo")
+        if record_cfo is None:
+            continue
+        tested += 1
+        scale = max(abs(net), 1.0)
+        if abs(net - (cfo + cfi + cff)) / scale <= _AGREE:
+            vendor_closes += 1
+        if abs(net - (float(record_cfo) + cfi + cff)) / scale <= _AGREE:
+            record_closes += 1
+
+    print("\n  cfo: does the figure fit the statement it claims to come"
+          " from?")
+    print("  " + "-" * 70)
+    if tested:
+        print(f"  net change = operating + investing + financing, over"
+              f" {tested} companies:")
+        print(f"    with the vendor's operating cash flow  "
+              f"{vendor_closes:>5}"
+              f"  ({100.0 * vendor_closes / tested:.1f}%)")
+        print(f"    with the record's                      "
+              f"{record_closes:>5}"
+              f"  ({100.0 * record_closes / tested:.1f}%)")
+        print("  A figure that breaks an identity the rest of the"
+              " statement keeps is")
+        print("  not a second opinion about the same number. It is a"
+              " different number.")
+    else:
+        print("  NOTHING COMPARED - no company carried all four lines"
+              " and a record cfo.")
+    report["cfo"] = {"tested": tested, "vendor_closes": vendor_closes,
+                     "record_closes": record_closes}
+
+    out["third_witness"] = report
 
 
 def _held_overlay_fields() -> Dict[str, Dict[str, Any]]:
@@ -1477,6 +1691,8 @@ FOCUSED_SECTIONS = {
         pick_cashflow_symbols(args.limit or None), args.workers, out),
     "overlay": lambda args, out: vendor_disagreement(
         pick_overlay_symbols(args.limit or None), args.workers, out),
+    "witness": lambda args, out: third_witness(
+        pick_overlay_symbols(args.limit or None), args.workers, out),
 }
 
 
@@ -1566,6 +1782,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         pick_cashflow_symbols(args.limit or None), args.workers, out)
     vendor_disagreement(pick_overlay_symbols(args.limit or None),
                         args.workers, out)
+    third_witness(pick_overlay_symbols(args.limit or None),
+                  args.workers, out)
 
     _write(out, args.json)
     return 0

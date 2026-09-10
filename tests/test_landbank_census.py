@@ -291,11 +291,12 @@ class TestTheFocusedRunStaysFocused:
         import inspect
         source = inspect.getsource(census.main)
         tail = source[source.index("_handshake_cookies()"):]
+        # The function each section runs is read out of the registry
+        # rather than listed here. A hand-written map is a second list of
+        # sections, which is the exact thing this class exists to stop.
         for name, func in census.FOCUSED_SECTIONS.items():
-            called = {"landbank": "landbank_and_loanbook",
-                      "cashflow": "cash_flows_and_borrowings",
-                      "overlay": "vendor_disagreement"}[name]
-            assert called in tail, name
+            called = inspect.getsource(func).split("(")[0].split()[-1]
+            assert called in tail, f"{name} runs {called}, not in the full census"
 
     def test_the_workflow_can_reach_every_mode(self):
         """The workflow must not carry a second, shorter list of sections.
