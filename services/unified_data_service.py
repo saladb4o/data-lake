@@ -414,8 +414,38 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
     ni_ttm = _sum_ttm([23000, 23800, 23001])
     ebit_ttm = _sum_ttm([21020, 22000])
     da_ttm = _sum_ttm([31110, 31010]) # Depreciation and Amortization from Cash Flow
-    capex_ttm = _sum_ttm([32100, 32110, 32010]) # Purchase of Fixed Assets / CapEx (32100 is primary VAS line)
-    cfo_ttm = _sum_ttm([31000, 31100]) # Net Cash Flows from Operating Activities
+    # capex reads VAS 21 and the decoding above says 32100 is VAS 21, so
+    # this is NOT changed - but it is not yet confirmed either, and the
+    # same census gave a reason to doubt it: 32100 was non-zero for 10 of
+    # 148 companies. That is either a population of companies that bought
+    # no fixed assets, which is possible for a group selected precisely
+    # because their cash flow data is untrustworthy, or a second wrong
+    # code. Nothing here can tell those apart, so nothing here moves; the
+    # census now carries a check that can.
+    capex_ttm = _sum_ttm([32100, 32110, 32010])
+    # Operating cash flow is the section total, and the section total is
+    # 32000.
+    #
+    # itemCode is 3 + the two-digit VAS B03 code + 00, and the statement's
+    # own arithmetic established it rather than a chart of accounts: over
+    # 153 companies that returned a coded cash flow statement, checked one
+    # company at a time,
+    #
+    #   net change = operating + investing + financing   153 of 153, 100%
+    #   cash at end = cash at start + net change         149 of 153, 97.4%
+    #
+    # so 32000/33000/34000 are VAS 20/30/40, the three section totals, and
+    # 35000/36000/37000 are VAS 50/60/70. An identity holding on every one
+    # of 153 separately-filed statements is not a coincidence of labels or
+    # of magnitudes; it is the statement adding up.
+    #
+    # 31000 and 31100 are adjustment lines inside the operating section,
+    # and the same census counted them non-zero for 25 of 155 companies
+    # where 32000 was non-zero for 153 of 153. The old pair is kept behind
+    # the total rather than dropped, because a payload that carries the
+    # adjustments and not the total is worth reading rather than refusing,
+    # and _sum_ttm takes the first code that answers.
+    cfo_ttm = _sum_ttm([32000, 31000, 31100])
     
     # Granular Working Capital & Industry Items
     delta_ar = _sum_ttm([31130]) # Delta Receivables

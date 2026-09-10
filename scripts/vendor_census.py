@@ -890,7 +890,7 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
 # --------------------------------------------------------------------------
 #: What the service reads today for each, so a run states the codes it is
 #: testing rather than leaving the reader to go and look.
-CASH_FLOW_CODES = {"cfo": (31000, 31100), "capex": (32100, 32110, 32010)}
+CASH_FLOW_CODES = {"cfo": (32000, 31000, 31100), "capex": (32100, 32110, 32010)}
 DEBT_CODES = (13000, 13100)
 
 #: The resolver's gate. Duplicated rather than imported because the census
@@ -910,10 +910,41 @@ _TRUSTED = 2
 #: net cash from operations. On that reading 36000 - 35000 - 37000 closed
 #: to four decimals at the median, which is suggestive and nothing more at
 #: n=3. These print the rate at which each holds per company.
+#: An identity is (label, total, terms, absent_is_zero).
+#:
+#: absent_is_zero is the difference between two kinds of question and it
+#: has to be stated per identity rather than assumed once. In "cash at end
+#: = cash at start + net change" a missing term is a missing fact and the
+#: company cannot be tested, which is why absent is not counted as
+#: disagreement anywhere in this file. In a section subtotal it is the
+#: opposite: a cash flow statement omits a line exactly when the company
+#: had none of it, so treating an absent sub-line as nil is reading the
+#: statement rather than guessing at it - and with nine sub-lines,
+#: requiring all nine present would skip almost every company and the
+#: check would measure nothing.
 CASH_FLOW_IDENTITIES = (
-    ("cash at end = cash at start + net change", 37000, (36000, 35000)),
+    ("cash at end = cash at start + net change", 37000, (36000, 35000),
+     False),
     ("net change = operating + investing + financing",
-     35000, (32000, 33000, 34000)),
+     35000, (32000, 33000, 34000), False),
+    # The two that test capex. VAS numbers the investing section 21-30 and
+    # the financing section 31-40, so under the recovered scheme the
+    # investing total 33000 is the sum of 32100..32900 and the financing
+    # total 34000 the sum of 33100..33900. capex is read from 32100, VAS
+    # 21 - the first line of the investing section - and the census found
+    # it non-zero for 10 of 148 companies, which is either a population
+    # that bought no fixed assets or a second wrong code.
+    #
+    # These cannot tell those two apart on their own, and are not meant
+    # to. What they establish is whether 32100 sits in the investing
+    # section at all: if the section adds up from those nine codes, the
+    # sub-line numbering is confirmed and a sparse 32100 is the companies,
+    # not the code. If it does not, the sub-lines are numbered some other
+    # way and capex is being read from whatever happens to be at 32100.
+    ("investing total = its own sub-lines", 33000,
+     tuple(range(32100, 33000, 100)), True),
+    ("financing total = its own sub-lines", 34000,
+     tuple(range(33100, 34000, 100)), True),
 )
 
 
@@ -928,15 +959,21 @@ def _check_identities(entries, sheet_key: str, identities,
     """
     print("  Identities, checked per company:")
     results = {}
-    for label, target, terms in identities:
+    for label, target, terms, absent_is_zero in identities:
         held = tested = 0
         for entry in entries:
             rows = {int(k): v for k, v in
                     (entry.get(sheet_key) or {}).items() if v is not None}
-            if target not in rows or any(t not in rows for t in terms):
+            if target not in rows:
+                continue
+            if not absent_is_zero and any(t not in rows for t in terms):
+                continue
+            if absent_is_zero and not any(t in rows for t in terms):
+                # Every sub-line absent is a payload that does not carry
+                # the section at all, not a section that sums to nil.
                 continue
             tested += 1
-            expected = sum(rows[t] for t in terms)
+            expected = sum(rows.get(t, 0.0) for t in terms)
             scale = max(abs(rows[target]), abs(expected), 1.0)
             if abs(rows[target] - expected) / scale <= tolerance:
                 held += 1
@@ -1032,9 +1069,12 @@ def cash_flows_and_borrowings(symbols: List[str], workers: int,
 
     def work(sym: str) -> Dict[str, Any]:
         try:
-            return fetch_vndirect_financials(sym) or {}
+            entry = fetch_vndirect_financials(sym) or {}
         except Exception:
             return {}
+        if entry:
+            entry.setdefault("symbol", sym)
+        return entry
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for fut in as_completed([pool.submit(work, s) for s in symbols]):
@@ -1095,8 +1135,91 @@ def cash_flows_and_borrowings(symbols: List[str], workers: int,
         print(f"  {len(liabilities)} distinct liability codes (13xxx)")
         report["liability_codes"] = _print_codes_by_size(
             liabilities, shares, raws, names, "assets")
+        report["borrowing_candidates"] = _score_debt_candidates(with_bs)
 
     out["cash_flows_and_borrowings"] = report
+
+
+#: Combinations of liability codes that could be borrowings, each scored
+#: against a figure that already exists. Under the recovered numbering,
+#: 13110/13120 are VAS 311/312 and 13200/13340 are VAS 320/334 - and which
+#: of those is short-term borrowings depends on which chart of accounts
+#: the vendor follows, QD15 or TT200, because the two swap 311 and 312.
+#:
+#: That question is NOT settled by picking the chart of accounts that
+#: sounds right. It is settled against TradingView, which reports total
+#: debt for most of the universe: the right combination is the one whose
+#: sum matches a figure the record already holds at tier 3, on company
+#: after company. Reasoning from the standard rather than from the payload
+#: is how 11420 got into the extractor in the first place.
+_DEBT_CANDIDATES = (
+    ("13110 + 13340   (QD15: vay ngan han + vay dai han)", (13110, 13340)),
+    ("13200 + 13340   (TT200: vay ngan han + vay dai han)", (13200, 13340)),
+    ("13110 alone", (13110,)),
+    ("13120 alone", (13120,)),
+    ("13000 + 13100   (what the extractor reads today)", (13000, 13100)),
+)
+
+
+def _score_debt_candidates(entries) -> Dict[str, Any]:
+    """Which liability codes add up to the total debt already on record.
+
+    Only tier-3-or-better total_debt is compared against, because a
+    triangulated or stood-in figure was derived by this project and
+    matching it would only prove the census agrees with an earlier guess.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    known: Dict[str, float] = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+        if isinstance(stocks, dict):
+            stocks = list(stocks.values())
+        for rec in stocks or []:
+            if not isinstance(rec, dict) or not rec.get("symbol"):
+                continue
+            tiers = rec.get("field_provenance") or {}
+            value = rec.get("total_debt")
+            if int(tiers.get("total_debt", 0) or 0) >= 3 and value:
+                known[str(rec["symbol"]).upper().strip()] = float(value)
+
+    print("\n  Which codes add up to a total debt already on record"
+          f" ({len(known)} symbols carry one at tier 3):")
+    if not known:
+        print("    none do, so this cannot be decided from the snapshot.")
+        return {}
+
+    print("    candidate                                        matched  of")
+    results = {}
+    for label, codes in _DEBT_CANDIDATES:
+        matched = compared = 0
+        for entry in entries:
+            sym = str(entry.get("symbol") or "").upper().strip()
+            target = known.get(sym)
+            if target is None:
+                continue
+            rows = entry.get("balance_sheet_fq_by_code") or {}
+            values = [rows.get(c, rows.get(str(c))) for c in codes]
+            if all(v is None for v in values):
+                continue
+            compared += 1
+            total = sum(float(v) for v in values if v is not None)
+            for scale in (1.0, 1e9, 1e-9):
+                base = max(abs(target), abs(total * scale), 1.0)
+                if abs(target - total * scale) / base <= 0.05:
+                    matched += 1
+                    break
+        rate = (100.0 * matched / compared) if compared else None
+        print(f"    {label:<48}"
+              f"{(f'{rate:5.1f}%' if rate is not None else '    -')}"
+              f"  ({matched}/{compared})")
+        results[label] = {"matched": matched, "compared": compared,
+                          "rate": rate}
+    print("    The combination that matches is the one debt should read.")
+    return results
 
 
 # --------------------------------------------------------------------------

@@ -14,6 +14,7 @@ liabilities). Neither is borrowings. That is a wrong number published
 rather than a refusal, and it inflates net_de_ratio for every company
 TradingView leaves out.
 """
+import json
 import os
 import sys
 
@@ -125,9 +126,9 @@ class TestItReportsWhatIsThere:
 class TestItCensusesTheCodesInForce:
     def test_the_cash_flow_codes_match_the_service(self):
         source = open(uds.__file__, encoding="utf-8").read()
-        assert "_sum_ttm([31000, 31100])" in source
+        assert "_sum_ttm([32000, 31000, 31100])" in source
         assert "_sum_ttm([32100, 32110, 32010])" in source
-        assert census.CASH_FLOW_CODES["cfo"] == (31000, 31100)
+        assert census.CASH_FLOW_CODES["cfo"] == (32000, 31000, 31100)
         assert census.CASH_FLOW_CODES["capex"] == (32100, 32110, 32010)
 
     def test_the_debt_codes_match_the_service(self):
@@ -200,13 +201,18 @@ class TestTheDecodingIsConfirmedByArithmetic:
     def test_a_statement_that_closes_is_counted(self):
         r = census._check_identities([self.GOOD], "cash_flow_ttm_by_code",
                                      census.CASH_FLOW_IDENTITIES)
-        assert all(v["held"] == 1 and v["tested"] == 1 for v in r.values())
+        # The subtotal identities need sub-lines this fixture has none of,
+        # and a check that skipped every company is reported as untested
+        # rather than as agreement.
+        closing = [v for k, v in r.items() if "sub-lines" not in k]
+        assert all(v["held"] == 1 and v["tested"] == 1 for v in closing)
 
     def test_a_statement_that_does_not_close_is_counted_against(self):
         r = census._check_identities([self.GOOD, self.GOOD, self.BAD],
                                      "cash_flow_ttm_by_code",
                                      census.CASH_FLOW_IDENTITIES)
-        assert all(v["held"] == 2 and v["tested"] == 3 for v in r.values())
+        closing = [v for k, v in r.items() if "sub-lines" not in k]
+        assert all(v["held"] == 2 and v["tested"] == 3 for v in closing)
 
     def test_a_company_missing_a_term_is_not_tested_rather_than_failed(self):
         # Absent is not disagreement. Counting a missing line as a broken
@@ -230,10 +236,113 @@ class TestTheDecodingIsConfirmedByArithmetic:
                                      census.CASH_FLOW_IDENTITIES)
         assert r["cash at end = cash at start + net change"]["held"] == 0
 
-    def test_the_identity_the_extractor_contradicts_is_the_one_checked(self):
-        # cfo reads 31000/31100; the identity places net operating cash at
-        # 32000. If the identity is dropped the disagreement goes unnoticed.
-        targets = {t for _, _, terms in census.CASH_FLOW_IDENTITIES
+    def test_the_code_the_extractor_now_reads_is_the_one_under_test(self):
+        # cfo was retargeted at 32000 on the strength of these identities,
+        # so they have to keep testing it. An identity set that stopped
+        # mentioning 32000 would leave the change resting on one run.
+        targets = {t for _, _, terms, _ in census.CASH_FLOW_IDENTITIES
                    for t in terms}
         assert 32000 in targets
-        assert 32000 not in census.CASH_FLOW_CODES["cfo"]
+        assert census.CASH_FLOW_CODES["cfo"][0] == 32000
+
+    def test_the_section_subtotals_are_checked_with_absent_as_nil(self):
+        # A subtotal is the one place absent means nil rather than
+        # unknown: a statement omits a line when the company had none of
+        # it. Requiring all nine sub-lines present would skip almost
+        # every company, and a check that tests nobody reads as silence.
+        by_label = {i[0]: i for i in census.CASH_FLOW_IDENTITIES}
+        assert by_label["investing total = its own sub-lines"][3] is True
+        assert by_label["cash at end = cash at start + net change"][3] is False
+
+    def test_a_subtotal_closes_from_its_sub_lines_alone(self):
+        entry = {"cash_flow_ttm_by_code": {33000: -300.0, 32100: -500.0,
+                                           32700: 200.0}}
+        r = census._check_identities([entry], "cash_flow_ttm_by_code",
+                                     census.CASH_FLOW_IDENTITIES)
+        got = r["investing total = its own sub-lines"]
+        assert got["held"] == 1 and got["tested"] == 1
+
+    def test_a_payload_with_no_sub_lines_at_all_is_not_tested(self):
+        # Every sub-line absent is a payload that does not carry the
+        # section, not a section that sums to nil - and scoring it as a
+        # failure would understate a decoding that is right.
+        entry = {"cash_flow_ttm_by_code": {33000: -300.0}}
+        r = census._check_identities([entry], "cash_flow_ttm_by_code",
+                                     census.CASH_FLOW_IDENTITIES)
+        assert r["investing total = its own sub-lines"]["tested"] == 0
+
+
+class TestTheBorrowingCandidatesAreScoredNotChosen:
+    """Which liability codes are borrowings, decided against a real figure.
+
+    Under the recovered numbering the answer depends on which chart of
+    accounts VNDIRECT follows: QD15 puts short-term borrowings at VAS 311
+    and TT200 puts trade payables there. Picking the one that sounds right
+    is how 11420 got into the extractor, so the candidates are scored
+    against TradingView's total debt instead - the combination that
+    reproduces a figure already on record is the answer.
+    """
+
+    @staticmethod
+    def _snap(tmp_path, monkeypatch, stocks):
+        path = tmp_path / "screener_snapshot.json"
+        path.write_text(json.dumps({"stocks": stocks}), encoding="utf-8")
+        monkeypatch.setattr(uds, "screener_snapshot_file", lambda: str(path))
+
+    def test_the_matching_combination_scores_higher(self, tmp_path,
+                                                    monkeypatch, capsys):
+        self._snap(tmp_path, monkeypatch, [
+            {"symbol": "AAA", "total_debt": 300.0,
+             "field_provenance": {"total_debt": 3}},
+        ])
+        entry = {"symbol": "AAA", "balance_sheet_fq_by_code": {
+            13110: 200.0, 13340: 100.0, 13200: 5.0, 13120: 900.0,
+            13000: 4000.0, 13100: 3000.0}}
+        got = census._score_debt_candidates([entry])
+        assert got["13110 + 13340   (QD15: vay ngan han + vay dai han)"][
+            "matched"] == 1
+        assert got["13120 alone"]["matched"] == 0
+        assert got["13000 + 13100   (what the extractor reads today)"][
+            "matched"] == 0
+
+    def test_a_triangulated_total_debt_is_not_a_yardstick(self, tmp_path,
+                                                          monkeypatch):
+        # Tier 2 was derived by this project. Matching it would only show
+        # the census agrees with an earlier guess, not with a filing.
+        self._snap(tmp_path, monkeypatch, [
+            {"symbol": "AAA", "total_debt": 300.0,
+             "field_provenance": {"total_debt": 2}},
+        ])
+        entry = {"symbol": "AAA",
+                 "balance_sheet_fq_by_code": {13110: 300.0}}
+        assert census._score_debt_candidates([entry]) == {}
+
+    def test_a_company_with_none_of_the_codes_is_not_compared(self, tmp_path,
+                                                              monkeypatch):
+        # Absent is not disagreement here either: a payload that carries
+        # no candidate says nothing about which candidate is right.
+        self._snap(tmp_path, monkeypatch, [
+            {"symbol": "AAA", "total_debt": 300.0,
+             "field_provenance": {"total_debt": 3}},
+        ])
+        entry = {"symbol": "AAA", "balance_sheet_fq_by_code": {12700: 9.0}}
+        got = census._score_debt_candidates([entry])
+        assert all(v["compared"] == 0 for v in got.values())
+
+    def test_a_unit_difference_still_matches(self, tmp_path, monkeypatch):
+        # The record keeps some figures in billions and the vendor sends
+        # raw dong; a scale mismatch would rule out the right answer.
+        self._snap(tmp_path, monkeypatch, [
+            {"symbol": "AAA", "total_debt": 300.0,
+             "field_provenance": {"total_debt": 3}},
+        ])
+        entry = {"symbol": "AAA",
+                 "balance_sheet_fq_by_code": {13110: 300.0e9}}
+        got = census._score_debt_candidates([entry])
+        assert got["13110 alone"]["matched"] == 1
+
+    def test_the_codes_in_force_are_among_the_candidates(self):
+        # The pair the extractor reads today has to be scored beside the
+        # rest, or the run cannot say the change was an improvement.
+        assert any(tuple(codes) == tuple(census.DEBT_CODES)
+                   for _, codes in census._DEBT_CANDIDATES)
