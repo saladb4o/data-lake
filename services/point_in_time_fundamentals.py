@@ -166,10 +166,21 @@ class PointInTimeFundamentals:
             )
 
     def publication_date(self, record: Dict[str, Any], quarter_end: Optional[date]) -> Optional[date]:
-        """When the filing became public: its filing_date, else quarter end + lag."""
+        """When the filing became public: its filing_date, else quarter end + lag.
+
+        ``quarter_end`` is the caller's, but its absence must not silently
+        disable the gate. Returning None here means "publication date
+        unknown", and get() reads an unknown date as no restriction - so a
+        caller who simply forgot the argument would get every filing at
+        every simulated date, which is lookahead that looks like skill.
+        The record knows its own fiscal date, so fall back to that before
+        giving up.
+        """
         filed = _parse_date(record.get("filing_date"))
         if filed is not None:
             return filed
+        if quarter_end is None:
+            quarter_end = _parse_date(record.get("fiscal_date"))
         if quarter_end is None:
             return None
         return date.fromordinal(quarter_end.toordinal() + self._lag_days)

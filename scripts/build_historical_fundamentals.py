@@ -216,13 +216,24 @@ def build_symbol(symbol: str, size: int = 4000,
         if not record:
             continue
 
-        # VNDIRECT does not expose the filing date on this endpoint, so record
-        # the assumed publication date explicitly rather than letting the
-        # reader silently apply a default it cannot see.
-        quarter_end = _quarter_end(code)
-        if quarter_end is not None:
-            record["filing_date"] = (quarter_end + timedelta(days=lag_days)).isoformat()
-            record["filing_date_is_estimated"] = True
+        # VNDIRECT does not expose the filing date on this endpoint. The
+        # estimate is NOT written as filing_date, and that is deliberate.
+        #
+        # PointInTimeFundamentals.publication_date takes a record's
+        # filing_date as fact and only falls back to quarter end + its own
+        # lag when there is none. Writing an estimate into that field
+        # therefore overrides the reader's parameter with a guess it
+        # cannot see or vary - the lag becomes frozen into the file, and
+        # asking "how much of the backtest's return comes from assuming
+        # 45 days?" costs one full rebuild per value tried.
+        #
+        # So the file states that the date is unknown and says what a
+        # reader would have to assume, and the reader keeps the knob.
+        # When a real filing date becomes available it belongs in
+        # filing_date, and then it should override the lag - because
+        # then it is not an assumption.
+        record["filing_date_is_estimated"] = True
+        record["assumed_publication_lag_days"] = lag_days
         record["fiscal_date"] = fiscal
         quarters[code] = record
 
