@@ -130,19 +130,27 @@ class TestItReportsWhatIsThere:
 
 class TestItCensusesTheCodesInForce:
     def test_the_cash_flow_codes_match_the_service(self):
-        source = open(uds.__file__, encoding="utf-8").read()
-        assert "_sum_ttm([32000, 31000, 31100])" in source
-        assert "_sum_ttm([32100, 32110, 32010])" in source
-        assert census.CASH_FLOW_CODES["cfo"] == (32000, 31000, 31100)
-        assert census.CASH_FLOW_CODES["capex"] == (32100, 32110, 32010)
+        # Was a grep for the literal call in the service source. The
+        # codes live in one table now, so this is an identity rather
+        # than a comparison of two lists that happen to agree today.
+        for name in ("cfo", "capex"):
+            assert (census.CASH_FLOW_CODES[name]
+                    is uds.VNDIRECT_ITEM_CODES[name][0]), name
+        assert census.CASH_FLOW_CODES["cfo"][0] == 32000
 
     def test_the_debt_codes_match_the_service(self):
-        # When debt is retargeted this must be updated with it, or the
-        # census goes on measuring a question nobody asks.
-        source = open(uds.__file__, encoding="utf-8").read()
-        assert f"_latest_sum({list(census.DEBT_CODES)})" in source
+        """This used to grep the service source for the literal codes.
 
-    def test_borrowings_are_added_up_not_fallen_back_through(self):
+        It had to, because the census kept its own copy and the only way
+        to catch drift was to look for the same digits in both files. The
+        codes now come from the service's table directly, so there is
+        nothing left to drift and the check is an identity - which is the
+        point: a question that can no longer be got wrong.
+        """
+        assert census.DEBT_CODES is uds.VNDIRECT_ITEM_CODES["debt"][0]
+        assert uds.VNDIRECT_ITEM_CODES["debt"][1] == "sum"
+
+    def test_borrowings_are_added_up_not_fallen_back_through(self, monkeypatch):
         """_latest stops at the first code that answers.
 
         It is a fallback chain, for one line the vendor might file under
@@ -152,10 +160,23 @@ class TestItCensusesTheCodesInForce:
         _latest would publish the short-term half as the whole - a
         smaller number than the truth, in a ratio the screener shows, and
         nothing downstream could tell.
+
+        This was a grep of the service source for the helper's name,
+        which only ever proved the right words were written. It reads
+        the figure the service actually publishes now: 700 + 300 is
+        1,000, and 700 is what falling through the chain would give.
         """
-        source = open(uds.__file__, encoding="utf-8").read()
-        assert "debt = _latest_sum(" in source
-        assert "debt = _latest([" not in source
+        rows = [{"fiscalDate": "2024-03-31", "itemCode": 13110,
+                 "numericValue": 700.0, "modelType": 1.0},
+                {"fiscalDate": "2024-03-31", "itemCode": 13340,
+                 "numericValue": 300.0, "modelType": 1.0}]
+        monkeypatch.setattr(
+            "services.stock_service.fetch_vndirect_raw_statements",
+            lambda *a, **k: rows)
+        got = uds.fetch_vndirect_financials("TEST")["total_debt_fq"]
+        assert got == 1000.0, (
+            f"published {got}; 700.0 means the two borrowing lines were"
+            " walked as alternatives instead of being added")
 
     def test_the_two_helpers_really_differ(self, monkeypatch):
         # A summing helper that quietly fell back would pass the test

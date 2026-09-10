@@ -319,6 +319,103 @@ def fetch_tradingview_batch_by_tickers(
 # 1.5. VNDIRECT FINFO DEEP FINANCIAL STATEMENTS (TIER 2 WITNESS)
 # =============================================================================
 
+#: itemCode -> the VNDIRECT lines a field is read from, and how the codes
+#: combine. Module level and public because it is read from two places:
+#: this service, which publishes the live screener, and
+#: scripts/build_historical_fundamentals.py, which builds the quarterly
+#: lake the point-in-time backtest values symbols against.
+#:
+#: That script used to carry its own copy of these codes, and the copy is
+#: what makes this a table rather than a set of literals inline. Both
+#: cfo and debt were corrected here on measured evidence - cfo from the
+#: adjustment lines to the section total, debt from total liabilities to
+#: borrowings - and the copy went on reading the old codes, so the lake
+#: and the screener would have disagreed about the same company on the
+#: same quarter with nothing to say which was right.
+#:
+#: The rule travels with the codes, and it has to. "first" is a fallback
+#: chain: one line the vendor may file under either code, so the first
+#: that answers wins and the rest are alternatives. "sum" is a figure
+#: that IS two separate lines added, and reading it as a chain publishes
+#: the first half as the whole - a smaller number than the truth, in a
+#: ratio the screener displays, with nothing downstream able to notice.
+#: Sharing the codes without the rule would hand that bug straight to the
+#: second reader.
+#:
+#: Time aggregation is NOT here and is each caller's own business: the
+#: screener wants a trailing twelve months, the lake wants each quarter
+#: as filed. Both ask the same question about which code to read.
+VNDIRECT_ITEM_CODES: Dict[str, Tuple[Tuple[int, ...], str]] = {
+    # Income statement, in entity-form order: non-finance, bank,
+    # securities, insurance.
+    "revenue":      ((21001, 421900, 21000, 21010), "first"),
+    "net_income":   ((23000, 23800, 23001), "first"),
+    "ebit":         ((21020, 22000), "first"),
+
+    # Cash flow. itemCode is 3 + the two-digit VAS B03 code + 00, which
+    # the statement's own arithmetic established rather than a chart of
+    # accounts: over 153 companies, checked one at a time, net change =
+    # operating + investing + financing held 153 of 153, and cash at end
+    # = cash at start + net change held 149 of 153. So 32000 is VAS 20,
+    # the operating section total.
+    #
+    # 31000 and 31100 are adjustment lines inside that section, non-zero
+    # for 25 of 155 companies where 32000 was non-zero for 153 of 153.
+    # They stay behind the total rather than being dropped: a payload
+    # carrying the adjustments and not the total is worth reading rather
+    # than refusing.
+    "cfo":          ((32000, 31000, 31100), "first"),
+    "da":           ((31110, 31010), "first"),
+    # capex reads VAS 21 and the decoding says 32100 is VAS 21, so this
+    # is unchanged - but it is not confirmed either, and the census gives
+    # reason to doubt it: 32100 was non-zero for 8 of 152 companies in
+    # one run and 0 of 144 in the next. That is either a population that
+    # bought no fixed assets or a second wrong code, and nothing measured
+    # so far tells those apart.
+    "capex":        ((32100, 32110, 32010), "first"),
+
+    # Balance sheet. itemCode is 1 + the three-digit VAS code + 0,
+    # confirmed by median share of total assets: 12700 = 1.0000 (VAS 270
+    # total assets), 11000 = 0.6349 (VAS 100), 12000 = 0.3929 (VAS 200),
+    # 11300 = 0.1341 (VAS 130), 11100 = 0.0195 (VAS 110).
+    "total_assets": ((12700, 10000, 11000), "first"),
+    "equity":       ((14000, 14100), "first"),
+    "cash":         ((11100,), "first"),
+    "gross_ppe":    ((12110, 12100), "first"),
+
+    # Borrowings, not liabilities, and a sum rather than a chain.
+    #
+    # This read 13000 and 13100 - VAS 300 total liabilities and VAS 310
+    # current liabilities. Trade payables, customer deposits and accrued
+    # expenses are none of them borrowings, and the figure went straight
+    # into net_de_ratio across the screener. Scored against the total
+    # debt TradingView carries at tier 3, while that yardstick was still
+    # independent of this extractor:
+    #
+    #   13110 + 13340  (QD15 vay ngan han + vay dai han)   16.4%  25/152
+    #   13110 alone                                        10.6%  16/151
+    #   13000 + 13100  (what this used to read)             1.3%   2/152
+    #   13200 + 13340  (TT200 numbering)                    0.0%   0/152
+    #
+    # 16.4% is weak and is not claimed otherwise. It is twelve times the
+    # alternative, and the alternative is certainly wrong rather than
+    # merely unconfirmed, so this trades a certain error for an uncertain
+    # one.
+    "debt":         ((13110, 13340), "sum"),
+
+    # Total liabilities is a real figure and stays available under its own
+    # name. What it is not is debt, and assigning it to debt is the error
+    # the entry above records. The quarterly lake publishes it because a
+    # record needs a minimum number of statement fields to count as
+    # usable, and because assets - liabilities - equity is an identity
+    # something downstream may want to check.
+    "total_liabilities": ((13000, 13100), "first"),
+}
+
+#: How VNDIRECT_ITEM_CODES entries are allowed to combine.
+VNDIRECT_COMBINE_RULES = ("first", "sum")
+
+
 def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: int = 4000) -> Dict[str, Any]:
     """
     Tier 2 Reported Witness: Fetches deep historical statements from VNDIRECT Finfo API with L1/L2 Disk Lake caching.
@@ -424,78 +521,50 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
                 return val_lookup[c].get(latest_d)
         return None
 
-    # Extraction across standard & financial sector item codes
-    rev_ttm = _sum_ttm([21001, 421900, 21000, 21010]) # Non-finance, Bank, Sec, Ins
-    ni_ttm = _sum_ttm([23000, 23800, 23001])
-    ebit_ttm = _sum_ttm([21020, 22000])
-    da_ttm = _sum_ttm([31110, 31010]) # Depreciation and Amortization from Cash Flow
-    # capex reads VAS 21 and the decoding above says 32100 is VAS 21, so
-    # this is NOT changed - but it is not yet confirmed either, and the
-    # same census gave a reason to doubt it: 32100 was non-zero for 10 of
-    # 148 companies. That is either a population of companies that bought
-    # no fixed assets, which is possible for a group selected precisely
-    # because their cash flow data is untrustworthy, or a second wrong
-    # code. Nothing here can tell those apart, so nothing here moves; the
-    # census now carries a check that can.
-    capex_ttm = _sum_ttm([32100, 32110, 32010])
-    # Operating cash flow is the section total, and the section total is
-    # 32000.
-    #
-    # itemCode is 3 + the two-digit VAS B03 code + 00, and the statement's
-    # own arithmetic established it rather than a chart of accounts: over
-    # 153 companies that returned a coded cash flow statement, checked one
-    # company at a time,
-    #
-    #   net change = operating + investing + financing   153 of 153, 100%
-    #   cash at end = cash at start + net change         149 of 153, 97.4%
-    #
-    # so 32000/33000/34000 are VAS 20/30/40, the three section totals, and
-    # 35000/36000/37000 are VAS 50/60/70. An identity holding on every one
-    # of 153 separately-filed statements is not a coincidence of labels or
-    # of magnitudes; it is the statement adding up.
-    #
-    # 31000 and 31100 are adjustment lines inside the operating section,
-    # and the same census counted them non-zero for 25 of 155 companies
-    # where 32000 was non-zero for 153 of 153. The old pair is kept behind
-    # the total rather than dropped, because a payload that carries the
-    # adjustments and not the total is worth reading rather than refusing,
-    # and _sum_ttm takes the first code that answers.
-    cfo_ttm = _sum_ttm([32000, 31000, 31100])
-    
+    def _flow_ttm(field):
+        """A trailing-twelve-month flow, by the shared table's rule."""
+        codes, how = VNDIRECT_ITEM_CODES[field]
+        if how != "first":
+            # _sum_ttm walks the codes as alternatives and stops at the
+            # first that answers, so it cannot honour "sum". Marking a
+            # flow field "sum" and leaving this out would publish one
+            # code where two were meant, silently. Refusing is the only
+            # safe answer until _sum_ttm learns to add.
+            raise ValueError(
+                f"{field!r} is {how!r}, which _sum_ttm cannot do")
+        return _sum_ttm(codes)
+
+    def _stock_latest(field):
+        """A balance-sheet figure at the latest date, by the same rule."""
+        codes, how = VNDIRECT_ITEM_CODES[field]
+        return _latest_sum(codes) if how == "sum" else _latest(codes)
+
+    # Extraction across standard & financial sector item codes. Which
+    # codes, and whether they chain or add, is VNDIRECT_ITEM_CODES above -
+    # shared with scripts/build_historical_fundamentals.py so the lake and
+    # the screener cannot read the same company differently.
+    rev_ttm = _flow_ttm("revenue")
+    ni_ttm = _flow_ttm("net_income")
+    ebit_ttm = _flow_ttm("ebit")
+    da_ttm = _flow_ttm("da")
+    capex_ttm = _flow_ttm("capex")
+    cfo_ttm = _flow_ttm("cfo")
+
     # Granular Working Capital & Industry Items
     delta_ar = _sum_ttm([31130]) # Delta Receivables
     delta_inv = _sum_ttm([31140]) # Delta Inventory
     delta_ap = _sum_ttm([31150]) # Delta Payables
     delta_wc = (delta_ar or 0.0) + (delta_inv or 0.0) - (delta_ap or 0.0)
-    
-    assets = _latest([12700, 10000, 11000])
-    equity = _latest([14000, 14100])
-    # Borrowings, not liabilities.
-    #
-    # This read 13000 and 13100 - VAS 300 NO PHAI TRA and VAS 310 no ngan
-    # han, total and current liabilities. Trade payables, customer
-    # deposits and accrued expenses are none of them borrowings, and the
-    # figure was published straight into net_de_ratio across the screener.
-    #
-    # Scored against the total debt TradingView already carries at tier 3,
-    # over the companies that have one:
-    #
-    #   13110 + 13340  (QD15 vay ngan han + vay dai han)   16.4%  25/152
-    #   13110 alone                                        10.6%  16/151
-    #   13000 + 13100  (what this used to read)             1.3%   2/152
-    #   13200 + 13340  (TT200 numbering)                    0.0%   0/152
-    #
-    # 16.4% is a weak match and is not claimed as a strong one. It is
-    # twelve times the alternative, and the alternative is certainly
-    # wrong rather than merely unconfirmed: total liabilities is not a
-    # borrowing figure under any chart of accounts. This trades a certain
-    # error for an uncertain one, which is the right direction, and the
-    # weakness is on the record rather than papered over.
-    debt = _latest_sum([13110, 13340])
+
+    assets = _stock_latest("total_assets")
+    equity = _stock_latest("equity")
+    debt = _stock_latest("debt")
+    cash = _stock_latest("cash")
+    gross_ppe = _stock_latest("gross_ppe")
+    # Lines below are read here only - nothing else carries a copy of
+    # them, so there is no second list to drift and they stay inline.
     curr_assets = _latest([11000])
     curr_liab = _latest([13100])
-    cash = _latest([11100])
-    gross_ppe = _latest([12110, 12100])
     accum_deprec = _latest([12120])
     # The land bank is inventory, and the numbering is not the vendor's own.
     #

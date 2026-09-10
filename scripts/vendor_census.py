@@ -68,6 +68,7 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.unified_data_service import (  # noqa: E402
+    VNDIRECT_ITEM_CODES,
     _request_with_retry,
     _safe_float,
     fetch_vndirect_financials,
@@ -889,9 +890,15 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
 # 8. The cash flows and the borrowings, by item code
 # --------------------------------------------------------------------------
 #: What the service reads today for each, so a run states the codes it is
-#: testing rather than leaving the reader to go and look.
-CASH_FLOW_CODES = {"cfo": (32000, 31000, 31100), "capex": (32100, 32110, 32010)}
-DEBT_CODES = (13110, 13340)
+#: testing rather than leaving the reader to go and look. Taken from the
+#: service's own table rather than retyped: the entire value of printing
+#: them is that they are what the extractor actually reads, and a copy
+#: here would let a run state codes the extractor abandoned - a false
+#: claim in the report, not merely a stale constant. This file was the
+#: third place these codes were written down.
+CASH_FLOW_CODES = {name: VNDIRECT_ITEM_CODES[name][0]
+                   for name in ("cfo", "capex")}
+DEBT_CODES = VNDIRECT_ITEM_CODES["debt"][0]
 
 #: The resolver's gate. Duplicated rather than imported because the census
 #: must not import the valuation engine to ask a question about a vendor;

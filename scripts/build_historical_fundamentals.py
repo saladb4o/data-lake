@@ -34,7 +34,7 @@ import os
 import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -42,26 +42,60 @@ from services.point_in_time_fundamentals import (  # noqa: E402
     DEFAULT_PUBLICATION_LAG_DAYS,
     FUNDAMENTALS_LAKE_FILE,
 )
+from services.unified_data_service import VNDIRECT_ITEM_CODES  # noqa: E402
 
 logger = logging.getLogger("build_historical_fundamentals")
 
-# itemCode candidates per output field, in entity-form order:
-# non-finance, banking, securities, insurance.
-FLOW_CODES: Dict[str, List[int]] = {
-    "revenue": [21001, 421900, 21000, 21010],
-    "net_income": [23000, 23800, 23001],
-    "ebit": [21020, 22000],
-    "cfo": [31000, 31100],
-    "depreciation": [31110, 31010],
-    "capex": [32100, 32110, 32010],
-}
-STOCK_CODES: Dict[str, List[int]] = {
-    "total_assets": [12700, 10000, 11000],
-    "equity": [14000, 14100],
-    "total_liabilities": [13000, 13100],
-    "cash": [11100],
-    "gross_ppe": [12110, 12100],
-}
+# The item codes are NOT declared here. They live in
+# services.unified_data_service.VNDIRECT_ITEM_CODES, and this reads them
+# from there.
+#
+# They used to be declared here, as a copy, and the copy is the reason
+# this note is long. Two of those fields were corrected in the service on
+# measured evidence and the copy never heard about it:
+#
+#   cfo   read 31000 and 31100, adjustment lines inside the operating
+#         section, where the section total is 32000. The lake would have
+#         carried a figure that breaks the statement's own arithmetic -
+#         net change = operating + investing + financing held for 99.8%
+#         of companies with the total and 3.7% with those lines.
+#
+#   debt  was derived from total_liabilities, VAS 300 and VAS 310. Trade
+#         payables and customer deposits are not borrowings.
+#
+# So the backtest would have valued a company against quarterly
+# fundamentals that disagree with the screener's figures for the same
+# company, with nothing in either file to say which was right - and
+# because the lake is the point-in-time source, the disagreement would
+# have looked like the market being wrong rather than the extractor.
+#
+# The mapping carries a combining rule per field as well as the codes,
+# and honouring it is the point: "first" is a fallback chain, "sum" is
+# two lines added. Reading a "sum" field as a chain publishes the first
+# half as the whole, which is what borrowings would do - short-term debt
+# reported as total debt, smaller than the truth and unremarkable enough
+# to survive review.
+#: Fields this lake takes from the shared mapping. The service reads
+#: more lines than these; a field is listed here because the backtest
+#: uses it, not because the vendor has it.
+LAKE_FIELDS: Tuple[str, ...] = (
+    "revenue", "net_income", "ebit", "cfo", "da", "capex",
+    "total_assets", "equity", "debt", "total_liabilities", "cash",
+    "gross_ppe",
+)
+
+#: The lake's own name for a field where it differs from the service's.
+#: Kept explicit rather than renamed silently: "depreciation" is what the
+#: backtest reads, and changing that would be a separate change to a
+#: separate consumer.
+LAKE_FIELD_NAMES: Dict[str, str] = {"da": "depreciation"}
+
+#: Fields whose value is a balance at a date rather than a flow over the
+#: quarter. Both are read at the same fiscal date here - the lake stores
+#: each quarter as filed - so this exists only to document which is
+#: which for anyone summing them later.
+STOCK_FIELDS = frozenset({"total_assets", "equity", "debt",
+                          "total_liabilities", "cash", "gross_ppe"})
 
 
 def _quarter_code(fiscal_date: str) -> Optional[str]:
@@ -137,18 +171,31 @@ def build_symbol(symbol: str, size: int = 4000,
         if code is None:
             continue
 
-        def first(candidates: Iterable[int]) -> Optional[float]:
-            for item_code in candidates:
-                value = by_code.get(item_code, {}).get(fiscal)
+        def read(field: str) -> Optional[float]:
+            """One field at this fiscal date, by the shared table's rule.
+
+            The rule is honoured rather than assumed: a "sum" field read
+            as a chain would publish its first code as the whole figure.
+            An unknown rule raises instead of falling back to chaining,
+            because falling back is exactly how that bug would arrive.
+            """
+            codes, how = VNDIRECT_ITEM_CODES[field]
+            values = [by_code.get(code, {}).get(fiscal) for code in codes]
+            if how == "sum":
+                present = [v for v in values if v is not None]
+                return sum(present) if present else None
+            if how != "first":
+                raise ValueError(f"{field!r}: unknown rule {how!r}")
+            for value in values:
                 if value is not None:
                     return value
             return None
 
         record: Dict[str, Any] = {}
-        for field, codes in {**FLOW_CODES, **STOCK_CODES}.items():
-            value = first(codes)
+        for field in LAKE_FIELDS:
+            value = read(field)
             if value is not None:
-                record[field] = value
+                record[LAKE_FIELD_NAMES.get(field, field)] = value
 
         shares = shares_by_date.get(fiscal)
         if shares:
@@ -158,8 +205,9 @@ def build_symbol(symbol: str, size: int = 4000,
             if record.get("equity") is not None:
                 record["bvps"] = record["equity"] / shares
 
-        if record.get("equity") is not None and record.get("total_liabilities") is not None:
-            record.setdefault("debt", record["total_liabilities"])
+        # debt is read from the shared table now, as borrowings. It used
+        # to be assigned from total_liabilities here, which is what made
+        # the copy above dangerous rather than merely redundant.
         if record.get("cfo") is not None and record.get("capex") is not None:
             record["fcf"] = record["cfo"] - abs(record["capex"])
         if record.get("ebit") is not None and record.get("depreciation") is not None:
