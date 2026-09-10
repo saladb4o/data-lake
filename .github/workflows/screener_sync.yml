@@ -314,6 +314,23 @@ jobs:
                     f"({100.0 * same / len(both):.1f}%) - this was 100% "
                     "while debt was assigned from liabilities")
 
+          # Four fields came back at almost exactly half on the first
+          # build - gross_ppe, depreciation, debt, cash - while assets
+          # and equity were at 99.5%. A fill rate cannot say which half.
+          # A hole spread across symbols (entity forms filing under codes
+          # we do not read) and a hole spread across time (a code that
+          # starts at some quarter) both print 53%, and the fix for each
+          # is a different one. So report both shapes per field.
+          print()
+          print("| field | symbols with it | first quarter | last quarter |")
+          print("|---|---:|---|---|")
+          for name in sorted(fields):
+              if name.startswith(("filing_", "fiscal_")):
+                  continue
+              syms = {s for s, _, r in records if r.get(name) is not None}
+              qs = sorted(c for _, c, r in records if r.get(name) is not None)
+              print(f"| {name} | {len(syms)}/{len(symbols)} | {qs[0]} | {qs[-1]} |")
+
           # A record is only usable by the backtest when it carries at
           # least MIN_REQUIRED_FIELDS of the fields that mode counts.
           usable = sum(1 for _, _, r in records
