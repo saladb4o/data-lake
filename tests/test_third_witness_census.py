@@ -93,6 +93,27 @@ class TestTheCashWitness:
         assert report["cash"]["record_wins"] == 0
         assert report["cash"]["vendor_wins"] == 0
 
+    def test_the_witness_is_not_the_number_being_judged(self, monkeypatch):
+        """cash_fq is _latest([11100]) - the balance sheet line itself.
+
+        The first version judged both candidates against the balance
+        sheet, so the vendor was right by construction whenever both
+        figures existed. It scored 644 to nil with nothing undecided, and
+        a perfect score from a measurement is a reason to look at the
+        measurement.
+
+        Here the vendor echoes the balance sheet and the record matches
+        the cash flow statement instead. Against the balance sheet the
+        vendor wins; against the other statement, which is what the
+        witness has to be, the record does. The old code fails this.
+        """
+        payload = _payload(sheet_cash=100.0, flow_cash=500.0,
+                           cash_fq=100.0)
+        report, _ = _run(monkeypatch, {"AAA": payload},
+                         {"AAA": {"cash": 500.0}})
+        assert report["cash"]["record_wins"] == 1
+        assert report["cash"]["vendor_wins"] == 0
+
     def test_a_missing_line_is_not_counted(self, monkeypatch):
         payload = _payload()
         del payload["cash_flow_fq_by_code"][37000]

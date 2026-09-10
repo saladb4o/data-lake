@@ -57,16 +57,21 @@ class TestTheCashFlowIsExportedByCode:
         out = uds.fetch_vndirect_financials("AAA")
         assert out["cash_flow_ttm_by_code"][31000] == 8.0e11  # four quarters
 
-    def test_a_short_history_is_annualised_not_summed(self, stub):
+    def test_a_short_history_is_annualised_not_summed(self, stub,
+                                                     monkeypatch):
         # _sum_ttm scales by 4/len when the vendor sent fewer than four
         # quarters. The export carries that through, so a census table
         # shows an annual rate and not the quarter - worth stating,
         # because reading it as a quarter understates by up to fourfold.
         stub([(31000, 2.0e11)])
         import services.stock_service as ss
-        ss.fetch_vndirect_raw_statements = (
+        # Restored by the stub fixture's own monkeypatch at teardown, but
+        # written through it here so it does not depend on that.
+        monkeypatch.setattr(
+            ss, "fetch_vndirect_raw_statements",
             lambda symbol, report_type="ANNUAL", target_quarters=16:
-            _raw([(31000, 2.0e11)], dates=("2025-06-30",)))
+            _raw([(31000, 2.0e11)], dates=("2025-06-30",)),
+            raising=False)
         out = uds.fetch_vndirect_financials("AAB")
         assert out["cash_flow_ttm_by_code"][31000] == 8.0e11
 
@@ -132,10 +137,49 @@ class TestItCensusesTheCodesInForce:
         assert census.CASH_FLOW_CODES["capex"] == (32100, 32110, 32010)
 
     def test_the_debt_codes_match_the_service(self):
-        # When debt is retargeted at real borrowings this must be updated
-        # with it, or the census goes on measuring a question nobody asks.
+        # When debt is retargeted this must be updated with it, or the
+        # census goes on measuring a question nobody asks.
         source = open(uds.__file__, encoding="utf-8").read()
-        assert f"_latest({list(census.DEBT_CODES)})" in source
+        assert f"_latest_sum({list(census.DEBT_CODES)})" in source
+
+    def test_borrowings_are_added_up_not_fallen_back_through(self):
+        """_latest stops at the first code that answers.
+
+        It is a fallback chain, for one line the vendor might file under
+        either of two codes. Borrowings are not that: short-term and
+        long-term are two separate lines and the debt figure is their
+        sum, which is also what the census scored. Passing the pair to
+        _latest would publish the short-term half as the whole - a
+        smaller number than the truth, in a ratio the screener shows, and
+        nothing downstream could tell.
+        """
+        source = open(uds.__file__, encoding="utf-8").read()
+        assert "debt = _latest_sum(" in source
+        assert "debt = _latest([" not in source
+
+    def test_the_two_helpers_really_differ(self, monkeypatch):
+        # A summing helper that quietly fell back would pass the test
+        # above while doing the thing it exists to prevent.
+        #
+        # monkeypatch, not a bare assignment. The first version of this
+        # rebound fetch_vndirect_raw_statements and the cache on the
+        # module directly, with no fixture to undo it, so every later
+        # test in the session got this two-row stub and an disabled cache
+        # - and went to the network. A test that leaks its stub does not
+        # fail; it quietly changes what every test after it is measuring.
+        import services.stock_service as ss
+        rows = [{"itemCode": 13110, "fiscalDate": "2025-06-30",
+                 "numericValue": 300.0, "itemName": ""},
+                {"itemCode": 13340, "fiscalDate": "2025-06-30",
+                 "numericValue": 700.0, "itemName": ""}]
+        monkeypatch.setattr(
+            ss, "fetch_vndirect_raw_statements",
+            lambda symbol, report_type="ANNUAL", target_quarters=16: rows,
+            raising=False)
+        monkeypatch.setattr(ss.cache, "get", lambda *a, **k: None)
+        monkeypatch.setattr(ss.cache, "set", lambda *a, **k: None)
+        out = uds.fetch_vndirect_financials("AAZ")
+        assert out["total_debt_fq"] == 1000.0, "the halves were not added"
 
     @staticmethod
     def _snapshot(tmp_path, monkeypatch, body):

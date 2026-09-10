@@ -891,7 +891,7 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
 #: What the service reads today for each, so a run states the codes it is
 #: testing rather than leaving the reader to go and look.
 CASH_FLOW_CODES = {"cfo": (32000, 31000, 31100), "capex": (32100, 32110, 32010)}
-DEBT_CODES = (13000, 13100)
+DEBT_CODES = (13110, 13340)
 
 #: The resolver's gate. Duplicated rather than imported because the census
 #: must not import the valuation engine to ask a question about a vendor;
@@ -1514,11 +1514,23 @@ def third_witness(symbols: List[str], workers: int,
         record_cash = (held.get(sym) or {}).get("cash")
         if record_cash is None:
             continue
-        # The balance sheet is the witness; the two candidates are the
-        # record's published cash and what the vendor reports as cash_fq.
-        record_ok = _agreement(record_cash, sheet_cash) in ("identical",
-                                                            "agree")
-        vendor_ok = _agreement(entry.get("cash_fq"), sheet_cash) in (
+        # The witness is the CASH FLOW statement's closing balance, not
+        # the balance sheet line.
+        #
+        # The first version of this used the balance sheet, and the vendor
+        # won 644 to nil with nothing undecided - a suspiciously perfect
+        # score, and it was: cash_fq is _latest([11100]), the very code
+        # being used as the witness, so vendor_ok was true by
+        # construction. The measurement asked whether the vendor agreed
+        # with itself and answered yes.
+        #
+        # 37000 comes from the other statement. The two are filed
+        # separately, they meet for 99.2% of companies, and neither is
+        # where cash_fq is read from - so a candidate that matches it has
+        # been corroborated rather than merely echoed.
+        record_ok = _agreement(record_cash, flow_cash) in ("identical",
+                                                           "agree")
+        vendor_ok = _agreement(entry.get("cash_fq"), flow_cash) in (
             "identical", "agree")
         if record_ok and not vendor_ok:
             record_wins += 1
@@ -1527,7 +1539,7 @@ def third_witness(symbols: List[str], workers: int,
         elif not record_ok and not vendor_ok:
             neither += 1
 
-    print("\n  cash: the two statements have to meet at the closing balance")
+    print("\n  cash: judged against the OTHER statement's closing balance")
     print("  " + "-" * 70)
     if pair:
         print(f"  {coherent} of {pair} companies - the vendor's cash flow"
