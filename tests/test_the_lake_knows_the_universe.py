@@ -65,9 +65,11 @@ class TestTheListingIsFetchedBeforeGivingUp:
         full = _map_of(MIN_PLAUSIBLE_UNIVERSE + 400)
 
         def _reload():
-            # What load_master_universe does: rebinds the module global.
-            import services.stock_service as ss
-            ss.ALL_SYMBOLS_MAP = full
+            # The listing arriving: the map the service reads now holds a
+            # real universe. Filled in place rather than rebound - a bare
+            # assignment onto an imported module has no teardown, and the
+            # code under test re-reads the attribute either way.
+            thin.update(full)
 
         with mock.patch.object(lake, "logger"), \
                 mock.patch("services.stock_service.ALL_SYMBOLS_MAP", thin), \
