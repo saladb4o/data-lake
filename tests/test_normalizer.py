@@ -52,6 +52,16 @@ GOLDEN_KEYS = {
 OPTIONAL_LINE_KEYS = {
     "total_assets", "total_liabilities", "equity", "debt", "cash",
     "revenue", "net_income", "ebit", "ebitda", "cfo", "capex", "shares_out",
+    # Lines that are reconstructed and tiered upstream and published only
+    # when the evidence for them exists, so they come and go with the
+    # payload. Each was silently withheld from the record at some point in
+    # this repository's history despite being computed and tiered, which is
+    # why this guard lists them explicitly rather than allowing any new key
+    # through: the point of the guard is that a key appearing here is a
+    # decision somebody made, not a drift nobody noticed.
+    "da", "tangible_equity", "dividend_per_share",
+    "current_assets", "current_liabilities", "working_capital",
+    "retained_earnings", "prev_revenue",
 }
 
 # Identity / classification keys that are NOT fundamental scalars and thus

@@ -1697,6 +1697,12 @@ def reconstruct_financial_triangles(
     cash_equiv = _safe_float(tv_data.get("cash_n_short_term_invest_fq") or tv_data.get("cash_n_cash_equivalents_fq"), default=0.0)
     curr_assets_raw = _safe_float(tv_data.get("total_current_assets_fq"))
     curr_liab_raw = _safe_float(tv_data.get("total_current_liabilities_fq"))
+    # retained_earnings_fq is in TV_COLUMNS and was read by no line of code
+    # in the repository. It is a reported balance-sheet line and the sole
+    # real input Altman Z'' lacked; without it the score rested on an
+    # assertion that retained earnings are 20% of book equity for every
+    # company listed in Vietnam.
+    retained_earnings_raw = _safe_float(tv_data.get("retained_earnings_fq"))
     ppe_gross_raw = _safe_float(tv_data.get("ppe_total_gross_fq"))
     accum_dep_raw = _safe_float(tv_data.get("accum_deprec_total_fq"))
     goodwill_raw = _safe_float(tv_data.get("goodwill_fq"), default=0.0)
@@ -1730,6 +1736,16 @@ def reconstruct_financial_triangles(
     if s0_curr_liab is not None:
         curr_liab_raw = s0_curr_liab
         field_provenance["current_liabilities"] = 4
+    elif curr_liab_raw is not None:
+        # total_current_liabilities_fq has been requested from the vendor and
+        # read into curr_liab_raw since the beginning, and the only rung that
+        # ever tiered it was the Source-0 override above. Everywhere else the
+        # figure was a reported number with no provenance, which under the
+        # fail-closed rule is indistinguishable from a number nobody has -
+        # so current liabilities could never be published, and every identity
+        # standing on them (working capital first among them) had to fall
+        # back on a fabricated fraction of the balance sheet.
+        field_provenance["current_liabilities"] = 3
 
     # Calculate Net PPE using accumulated depreciation if reported
     if ppe_gross_raw is not None and accum_dep_raw is not None:
@@ -1787,6 +1803,15 @@ def reconstruct_financial_triangles(
         field_provenance["current_assets"] = 1
     else:
         curr_assets = None
+
+    # Retained earnings. Reported or nothing: a company's accumulated
+    # profits cannot be inferred from the rest of the balance sheet without
+    # assuming the very thing Altman Z'' is asked to measure, so there is no
+    # second rung here on purpose. Where the vendor is silent the line is
+    # not published, working_capital and retained_earnings resolve imputed,
+    # and the score is labelled unreliable - which is the honest answer.
+    if retained_earnings_raw is not None:
+        field_provenance["retained_earnings"] = 3
 
     # D/E and Net D/E
     raw_de = _safe_float(tv_data.get("debt_to_equity_fq"))
@@ -2270,6 +2295,23 @@ def reconstruct_financial_triangles(
     else:
         field_provenance["rev_1y_growth"] = 3
 
+    # Last year's revenue, recovered from this year's and the growth rate
+    # the vendor reports against it. Both numbers are already here; the
+    # engine's DCF asked for prev_revenue, no producer had ever written it,
+    # and the impute standing in its place was revenue * (1 - g) using the
+    # engine's OWN forecast growth - which makes the historical base a
+    # function of the forecast, and the forecast then reads as confirmed by
+    # history. Recovering it from the reported growth breaks that loop.
+    #
+    # Guarded below -100%: a growth rate of exactly -100% means revenue went
+    # to zero, and anything past it would produce a negative prior year.
+    if revenue is not None and revenue > 0 and rev_1y is not None and rev_1y > -100.0:
+        prev_revenue = round(revenue / (1.0 + rev_1y / 100.0), 2)
+        _prop("prev_revenue", 2,
+              field_provenance["revenue"], field_provenance["rev_1y_growth"])
+    else:
+        prev_revenue = None
+
     pat_1y = _tv_first(
         "net_income_yoy_growth_fq", "net_income_yoy_growth_fy",
         "net_income_growth_yoy_fq", "net_income_growth_yoy_fy",
@@ -2512,6 +2554,23 @@ def reconstruct_financial_triangles(
         # D&A and fell back on asserting D&A is 25% of EBIT for every
         # company on earth.
         "da": (calc_da, "da"),
+        # The current halves of the balance sheet. Both were reconstructed
+        # and tiered here from the start and neither was ever published, so
+        # working capital - a subtraction of two numbers already in this
+        # function - had no derivation available downstream and stood on
+        # (assets - liabilities) * 0.25.
+        "current_assets": (curr_assets, "current_assets"),
+        "current_liabilities": (curr_liab_raw, "current_liabilities"),
+        "retained_earnings": (retained_earnings_raw, "retained_earnings"),
+        "prev_revenue": (prev_revenue, "prev_revenue"),
+        # Working capital itself, so the identity is computed once, here,
+        # where both halves carry their tiers, rather than reassembled by
+        # each consumer.
+        "working_capital": (
+            None if curr_assets is None or curr_liab_raw is None
+            else curr_assets - curr_liab_raw,
+            "current_assets",
+        ),
     }
 
     # Tangible book equity, for p_tbv - the model tbvps blocks for all 1,177
@@ -2562,6 +2621,16 @@ def reconstruct_financial_triangles(
             continue
         absolute_lines[_name] = float(_value)
         field_provenance[_name] = field_provenance[_witness]
+
+    # working_capital stands on two witnesses, and the single-witness rule
+    # above can only copy one of them. A reconstruction is tier 2 at best,
+    # and it inherits the weaker of the two halves it was subtracted from -
+    # a current-assets figure guessed at 40% of total assets must not let a
+    # working capital derived from it read as observed.
+    if "working_capital" in absolute_lines:
+        _prop("working_capital", 2,
+              field_provenance["current_assets"],
+              field_provenance["current_liabilities"])
 
     result = {
         "mcap": mcap,
@@ -2881,24 +2950,43 @@ def normalize_stock_data(
     # triangles published instead, so a line added upstream arrives here on
     # its own rather than waiting to be noticed.
     # ---------------------------------------------------------------
+    # The copy is mechanical now, not a list. A triangle key reaches the top
+    # level when it is a number that carries a tier, and it stops there when
+    # a key of the same name is already spelled out in the record below -
+    # the explicit spelling always wins, so nothing here can quietly
+    # redefine a field the record already publishes.
+    #
+    # Requiring a tier is what makes this safe rather than merely automatic.
+    # An untiered value copied up would read as observed, which is the one
+    # failure this whole gate exists to prevent; field_provenance membership
+    # is the same admission test reconstruct_financial_triangles() already
+    # applies to its own absolute lines.
+    #
+    # Measured against the hand-written list it replaces, this carries up
+    # exactly two lines that were being dropped, both consumed by models
+    # that were refusing for want of them:
+    #   da              -> ebitda = ebit + da, which the engine otherwise
+    #                      approximates by asserting D&A is 25% of EBIT
+    #   tangible_equity -> tbvps, a declared driver of p_tbv
+    #
+    # _NOT_A_TOP_LEVEL_LINE is not a convenience. "mcap" is tiered and
+    # numeric, so it passes every test above, and it is denominated in
+    # BILLIONS while every other absolute line here is in raw VND. It
+    # already reaches the record as "market_cap" (billions, for the
+    # screener UI) and as "market_cap_vnd" (raw, for the engine). Letting a
+    # third spelling through in a third place is how a unit error gets
+    # made, so it is named and excluded here rather than left to be
+    # noticed later.
+    _NOT_A_TOP_LEVEL_LINE = {"mcap"}
     absolute_lines = {
-        key: tri[key]
-        for key in (
-            "total_assets", "total_liabilities", "equity", "debt", "cash",
-            "revenue", "net_income", "ebit", "ebitda", "cfo", "capex",
-            "shares_out",
-            # Added by hand, which is the point: the comment above says a
-            # line published upstream "arrives here on its own", and the code
-            # under it is still a hand-written list. Deriving
-            # dividend_per_share in the triangles was not enough - the value
-            # was computed, tiered, and dropped at this copy, which is the
-            # same defect this audit has found fourteen times and nearly
-            # reproduced here. Making the copy automatic is the real fix and
-            # is a change of its own; it would pull every triangle key to the
-            # top level at once and move tiers nobody has measured.
-            "dividend_per_share",
-        )
-        if tri.get(key) is not None
+        key: value
+        for key, value in tri.items()
+        if key not in _NOT_A_TOP_LEVEL_LINE
+        and not key.startswith("_")
+        and value is not None
+        and not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and key in tri["field_provenance"]
     }
 
     # "market_cap" below is in BILLIONS - it is a display field, read by the
@@ -2913,6 +3001,12 @@ def normalize_stock_data(
     is_imputed["market_cap_vnd"] = is_imputed.get("market_cap", True)
 
     return {
+        # Absolute statement lines, raw VND, each tiered in field_provenance.
+        # First, so that every explicit key below overrides it: the spread is
+        # a floor of whatever the triangles published, never a replacement
+        # for a field this record spells out on its own terms.
+        **absolute_lines,
+
         "symbol": symbol,
         "name": resolved_name,
         "exchange": resolved_ex,
@@ -2968,8 +3062,6 @@ def normalize_stock_data(
         "size_category": size_category,
         "size_damper": size_damper,
 
-        # Absolute statement lines, raw VND, each tiered in field_provenance.
-        **absolute_lines,
         "market_cap_vnd": market_cap_vnd,
 
         # Provenance at the top level, where every consumer reads it:
