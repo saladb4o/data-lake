@@ -385,6 +385,60 @@ class TestTheBorrowingCandidatesAreScoredNotChosen:
         got = census._score_debt_candidates([entry])
         assert got["13110 alone"]["matched"] == 1
 
+    def test_a_record_copied_from_this_vendor_cannot_judge_between_codes(
+            self, tmp_path, monkeypatch, capsys):
+        """The yardstick has to be a figure this extractor did not write.
+
+        Once debt reads 13110 + 13340, every record whose figure came
+        from VNDIRECT IS that sum, so scoring it against the candidates
+        scores the extractor against itself and the winner is whichever
+        pair is already in force. Run 34496051364 printed 93.9% for
+        13110 + 13340 the run after the extractor changed to read exactly
+        those two codes, against 16.4% the run before, and the jump was
+        the change rather than a finding.
+
+        This is the third instance of that shape in a day - d&a scoring
+        464/464 against a column TradingView does not have, a cash
+        witness scoring 644-0 against the code it was judging - so the
+        rule is the same one section 9 applies: identical is a copy, and
+        a copy is not evidence.
+        """
+        self._snap(tmp_path, monkeypatch, [
+            {"symbol": "COPY", "debt": 300.0,
+             "field_provenance": {"total_debt": 3}},
+            {"symbol": "REAL", "debt": 300.0,
+             "field_provenance": {"total_debt": 3}},
+        ])
+        codes = {13110: 200.0, 13340: 100.0}
+        got = census._score_debt_candidates([
+            # The record is this vendor's own total_debt_fq, to the digit.
+            {"symbol": "COPY", "total_debt_fq": 300.0,
+             "balance_sheet_fq_by_code": dict(codes)},
+            # TradingView supplied this one; the vendor says something
+            # else, so the agreement with the codes is real evidence.
+            {"symbol": "REAL", "total_debt_fq": 812.0,
+             "balance_sheet_fq_by_code": dict(codes)},
+        ])
+        pair = got["13110 + 13340   (QD15: vay ngan han + vay dai han)"]
+        assert pair["compared"] == 1, (
+            "the copied record was scored; the census graded the"
+            " extractor against its own output")
+        assert pair["matched"] == 1
+        assert "copy" in capsys.readouterr().out
+
+    def test_every_yardstick_being_a_copy_is_reported_not_scored(
+            self, tmp_path, monkeypatch, capsys):
+        # The failure mode to avoid is a confident table built on nothing.
+        self._snap(tmp_path, monkeypatch, [
+            {"symbol": "AAA", "debt": 300.0,
+             "field_provenance": {"total_debt": 3}},
+        ])
+        assert census._score_debt_candidates([
+            {"symbol": "AAA", "total_debt_fq": 300.0,
+             "balance_sheet_fq_by_code": {13110: 200.0, 13340: 100.0}},
+        ]) == {}
+        assert "cannot be decided" in capsys.readouterr().out
+
     def test_the_codes_in_force_are_among_the_candidates(self):
         # The pair the extractor reads today has to be scored beside the
         # rest, or the run cannot say the change was an improvement.

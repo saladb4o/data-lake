@@ -3631,16 +3631,45 @@ _SECTORS_NEEDING_A_LINE_TRADINGVIEW_LACKS = frozenset({
 })
 
 
+#: The VNDIRECT keys the overlay lets win outright, whatever TradingView
+#: holds. Kept here rather than only in the overlay because this gate has
+#: to know about them, and a test pins the two lists together by parsing
+#: the overlay: a third reversal added there and not here would be
+#: unreachable in exactly the population it was written for.
+_LINES_THE_VENDOR_WINS_OUTRIGHT = ("cfo_ttm", "cash_fq")
+
+
 def _needs_vndirect_backfill(
     tv_entry: Optional[Dict[str, Any]],
     sector_code: Optional[str] = None,
 ) -> bool:
-    """True when only VNDIRECT can answer something this symbol needs.
+    """True when VNDIRECT has something to add for this symbol.
 
     Either TradingView left one of the general statement lines empty, or the
     symbol's sector is valued on a line TradingView does not carry at any
-    level of completeness - see the frozenset above.
+    level of completeness - see the frozenset above - or the overlay
+    reverses the cascade for a line, which is the case that makes this
+    unconditional.
+
+    It used to ask only about symbols whose TradingView row was visibly
+    incomplete, and that was right while the overlay was purely a cascade:
+    a complete row meant a vendor could add nothing that would be read.
+    Two lines are now decided in VNDIRECT's favour whatever TradingView
+    carries, and the moment that became true a complete row stopped being
+    evidence of anything - but this gate still skipped those symbols, so
+    the payload was never fetched, the overlay block never ran, and both
+    overrides were unreachable for precisely the companies they were
+    written to correct. Measured: the cash flow identity closed for the
+    published figure on 58.3% of the universe rather than the 99.8% the
+    override should have produced, and the whole shortfall was symbols
+    TradingView had answered in full.
+
+    A question not asked, read downstream as an answer of no - the same
+    shape as the missing cash flow pair and the unasked land bank, wearing
+    the clothes of an optimisation this time.
     """
+    if _LINES_THE_VENDOR_WINS_OUTRIGHT:
+        return True
     if sector_code and str(sector_code).strip().upper() in \
             _SECTORS_NEEDING_A_LINE_TRADINGVIEW_LACKS:
         return True

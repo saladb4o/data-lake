@@ -71,17 +71,35 @@ class TestTheSectorsThatNeedThemAreAsked:
     def test_the_case_is_lowercase_and_whitespace_tolerant(self):
         assert _needs_vndirect_backfill(complete_tv_row(), "  vnreal ")
 
-    def test_an_ordinary_sector_still_costs_no_second_request(self):
-        assert not _needs_vndirect_backfill(complete_tv_row(), "VNIND"), (
-            "widening the gate for two sectors must not turn it into a "
-            "second request for the whole universe"
-        )
+    def test_widening_for_two_sectors_is_not_what_widened_it_to_all(self):
+        """This asserted the gate stayed shut for an ordinary sector.
+
+        It is open for every sector now, and not because of anything in
+        this file: two overlay lines are decided in VNDIRECT's favour
+        whatever TradingView holds, so a complete row no longer means
+        the vendor has nothing to add. Remove those overrides and this
+        gate closes again for VNIND - which is what makes it still a
+        sector test rather than a tautology.
+        """
+        import services.unified_data_service as uds
+        from unittest import mock
+
+        with mock.patch.object(uds, "_LINES_THE_VENDOR_WINS_OUTRIGHT", ()):
+            assert not _needs_vndirect_backfill(complete_tv_row(), "VNIND"), (
+                "widening the gate for two sectors must not turn it into a "
+                "second request for the whole universe"
+            )
+            assert _needs_vndirect_backfill(complete_tv_row(), "VNREAL")
 
     def test_an_incomplete_row_is_still_asked_in_any_sector(self):
         assert _needs_vndirect_backfill({}, "VNIND")
 
     def test_the_gate_is_unchanged_when_no_sector_is_supplied(self):
-        assert not _needs_vndirect_backfill(complete_tv_row())
+        import services.unified_data_service as uds
+        from unittest import mock
+
+        with mock.patch.object(uds, "_LINES_THE_VENDOR_WINS_OUTRIGHT", ()):
+            assert not _needs_vndirect_backfill(complete_tv_row())
         assert _needs_vndirect_backfill(None)
 
 

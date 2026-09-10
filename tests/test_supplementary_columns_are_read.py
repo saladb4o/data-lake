@@ -20,6 +20,8 @@ multiplied by revenue already held in known units and propagates revenue's
 tier, and ROIC is a percentage read as a percentage.
 """
 
+from unittest import mock
+
 import pytest
 
 from services import unified_data_service as uds
@@ -239,10 +241,17 @@ def test_a_row_with_no_cash_flow_is_sent_to_the_overlay():
     }
     assert uds._needs_vndirect_backfill(complete_except_cash)
 
+    # The contrast this test is about is the cash flow pair, so it has to
+    # be measured with the override list empty. With it populated every
+    # row is asked, which is a different fix for a different hole and
+    # would make the assertion above pass no matter what _TV_REQUIRED_LINES
+    # said.
     fully_complete = dict(complete_except_cash)
     fully_complete["cash_f_operating_activities_ttm"] = 5e9
     fully_complete["capital_expenditures_ttm"] = -1e9
-    assert not uds._needs_vndirect_backfill(fully_complete)
+    with mock.patch.object(uds, "_LINES_THE_VENDOR_WINS_OUTRIGHT", ()):
+        assert uds._needs_vndirect_backfill(complete_except_cash)
+        assert not uds._needs_vndirect_backfill(fully_complete)
 
 
 class TestVietcapCashFlowReachesTheLadder:

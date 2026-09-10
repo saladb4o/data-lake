@@ -84,3 +84,35 @@ class TestNothingElseWasQuietlyReversed:
         # nothing.
         source = _overlay_source()
         assert len(re.findall(r"if not tv\.get\(", source)) >= 8
+
+
+class TestTheGateKnowsAboutTheOverrides:
+    """The reversal is only real if the payload is fetched.
+
+    An override lives in the overlay; whether the overlay runs at all is
+    decided much earlier, by _needs_vndirect_backfill, which used to ask
+    only about symbols whose TradingView row was incomplete. So a line
+    reversed in the overlay was silently not reversed for every symbol
+    TradingView had answered - which is the whole population the reversal
+    was about. Both overrides shipped that way and the census measured the
+    hole: 58.3% where 99.8% was expected.
+
+    These two lists are therefore one fact written twice, and this pins
+    them together.
+    """
+
+    def test_the_gate_names_the_same_lines_the_overlay_reverses(self):
+        source = _overlay_source()
+        reversed_keys = set(re.findall(r'if vnd\.get\("(\w+)"\):', source))
+        assert set(uds._LINES_THE_VENDOR_WINS_OUTRIGHT) == reversed_keys, (
+            "the overlay reverses"
+            f" {sorted(reversed_keys)} but the backfill gate knows about"
+            f" {sorted(uds._LINES_THE_VENDOR_WINS_OUTRIGHT)}; the"
+            " difference is a line that is reversed only where VNDIRECT"
+            " happened to be fetched for some other reason")
+
+    def test_a_reversed_line_forces_the_call_for_every_symbol(self):
+        # Not "for incomplete rows". A row TradingView filled in
+        # completely is exactly the row an override exists to correct.
+        assert uds._needs_vndirect_backfill(
+            {key: 1.0 for key in uds._TV_REQUIRED_LINES}) is True

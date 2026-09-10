@@ -1118,8 +1118,12 @@ def cash_flows_and_borrowings(symbols: List[str], workers: int,
               " the vendor does not serve one for these companies\n")
 
     print("-" * 74)
-    print(f"  borrowings: debt reads {DEBT_CODES}"
-          f" = VAS 300 and VAS 310, which are not borrowings")
+    # This line described the codes debt used to read, and went stale the
+    # moment the extractor changed - printing "which are not borrowings"
+    # underneath the pair that had just been adopted for being borrowings.
+    # A header that names a constant has to read that constant.
+    print(f"  borrowings: debt reads {DEBT_CODES}, scored below against a"
+          f" total debt this extractor did not supply")
     print("-" * 74)
     with_bs = [e for e in fetched if e.get("balance_sheet_fq_by_code")]
     print(f"  {len(with_bs):>5} of {len(fetched)} returned a coded"
@@ -1195,6 +1199,33 @@ def _score_debt_candidates(entries) -> Dict[str, Any]:
           f" ({len(known)} symbols carry one at tier 3):")
     if not known:
         print("    none do, so this cannot be decided from the snapshot.")
+        return {}
+
+    # A yardstick the extractor itself produced measures nothing. Once
+    # debt reads 13110 + 13340, every record whose figure came from
+    # VNDIRECT IS that sum, so scoring it against these candidates scores
+    # the extractor against itself and the winning combination is
+    # whichever one is already in force. That is what happened on run
+    # 34496051364: this table read 93.9% for 13110 + 13340 the run after
+    # the extractor was changed to read exactly those two codes, against
+    # 16.4% the run before, and the jump measured nothing but the change.
+    #
+    # A record identical to the vendor's own total_debt_fq is that copy,
+    # by the same rule section 9 applies: identical is not corroboration.
+    # Dropping them leaves only yardsticks TradingView supplied, which is
+    # the independent evidence this table needs to be worth printing.
+    copies = 0
+    for entry in entries:
+        sym = str(entry.get("symbol") or "").upper().strip()
+        if sym in known and _agreement(
+                known[sym], entry.get("total_debt_fq")) == "identical":
+            del known[sym]
+            copies += 1
+    if copies:
+        print(f"    ({copies} dropped: the record there is a copy of this"
+              " vendor's own figure, so it cannot judge between codes)")
+    if not known:
+        print("    every yardstick was a copy; this cannot be decided.")
         return {}
 
     print("    candidate                                        matched  of")
