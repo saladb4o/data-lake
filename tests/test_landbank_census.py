@@ -262,6 +262,45 @@ class TestTheFocusedRunStaysFocused:
             assert f'"{mode}"' in source, mode
             assert f'args.only == "{mode}"' in source, mode
 
+    def test_the_workflow_can_reach_every_mode(self):
+        """The workflow must not carry a second, shorter list of sections.
+
+        It did. The step condition named 'true' and 'landbank' while the
+        script had grown a third mode, so a run dispatched with 'cashflow'
+        skipped the census entirely and still reported success - a
+        measurement that silently did not happen, which is worse than one
+        that fails.
+
+        Now the workflow gates on "not false" and passes the value straight
+        to --only, which rejects a name it does not have. This pins that:
+        no list of section names in the workflow at all.
+        """
+        import inspect
+        import pathlib
+        import re
+
+        workflow = pathlib.Path(__file__).resolve().parents[1] / (
+            ".github/workflows/screener_sync.yml")
+        text = workflow.read_text(encoding="utf-8")
+        step = text[text.index("Census the vendor routes"):
+                    text.index("Audit valuation coverage")]
+        # Comments explain the trap by naming it; only what the runner
+        # executes can fall out of step with the script.
+        step = "\n".join(line for line in step.splitlines()
+                         if not line.lstrip().startswith("#"))
+        modes = set(re.findall(r'choices=\(([^)]*)\)',
+                               inspect.getsource(census.main))[0]
+                    .replace('"', "").replace(" ", "").split(","))
+        assert "cashflow" in modes and "landbank" in modes
+        for mode in modes - {"all"}:
+            # A section name hard-coded in the workflow is the thing that
+            # went wrong; the value is forwarded, never matched.
+            assert f"'{mode}'" not in step, (
+                f"the workflow names {mode!r}; it will fall behind the "
+                f"script again"
+            )
+        assert 'ONLY="${{ github.event.inputs.vendor_census }}"' in step
+
     def test_the_section_runs_after_the_catalogue_in_a_full_census(self):
         source = open(census.__file__, encoding="utf-8").read()
         assert (source.index("print_field_catalogue(out)\n\n    # After")

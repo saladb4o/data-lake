@@ -27,7 +27,7 @@ on:
         # and the loan book, and under which item codes - in a few hundred
         # requests and a table short enough to read from a log tail. 'true'
         # is the whole survey, several thousand requests and 1400 lines.
-        description: 'Census nguồn dữ liệu: false | landbank | true'
+        description: 'Census nguồn dữ liệu: false | landbank | cashflow | true'
         required: false
         default: 'false'
       census_limit:
@@ -111,7 +111,12 @@ jobs:
       # It writes no valuation input and cannot: it runs after the snapshot
       # is already built and never reads back into it.
       - name: Census the vendor routes
-        if: ${{ github.event.inputs.vendor_census == 'true' || github.event.inputs.vendor_census == 'landbank' }}
+        # Anything but false runs the census; which section is decided
+        # below, by the same value. Listing the section names here as well
+        # meant the two lists could disagree, and they did: a run asked for
+        # 'cashflow', the condition did not name it, and the step was
+        # skipped silently while the run looked like a success.
+        if: ${{ github.event.inputs.vendor_census != 'false' && github.event.inputs.vendor_census != '' }}
         continue-on-error: true
         # The census shares the job's 60-minute budget with the sync, and it
         # is the step most likely to sit waiting: it talks to vendors nobody
@@ -128,11 +133,11 @@ jobs:
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
         run: |
-          if [ "${{ github.event.inputs.vendor_census }}" = "landbank" ]; then
-            ONLY=landbank
-          else
-            ONLY=all
-          fi
+          # 'true' means the whole census; any other value names the one
+          # section to run and is handed straight to --only, which rejects
+          # a name it does not have rather than quietly running everything.
+          ONLY="${{ github.event.inputs.vendor_census }}"
+          if [ "$ONLY" = "true" ]; then ONLY=all; fi
           # Appended, not written: the audit below adds the coverage
           # headline to the same summary, and the summary is the one
           # channel that does not depend on reading a log from its tail.
