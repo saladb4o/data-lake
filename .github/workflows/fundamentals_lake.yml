@@ -1,0 +1,187 @@
+name: Historical Fundamentals Lake
+
+# Builds data/historical_fundamentals.json - the point-in-time quarterly
+# lake the fair-value backtest defaults to - on a clean runner, and
+# publishes it as a private artifact.
+#
+# Why a runner: the build talks to VNDIRECT Finfo once per symbol, and
+# that host is unreachable from several of the machines this work happens
+# on. It is also a long serial pass, so it wants a box nobody is using.
+#
+# The lake is uploaded, NOT committed. This repository is public and the
+# lake is the whole fundamentals history; committing it would publish it
+# to anyone who visits. Download it from the run page.
+#
+# This build had never been run end to end when this workflow was written,
+# so 'limit' exists to buy the measurement before the commitment: a short
+# pass tells us the per-symbol cost and whether the extracted fields are
+# what we think they are, for a few minutes instead of an hour.
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: 'Mã cụ thể, cách nhau bởi dấu cách (để trống = toàn bộ universe)'
+        required: false
+        default: ''
+      limit:
+        description: 'Giới hạn số mã khi chạy universe (0 = tất cả)'
+        required: false
+        default: '40'
+      merge:
+        description: 'Giữ lại các mã đã có trong lake (true/false)'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: fundamentals-lake
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the quarterly lake
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build the lake
+        env:
+          # Keep every write inside the workspace, as the screener sync
+          # does: without this the resolver looks for a Drive mount that
+          # does not exist on a runner.
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+        run: |
+          set -o pipefail
+          ARGS=""
+          if [ -n "${{ github.event.inputs.symbols }}" ]; then
+            ARGS="--symbols ${{ github.event.inputs.symbols }}"
+          else
+            ARGS="--universe"
+            LIMIT="${{ github.event.inputs.limit || '0' }}"
+            if [ "$LIMIT" != "0" ] && [ -n "$LIMIT" ]; then
+              ARGS="$ARGS --limit $LIMIT"
+            fi
+          fi
+          if [ "${{ github.event.inputs.merge }}" = "true" ]; then
+            ARGS="$ARGS --merge"
+          fi
+          echo "build_historical_fundamentals.py $ARGS"
+          START=$(date +%s)
+          python scripts/build_historical_fundamentals.py $ARGS \
+            --out "$DATA_LOCAL_DIR/historical_fundamentals.json"
+          echo "elapsed_seconds=$(( $(date +%s) - START ))"
+
+      # The lake has never been built before, so counting symbols is not
+      # enough: the question is whether the fields in it are the fields we
+      # think we extracted. Two of them were wrong in this script until
+      # recently - cfo read an adjustment line instead of the operating
+      # section total, and debt was assigned from total liabilities - and
+      # both failures are invisible in a symbol count. They are visible
+      # here, as a fill rate and as an equality that should now be rare.
+      #
+      # This never writes; it reads the file the step above produced.
+      - name: Read back what was written
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+        run: |
+          python - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import json, os, sys
+          from collections import Counter
+
+          sys.path.insert(0, os.getcwd())
+          # The judge of a usable record is imported, not restated. A
+          # list of field names copied into this workflow would be one
+          # more copy that cannot hear about a change - which is the
+          # defect this whole build was cleaned up to remove.
+          from services.point_in_time_fundamentals import (
+              MIN_REQUIRED_FIELDS, _usable_field_count)
+
+          path = os.path.join(os.environ["DATA_LOCAL_DIR"],
+                              "historical_fundamentals.json")
+          if not os.path.exists(path):
+              sys.exit(f"no lake at {path}")
+          lake = json.load(open(path, encoding="utf-8"))
+          symbols = lake.get("symbols", {})
+
+          records = []
+          for sym, entry in symbols.items():
+              for code, rec in (entry.get("quarters") or {}).items():
+                  records.append((sym, code, rec))
+
+          print("## Historical fundamentals lake")
+          print()
+          print(f"- symbols: **{len(symbols)}**")
+          print(f"- quarter records: **{len(records)}**")
+          if not records:
+              sys.exit("the lake holds no quarter records")
+
+          quarters = sorted({c for _, c, _ in records})
+          print(f"- quarters: {quarters[0]} .. {quarters[-1]} "
+                f"({len(quarters)} distinct)")
+          per = Counter(s for s, _, _ in records)
+          print(f"- quarters per symbol: min {min(per.values())}, "
+                f"median {sorted(per.values())[len(per)//2]}, "
+                f"max {max(per.values())}")
+          print()
+
+          fields = Counter()
+          for _, _, rec in records:
+              fields.update(k for k, v in rec.items() if v is not None)
+          n = len(records)
+          print("| field | records | fill |")
+          print("|---|---:|---:|")
+          for name, count in fields.most_common():
+              print(f"| {name} | {count} | {100.0 * count / n:.1f}% |")
+          print()
+
+          # The signature of the bug that used to live here: debt was
+          # total_liabilities, so the two were equal in every record. A
+          # handful of genuine matches is possible; a majority means the
+          # assignment came back.
+          both = [r for _, _, r in records
+                  if r.get("debt") is not None
+                  and r.get("total_liabilities") is not None]
+          same = sum(1 for r in both
+                     if abs(r["debt"] - r["total_liabilities"]) < 1.0)
+          if both:
+              print(f"- debt == total_liabilities in **{same}/{len(both)}** "
+                    f"({100.0 * same / len(both):.1f}%) - this was 100% "
+                    "while debt was assigned from liabilities")
+
+          # A record is only usable by the backtest when it carries at
+          # least MIN_REQUIRED_FIELDS of the fields that mode counts.
+          usable = sum(1 for _, _, r in records
+                       if _usable_field_count(r) >= MIN_REQUIRED_FIELDS)
+          print(f"- records with >= {MIN_REQUIRED_FIELDS} scored fields: "
+                f"**{usable}/{n}** ({100.0 * usable / n:.1f}%)")
+          PY
+
+      - name: Upload the lake
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical_fundamentals
+          path: data/historical_fundamentals.json
+          retention-days: 14
+          if-no-files-found: error
