@@ -386,8 +386,13 @@ jobs:
           LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
         run: bash scripts/run_the_measurement_pass.sh universe
 
+      # Measured, not guessed: a cancelled run reached symbols starting
+      # with C after 21 minutes - roughly a fifth of 1,523 - so the full
+      # pass is 1.5 to 2 hours. It runs 10 workers already; the limit is
+      # the shared rate-limit bucket, not concurrency. 60 minutes would
+      # have killed it every time, at the two-thirds mark.
       - name: Historical prices
-        timeout-minutes: 60
+        timeout-minutes: 180
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
