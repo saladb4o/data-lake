@@ -101,3 +101,39 @@ class TestTheTestIsDistrustedWhenItIsTooGood:
         tally = score(probe)["gross_ppe"]["candidates"]["capex_32110"]
         assert tally["tested"] == 1
         assert tally["held"] == 0
+
+
+class TestTheColumnsComeFromTheProbeNotFromHere:
+    """Restating the candidate names would drift the moment the shared
+    code table changed - silently, scoring codes the extractor no longer
+    reads and naming a winner among them."""
+
+    def test_the_judged_columns_are_read_from_the_probes_header(self):
+        from scripts.score_code_candidates import under_judgement
+
+        probe = {"codes": {"gross_ppe": [1], "accumulated_depreciation": [2],
+                           "capex_99999": [99999], "da_88888": [88888]}}
+        judged = under_judgement(probe)
+        assert judged["gross_ppe"] == ("capex_99999",)
+        assert judged["accumulated_depreciation"] == ("da_88888",)
+
+    def test_the_scorer_follows_the_table_when_a_code_changes(self):
+        """A new capex code in the table is judged without editing this."""
+        from scripts.score_code_candidates import score
+
+        probe = {"codes": {"gross_ppe": [1], "capex_12345": [12345]},
+                 "symbols": {"AAA": {
+                     "2021-Q1": {"gross_ppe": 1000.0, "capex_12345": -100.0},
+                     "2021-Q2": {"gross_ppe": 1100.0, "capex_12345": -100.0}}}}
+        result = score(probe)["gross_ppe"]["candidates"]
+        assert "capex_12345" in result
+        assert result["capex_12345"]["held"] == 1
+
+    def test_the_probes_columns_match_the_shared_table(self):
+        """The two files must agree about which codes are under judgement."""
+        from scripts.build_historical_fundamentals import DIAGNOSTIC_CODES
+        from services.unified_data_service import VNDIRECT_ITEM_CODES
+
+        for field, prefix in (("capex", "capex"), ("da", "da")):
+            for code in VNDIRECT_ITEM_CODES[field][0]:
+                assert f"{prefix}_{code}" in DIAGNOSTIC_CODES

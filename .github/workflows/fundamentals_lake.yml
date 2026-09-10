@@ -260,5 +260,6 @@ jobs:
             data/backtest_sweep.json
             data/code_candidates.json
             data/code_candidates_probe.json
+            data/new_sources.json
           retention-days: 14
           if-no-files-found: warn

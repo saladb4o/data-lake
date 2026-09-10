@@ -76,6 +76,15 @@ if [ -f "$DATA/code_candidates_probe.json" ]; then
       --json '$DATA/code_candidates.json' | tee -a '$SUMMARY'"
 fi
 
+# A source this codebase does not use. Reachability is itself the
+# question - every candidate host is 403 from a dev container, as
+# VNDIRECT is - and it runs after the lake so it can hold the two
+# vendors' figures for the same quarter side by side.
+stage "probe sources we do not use" \
+  bash -c "set -o pipefail; python scripts/probe_new_sources.py \
+    --lake '$DATA/historical_fundamentals.json' \
+    --json '$DATA/new_sources.json' | tee -a '$SUMMARY'"
+
 stage "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
     --lags $LAGS --json '$DATA/backtest_sweep.json' | tee -a '$SUMMARY'"
@@ -100,7 +109,8 @@ stage "coverage audit" \
   echo "| file | bytes |"
   echo "|---|---:|"
   for f in historical_fundamentals screener_snapshot historical_prices \
-           coverage backtest_sweep code_candidates code_candidates_probe; do
+           coverage backtest_sweep code_candidates code_candidates_probe \
+           new_sources; do
     if [ -f "$DATA/$f.json" ]; then
       echo "| $f.json | $(wc -c < "$DATA/$f.json") |"
     else

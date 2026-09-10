@@ -19,7 +19,8 @@ PASS = os.path.join(ROOT, "scripts", "run_the_measurement_pass.sh")
 
 STAGES = ("sync_unified_market_data", "sync_historical_prices",
           "build_historical_fundamentals", "score_code_candidates",
-          "measure_the_backtest", "audit_valuation_coverage")
+          "probe_new_sources", "measure_the_backtest",
+          "audit_valuation_coverage")
 
 
 @pytest.fixture
@@ -79,6 +80,7 @@ class TestLosingAnInputIsWorseThanLosingAMeasurement:
         assert _run(sandbox).returncode == 1
 
     @pytest.mark.parametrize("stage", ["score_code_candidates",
+                                       "probe_new_sources",
                                        "measure_the_backtest",
                                        "audit_valuation_coverage"])
     def test_a_measurement_failing_still_delivers_the_lakes(self, sandbox, stage):
@@ -106,6 +108,12 @@ class TestTheStagesRunInDependencyOrder:
         out = _run(sandbox).stdout
         assert (out.index("fundamentals lake")
                 < out.index("backtest sweep")), "the sweep reads the lake"
+
+    def test_the_probe_runs_after_the_lake_it_compares_against(self, sandbox):
+        """It holds the two vendors' figures for the same quarter."""
+        out = _run(sandbox).stdout
+        assert (out.index("fundamentals lake")
+                < out.index("probe sources we do not use"))
 
     def test_the_coverage_headline_is_printed_last(self, sandbox):
         """A log can only be read from its tail."""

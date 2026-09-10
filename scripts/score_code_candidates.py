@@ -32,11 +32,37 @@ import json
 import sys
 from typing import Any, Dict, List, Optional, Tuple
 
-#: candidate field -> the balance-sheet delta it should reproduce
-UNDER_JUDGEMENT: Dict[str, Tuple[str, ...]] = {
-    "gross_ppe": ("capex_32100", "capex_32110", "capex_32010"),
-    "accumulated_depreciation": ("da_31110", "da_31010"),
+#: candidate prefix -> the balance-sheet delta it should reproduce
+ANCHORS: Dict[str, str] = {
+    "capex": "gross_ppe",
+    "da": "accumulated_depreciation",
 }
+
+
+def under_judgement(probe: Dict[str, Any]) -> Dict[str, Tuple[str, ...]]:
+    """Which columns to judge, read from the probe rather than restated.
+
+    The probe derives its columns from the shared code table, so naming
+    them again here would drift the moment that table changed - and the
+    drift is silent: this would go on scoring codes the extractor no
+    longer reads, and report a winner among them.
+    """
+    columns = list(probe.get("codes") or {})
+    if not columns:
+        # An older probe without the header; fall back to whatever the
+        # records carry, so the scorer still works on what it is given.
+        for quarters in (probe.get("symbols") or {}).values():
+            for record in quarters.values():
+                columns = list(record)
+                break
+            break
+    out: Dict[str, Tuple[str, ...]] = {}
+    for prefix, anchor in ANCHORS.items():
+        found = tuple(sorted(c for c in columns
+                             if c.startswith(f"{prefix}_")))
+        if found:
+            out[anchor] = found
+    return out
 
 TOLERANCE = 0.25  # a quarter's fixed-asset movement is noisy; be generous
 
@@ -62,7 +88,7 @@ def score(probe: Dict[str, Any]) -> Dict[str, Any]:
     symbols = probe.get("symbols", {})
     results: Dict[str, Any] = {}
 
-    for anchor, candidates in UNDER_JUDGEMENT.items():
+    for anchor, candidates in under_judgement(probe).items():
         tallies = {name: {"present": 0, "nonzero": 0, "held": 0, "tested": 0}
                    for name in candidates}
         deltas_available = 0

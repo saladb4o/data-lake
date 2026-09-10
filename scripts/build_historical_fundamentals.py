@@ -98,34 +98,41 @@ STOCK_FIELDS = frozenset({"total_assets", "equity", "debt",
                           "total_liabilities", "cash", "gross_ppe"})
 
 
-#: Item codes to record alongside the lake so the two unresolved fields
-#: can be judged without a second pass over the universe.
+#: Values recorded alongside the lake so the two unresolved fields can be
+#: judged without a second pass over the universe.
 #:
 #: capex and depreciation are the only lines the extractor reads whose
 #: correctness has never been established. capex differs from the other
 #: vendor for 70.8% of companies and its first code is near-always zero;
-#: depreciation is the one field still missing for a fifth of the lake.
+#: depreciation is the field still missing for a fifth of the lake.
 #:
-#: The point is NOT to read these into the lake. It is that a filing
-#: contains its own arithmetic: capex should move gross fixed assets, and
-#: the period's depreciation should move accumulated depreciation. Those
-#: deltas are an independent yardstick - independent because they come
-#: from the balance sheet, which no cash-flow code we are judging feeds.
-#: Scoring a candidate against a figure the same extractor produced is
-#: how three measurements today returned a perfect score for nothing.
-DIAGNOSTIC_CODES: Dict[str, Tuple[int, ...]] = {
-    # Balance-sheet anchors, differenced quarter over quarter.
-    "gross_ppe": (12110, 12100),
-    "accumulated_depreciation": (12120,),
-    # The candidates themselves, each read on its own rather than as a
-    # chain, so a code that never answers is visible as a column of nulls
-    # instead of hiding behind the one before it.
-    "capex_32100": (32100,),
-    "capex_32110": (32110,),
-    "capex_32010": (32010,),
-    "da_31110": (31110,),
-    "da_31010": (31010,),
-}
+#: The candidates are NOT restated here. They are the codes the shared
+#: table already chains through, split one per column so a code that
+#: never answers shows as a column of nulls instead of hiding behind the
+#: one before it. Writing them out again would be a second map of item
+#: codes in a second file - the thing this build was cleaned up to
+#: remove - and it would drift the moment the table changed, leaving the
+#: diagnosis judging codes the extractor no longer reads.
+#:
+#: The anchors are balance-sheet lines, differenced quarter over quarter.
+#: gross_ppe comes from the table; accumulated depreciation is not in it
+#: at all - the service reads 12120 inline, for itself - so it is named
+#: here, once, as this file's own.
+ACCUMULATED_DEPRECIATION_CODE = 12120
+
+
+def _diagnostic_codes() -> Dict[str, Tuple[int, ...]]:
+    """The probe's columns, derived from the shared table."""
+    probe: Dict[str, Tuple[int, ...]] = {}
+    probe["gross_ppe"] = VNDIRECT_ITEM_CODES["gross_ppe"][0]
+    probe["accumulated_depreciation"] = (ACCUMULATED_DEPRECIATION_CODE,)
+    for field in ("capex", "da"):
+        for code in VNDIRECT_ITEM_CODES[field][0]:
+            probe[f"{field}_{code}"] = (code,)
+    return probe
+
+
+DIAGNOSTIC_CODES: Dict[str, Tuple[int, ...]] = _diagnostic_codes()
 
 
 def _quarter_code(fiscal_date: str) -> Optional[str]:
