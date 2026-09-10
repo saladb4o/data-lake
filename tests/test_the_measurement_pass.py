@@ -148,3 +148,65 @@ class TestTheSourceProbeIsOptIn:
                  "GITHUB_STEP_SUMMARY": str(sandbox / "summary.md")})
         assert "did not complete" in result.stdout
         assert result.returncode == 0, "a probe is a measurement, not an input"
+
+
+class TestAStageCanBeRunOnItsOwn:
+    """A job log cannot be read until the job ends, so six stages inside
+    one workflow step means an hour with no way to tell work from a hang.
+    One step per stage restores the timings GitHub shows live."""
+
+    def test_naming_a_stage_runs_only_that_one(self, sandbox):
+        for name in STAGES:
+            (sandbox / "scripts" / f"{name}.py").write_text(
+                f"#!/usr/bin/env python3\nprint('RAN {name}')\n",
+                encoding="utf-8")
+        out = subprocess.run(
+            ["bash", "scripts/run_the_measurement_pass.sh", "lake"],
+            cwd=sandbox, capture_output=True, text=True,
+            env={**os.environ, "DATA_LOCAL_DIR": str(sandbox / "data"),
+                 "GITHUB_STEP_SUMMARY": str(sandbox / "s.md")}).stdout
+        assert "RAN build_historical_fundamentals" in out
+        assert "RAN sync_historical_prices" not in out
+
+    def test_no_arguments_still_runs_everything(self, sandbox):
+        for name in STAGES:
+            (sandbox / "scripts" / f"{name}.py").write_text(
+                f"#!/usr/bin/env python3\nprint('RAN {name}')\n",
+                encoding="utf-8")
+        out = _run(sandbox).stdout
+        for name in STAGES:
+            assert f"RAN {name}" in out
+
+    def test_the_inventory_prints_once_not_once_per_stage(self, sandbox):
+        out = subprocess.run(
+            ["bash", "scripts/run_the_measurement_pass.sh", "lake"],
+            cwd=sandbox, capture_output=True, text=True,
+            env={**os.environ, "DATA_LOCAL_DIR": str(sandbox / "data"),
+                 "GITHUB_STEP_SUMMARY": str(sandbox / "s.md")}).stdout
+        assert "## Measurement pass" not in out, (
+            "the inventory belongs to the last stage, not to every one")
+
+    def test_an_input_stage_run_alone_still_fails_the_step(self, sandbox):
+        _fail(sandbox, "build_historical_fundamentals")
+        result = subprocess.run(
+            ["bash", "scripts/run_the_measurement_pass.sh", "lake"],
+            cwd=sandbox, capture_output=True, text=True,
+            env={**os.environ, "DATA_LOCAL_DIR": str(sandbox / "data"),
+                 "GITHUB_STEP_SUMMARY": str(sandbox / "s.md")})
+        assert result.returncode == 1
+
+
+class TestEveryStageHasABoundOfItsOwn:
+    def test_no_workflow_step_can_burn_the_whole_job(self):
+        import yaml
+
+        for path in (".github/workflows/fundamentals_lake.yml",
+                     ".github/workflows/screener_sync.yml"):
+            with open(os.path.join(ROOT, path), encoding="utf-8") as handle:
+                spec = yaml.safe_load(handle)
+            for step in spec["jobs"]["measure"]["steps"]:
+                if str(step.get("run", "")).startswith(
+                        "bash scripts/run_the_measurement_pass.sh"):
+                    assert step.get("timeout-minutes"), (
+                        f"{step['name']} in {path} has no bound; a hang there "
+                        "would burn the job")

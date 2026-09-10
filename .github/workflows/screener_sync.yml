@@ -377,13 +377,62 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run the measurement pass
+      - name: Universe and screener snapshot
+        timeout-minutes: 40
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
-        run: bash scripts/run_the_measurement_pass.sh
+        run: bash scripts/run_the_measurement_pass.sh universe
+
+      - name: Historical prices
+        timeout-minutes: 60
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh prices
+
+      - name: Fundamentals lake and code probe
+        timeout-minutes: 60
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh lake
+
+      - name: Score capex and depreciation codes
+        timeout-minutes: 10
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh codes
+
+      - name: Backtest sweep
+        timeout-minutes: 90
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh backtest
+
+      - name: Coverage audit
+        timeout-minutes: 30
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh audit
 
       # if: always() throughout. A pass that lost a stage still built
       # whatever came before it, and that is the expensive part.
