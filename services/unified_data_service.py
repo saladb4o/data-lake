@@ -34,6 +34,7 @@ from services.quant_scoring import score_universe
 from services.tls_config import TLS_VERIFY, configure_urllib_warnings
 from services.stock_service import resolve_data_file
 from services.rate_limiter import limit
+from services.accounting_identities import solve as solve_accounting_identities
 
 configure_urllib_warnings()
 
@@ -2632,6 +2633,83 @@ def reconstruct_financial_triangles(
               field_provenance["current_assets"],
               field_provenance["current_liabilities"])
 
+    # -------------------------------------------------------------
+    # Close the system.
+    #
+    # Every ladder above has now run. Each knows the two or three routes
+    # somebody thought of while writing that field; none of them knows that
+    # the same number may be recoverable from a fourth direction that
+    # happens to be available for this particular company. The identity
+    # catalogue does, and it runs last so that it can only fill gaps: a
+    # field a ladder answered is never overwritten, because the ladder knew
+    # which vendor column to prefer and this table does not.
+    #
+    # It adds no information. Everything it produces was already implied by
+    # figures the vendors stated, and where an identity has two unknowns it
+    # declines - which is why fcf stays blocked for the companies whose
+    # payload carries neither cfo nor capex. See services/accounting_
+    # identities.py for the two guards that make a catalogue safe rather
+    # than merely complete: lineage, so a value can never help compute its
+    # own ancestor and a pair of identities cannot manufacture a balance
+    # sheet that balances by construction; and depth, so a figure recovered
+    # through a long chain degrades to a stand-in instead of inheriting the
+    # tier of the strongest evidence anywhere behind it.
+    # -------------------------------------------------------------
+    _solver_inputs = {
+        "total_assets": tot_assets,
+        "total_liabilities": tot_liab,
+        "total_equity": tot_eq,
+        "current_assets": curr_assets,
+        "current_liabilities": curr_liab_raw,
+        "working_capital": absolute_lines.get("working_capital"),
+        "ebit": calc_ebit,
+        "ebitda": calc_ebitda,
+        "da": calc_da,
+        "cfo": calc_cfo,
+        "capex": calc_capex,
+        "fcf_ttm": fcf_ttm,
+        "net_income": net_income,
+        "revenue": revenue,
+        "prev_revenue": prev_revenue,
+        "eps": eps,
+        "shares": shares_out,
+        "rev_1y_growth": rev_1y,
+    }
+    # A field with a value but no tier is not evidence and must not seed a
+    # derivation; dropping it here makes the solver inherit only from lines
+    # this service has already vouched for.
+    _solver_inputs = {
+        name: value for name, value in _solver_inputs.items()
+        if value is not None and name in field_provenance
+    }
+    _recovered = solve_accounting_identities(_solver_inputs, field_provenance)
+
+    #: Which published line each solver field is emitted as. A name absent
+    #: here is recovered for the sake of the identities that consume it and
+    #: is not itself a published statement line.
+    _SOLVED_LINE_NAMES = {
+        "total_assets": "total_assets",
+        "total_liabilities": "total_liabilities",
+        "total_equity": "equity",
+        "current_assets": "current_assets",
+        "current_liabilities": "current_liabilities",
+        "working_capital": "working_capital",
+        "ebit": "ebit",
+        "ebitda": "ebitda",
+        "da": "da",
+        "cfo": "cfo",
+        "capex": "capex",
+        "net_income": "net_income",
+        "revenue": "revenue",
+        "prev_revenue": "prev_revenue",
+    }
+    for _name, (_value, _tier, _depth, _note) in _recovered.items():
+        field_provenance[_name] = _tier
+        _line = _SOLVED_LINE_NAMES.get(_name)
+        if _line is not None and _line not in absolute_lines:
+            absolute_lines[_line] = float(_value)
+            field_provenance[_line] = _tier
+
     result = {
         "mcap": mcap,
         "shares_out": shares_out,
@@ -2929,8 +3007,24 @@ def normalize_stock_data(
     # not tiered, and is not published, so the model stays refused rather
     # than valuing a company on an absent land bank.
     if vnd:
-        tri["delta_working_capital"] = vnd.get("delta_working_capital", 0.0)
         tri["capex_ttm"] = vnd.get("capex_ttm")
+        # delta_working_capital was attached untiered and read straight off
+        # the record by the engine as
+        #   float(fundamental_data.get("delta_working_capital") or 0.0)
+        # so it was never refused - it silently read as zero for every
+        # company, in
+        #   owners' earnings = NI + D&A - maintenance capex - dWC
+        # which overstates the earnings of any company whose receivables and
+        # inventory are growing. Not a refusal: a wrong number, published.
+        #
+        # It is computed by the vendor fetch only when at least one of the
+        # three working-capital deltas is present, so a None here means the
+        # payload could not support it and the engine's own zero stands - as
+        # an admitted fallback rather than as a figure.
+        _delta_wc = _safe_float(vnd.get("delta_working_capital"))
+        if _delta_wc is not None:
+            tri["delta_working_capital"] = _delta_wc
+            tri["field_provenance"]["delta_working_capital"] = 3
         for _key in ("landbank_fq", "bank_loans_fq", "gross_ppe_fq"):
             _value = _safe_float(vnd.get(_key))
             if _value is not None and _value > 0:
