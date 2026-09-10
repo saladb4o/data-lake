@@ -41,6 +41,7 @@ from services.stock_service import (
 )
 from services.market_calendar import default_backtest_end_year
 from services.point_in_time_fundamentals import (
+    DEFAULT_PUBLICATION_LAG_DAYS,
     FUNDAMENTALS_LAKE_FILE,
     PointInTimeFundamentals,
 )
@@ -149,6 +150,7 @@ def _fundamentals_diagnostics(
     used: int,
     skipped: int,
     unmatched_custom_symbols: Sequence[str],
+    publication_lag_days: Optional[int] = None,
 ) -> Dict[str, Any]:
     """States plainly where this run's fundamentals came from.
 
@@ -176,6 +178,11 @@ def _fundamentals_diagnostics(
 
     info["is_evidence_of_skill"] = True
     info["lake_file"] = FUNDAMENTALS_LAKE_FILE
+    # The assumption travels with the result. Two runs at different lags
+    # render identically otherwise, and only one of them answers the
+    # question that was asked.
+    if publication_lag_days is not None:
+        info["publication_lag_days_assumed"] = publication_lag_days
     info["symbols_in_lake"] = provider.symbol_count if provider else 0
     if provider is not None and provider.is_empty:
         info["is_evidence_of_skill"] = False
@@ -653,6 +660,7 @@ class FairValueBacktestService:
         omnibus_metric: str = "smape",
         custom_symbols: Optional[List[str]] = None,
         fundamentals_mode: str = FundamentalsMode.POINT_IN_TIME,
+        publication_lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
     ) -> BacktestResultPayload:
         """
         Executes a deterministic, institutional-grade 3-Mode Backtest simulation using Real Data Lake.
@@ -663,6 +671,12 @@ class FairValueBacktestService:
             Real quarterly filings from the fundamentals lake, only those
             published by the rebalance date. Symbols without a filing for a
             quarter are skipped.
+
+        ``publication_lag_days`` is how long after quarter end a filing is
+        assumed to be public, for records whose real filing date is unknown.
+        It is an assumption, and how much of a result rests on it is a
+        question worth asking - so it is a parameter here rather than a
+        constant, and it is part of the cache key.
 
         ``snapshot_projected``
             The legacy path: today's P/E and P/B applied to the historical
@@ -678,7 +692,12 @@ class FairValueBacktestService:
             f"{margin_of_safety_pct}_{exit_premium_pct}_{use_dynamic_beta_mos}_"
             f"{filter_z_score_safe}_{filter_rkv_value_trap}_{exchange}_{top_k}_{rebalance_cadence}_"
             f"{fill_mode}_{survival_filter}_{tsmom_filter}_{forensic_filter}_{holding_period_months}_{initial_capital}_{start_year}_{end_year}_"
-            f"{composite_mode}_{omnibus_metric}_{str(custom_symbols)}_{fundamentals_mode}"
+            # publication_lag_days belongs here. Without it a sweep over
+            # lags returns the first lag's result for every value tried,
+            # four identical rows, and reads as "the assumption does not
+            # matter" - a confident finding produced by a cache.
+            f"{composite_mode}_{omnibus_metric}_{str(custom_symbols)}_{fundamentals_mode}_"
+            f"lag{publication_lag_days}"
         )
         cached = _fv_backtest_cache.get(cache_key)
         if cached:
@@ -773,7 +792,10 @@ class FairValueBacktestService:
 
         # --- Point-in-time fundamentals -------------------------------------
         use_point_in_time = (fundamentals_mode == FundamentalsMode.POINT_IN_TIME)
-        pit_fundamentals = PointInTimeFundamentals.from_lake() if use_point_in_time else None
+        pit_fundamentals = (
+            PointInTimeFundamentals.from_lake(
+                publication_lag_days=publication_lag_days)
+            if use_point_in_time else None)
         pit_used = 0
         pit_skipped = 0
         quarter_price_index: Dict[str, Dict[str, float]] = defaultdict(dict)
@@ -1357,6 +1379,8 @@ class FairValueBacktestService:
                     used=pit_used,
                     skipped=pit_skipped,
                     unmatched_custom_symbols=unmatched_custom_symbols,
+                    publication_lag_days=(
+                        publication_lag_days if use_point_in_time else None),
                 ),
             }
         )
