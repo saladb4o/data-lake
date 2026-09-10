@@ -19,8 +19,7 @@ PASS = os.path.join(ROOT, "scripts", "run_the_measurement_pass.sh")
 
 STAGES = ("sync_unified_market_data", "sync_historical_prices",
           "build_historical_fundamentals", "score_code_candidates",
-          "probe_new_sources", "measure_the_backtest",
-          "audit_valuation_coverage")
+          "measure_the_backtest", "audit_valuation_coverage")
 
 
 @pytest.fixture
@@ -80,7 +79,6 @@ class TestLosingAnInputIsWorseThanLosingAMeasurement:
         assert _run(sandbox).returncode == 1
 
     @pytest.mark.parametrize("stage", ["score_code_candidates",
-                                       "probe_new_sources",
                                        "measure_the_backtest",
                                        "audit_valuation_coverage"])
     def test_a_measurement_failing_still_delivers_the_lakes(self, sandbox, stage):
@@ -109,14 +107,44 @@ class TestTheStagesRunInDependencyOrder:
         assert (out.index("fundamentals lake")
                 < out.index("backtest sweep")), "the sweep reads the lake"
 
-    def test_the_probe_runs_after_the_lake_it_compares_against(self, sandbox):
-        """It holds the two vendors' figures for the same quarter."""
-        out = _run(sandbox).stdout
-        assert (out.index("fundamentals lake")
-                < out.index("probe sources we do not use"))
-
     def test_the_coverage_headline_is_printed_last(self, sandbox):
         """A log can only be read from its tail."""
         out = _run(sandbox).stdout
         assert (out.index("coverage audit")
                 > out.index("backtest sweep"))
+
+
+class TestTheSourceProbeIsOptIn:
+    """FiinGroup needs a paid plan, so the probe cannot answer what it was
+    written for. It stays in the tree - the comparison it makes is the
+    check on the code map that VNDIRECT cannot provide - but a pass must
+    not spend requests on a vendor we cannot use."""
+
+    def test_it_does_not_run_by_default(self, sandbox):
+        (sandbox / "scripts" / "probe_new_sources.py").write_text(
+            "#!/usr/bin/env python3\nprint('PROBED')\n", encoding="utf-8")
+        assert "PROBED" not in _run(sandbox).stdout
+
+    def test_it_runs_when_asked_for(self, sandbox):
+        (sandbox / "scripts" / "probe_new_sources.py").write_text(
+            "#!/usr/bin/env python3\nprint('PROBED')\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", "scripts/run_the_measurement_pass.sh"],
+            cwd=sandbox, capture_output=True, text=True,
+            env={**os.environ, "PROBE_SOURCES": "1",
+                 "DATA_LOCAL_DIR": str(sandbox / "data"),
+                 "GITHUB_STEP_SUMMARY": str(sandbox / "summary.md")})
+        assert "PROBED" in result.stdout
+
+    def test_the_pass_still_reports_it_when_it_is_asked_for_and_fails(self, sandbox):
+        (sandbox / "scripts" / "probe_new_sources.py").write_text(
+            "#!/usr/bin/env python3\nimport sys\nsys.exit(4)\n",
+            encoding="utf-8")
+        result = subprocess.run(
+            ["bash", "scripts/run_the_measurement_pass.sh"],
+            cwd=sandbox, capture_output=True, text=True,
+            env={**os.environ, "PROBE_SOURCES": "1",
+                 "DATA_LOCAL_DIR": str(sandbox / "data"),
+                 "GITHUB_STEP_SUMMARY": str(sandbox / "summary.md")})
+        assert "did not complete" in result.stdout
+        assert result.returncode == 0, "a probe is a measurement, not an input"

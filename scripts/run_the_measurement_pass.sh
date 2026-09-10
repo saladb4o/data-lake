@@ -76,14 +76,21 @@ if [ -f "$DATA/code_candidates_probe.json" ]; then
       --json '$DATA/code_candidates.json' | tee -a '$SUMMARY'"
 fi
 
-# A source this codebase does not use. Reachability is itself the
-# question - every candidate host is 403 from a dev container, as
-# VNDIRECT is - and it runs after the lake so it can hold the two
-# vendors' figures for the same quarter side by side.
+# Off by default. FiinGroup, the one route here that this codebase does
+# not already have, is behind a paid plan - so the probe cannot answer
+# the question it was written for, and spending requests on it every pass
+# would be spending them on a vendor we cannot use. The script is kept
+# rather than deleted: if a plan is ever bought, the comparison it makes
+# (which of the vendor's named rows carries each of our numbers) is the
+# check on the code map that VNDIRECT cannot provide.
+#
+#   PROBE_SOURCES=1  to run it.
+if [ "${PROBE_SOURCES:-0}" = "1" ]; then
 stage "probe sources we do not use" \
   bash -c "set -o pipefail; python scripts/probe_new_sources.py \
     --lake '$DATA/historical_fundamentals.json' \
     --json '$DATA/new_sources.json' | tee -a '$SUMMARY'"
+fi
 
 stage "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
