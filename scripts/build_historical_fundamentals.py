@@ -230,28 +230,33 @@ def build_symbol(symbol: str, size: int = 4000,
 
 
 def _universe_symbols(limit: Optional[int]) -> List[str]:
-    """The listed universe, or nothing at all.
+    """The listed equity universe, by the screener's own definition.
 
-    A fresh checkout has no master list - data/*.json is gitignored - so
-    on a CI runner load_master_universe() finds no all_symbols.json and
-    falls back to a hardcoded VN30. "--universe" then means thirty
-    symbols, the build succeeds, and the artifact says nothing to
-    distinguish it from the real thing. That happened: a run asked for
-    the whole universe and produced a file byte-identical to a run
-    capped at forty.
+    This used to read ALL_SYMBOLS_MAP directly and filter nothing, so
+    "--universe" meant every instrument the listing carries - covered
+    warrants, ETFs and funds included, some five thousand codes. Most of
+    them have no quarterly financial statements at all, so the pass spent
+    its time asking a filings endpoint about warrants; the ones that do
+    answer are not companies the backtest values.
 
-    So the listing is fetched when what we hold is implausibly small,
-    exactly as the screener sync does, and if it is still small this
-    refuses instead of quietly valuing the VN30. Both use the same
-    threshold, imported rather than restated.
+    So the population comes from load_local_symbols(), which is what the
+    screener uses: STOCK on HOSE, HNX or UPCOM, roughly 1,523 codes. The
+    two must agree - a lake built over a different population than the
+    screener values makes every coverage figure a comparison between two
+    different denominators.
+
+    It also removes the VN30 trap. ALL_SYMBOLS_MAP falls back to a
+    hardcoded thirty when no listing is on disk; load_local_symbols reads
+    the file and returns nothing, so a missing listing is fetched and
+    then refused rather than silently valued.
     """
-    from services.stock_service import ALL_SYMBOLS_MAP, load_master_universe
-    from scripts.sync_unified_market_data import MIN_PLAUSIBLE_UNIVERSE
+    from scripts.sync_unified_market_data import (
+        MIN_PLAUSIBLE_UNIVERSE, load_local_symbols)
 
-    symbols = sorted(ALL_SYMBOLS_MAP.keys()) if ALL_SYMBOLS_MAP else []
-    if len(symbols) < MIN_PLAUSIBLE_UNIVERSE:
-        logger.info("only %d symbols on hand; fetching the listing...",
-                    len(symbols))
+    master = load_local_symbols()
+    if len(master) < MIN_PLAUSIBLE_UNIVERSE:
+        logger.info("only %d equities on hand; fetching the listing...",
+                    len(master))
         try:
             from services.stock_service import sync_universe_from_vnstock
             stats = sync_universe_from_vnstock(force=True)
@@ -262,19 +267,20 @@ def _universe_symbols(limit: Optional[int]) -> List[str]:
             logger.warning("listing sync failed: %s: %s",
                            type(exc).__name__, exc)
             traceback.print_exc()
-        load_master_universe()
-        from services.stock_service import ALL_SYMBOLS_MAP as reloaded
-        symbols = sorted(reloaded.keys()) if reloaded else []
-        logger.info("reloaded %d symbols", len(symbols))
+        master = load_local_symbols()
+        logger.info("reloaded %d equities", len(master))
 
-    if len(symbols) < MIN_PLAUSIBLE_UNIVERSE:
+    if len(master) < MIN_PLAUSIBLE_UNIVERSE:
         # A thin lake is worse than no lake: it is indistinguishable
         # from a full one once it is a file on disk, and the backtest
         # reads it as the population it had to choose from.
-        logger.error("only %d symbols available; refusing to build a lake "
+        logger.error("only %d equities available; refusing to build a lake "
                      "that would look like the universe and is not",
-                     len(symbols))
+                     len(master))
         return []
+
+    symbols = sorted(master)
+    logger.info("universe: %d listed equities", len(symbols))
     return symbols[:limit] if limit else symbols
 
 
