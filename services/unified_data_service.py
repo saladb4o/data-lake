@@ -554,6 +554,19 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
             if (10000 <= c < 20000 or 100000 <= c < 200000)
             and val_lookup[c].get(latest_d) is not None
         },
+        # {itemCode: its TTM value} for the cash flow statement. Same
+        # reason as the other two: fcf blocks more symbols than any other
+        # driver, the extractor reads codes [31000, 31100] for operating
+        # cash flow and [32100, 32110, 32010] for capex, and when those
+        # come back empty there is no way to tell a payload with no cash
+        # flow statement from one whose codes are read wrong. The balance
+        # sheet turned out to be the second of those; nobody has checked
+        # which this is.
+        # Diagnostic only; never read as a number by anything that
+        # publishes.
+        "cash_flow_ttm_by_code": {
+            c: _sum_ttm([c]) for c in val_lookup if 30000 <= c < 40000
+        },
         # {itemCode: the vendor's own name for it}, taken from the rows just
         # parsed. Diagnostic only; never read as a number.
         "item_code_names": name_lookup,

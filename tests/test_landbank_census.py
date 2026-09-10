@@ -251,11 +251,16 @@ class TestTheReportSeparatesTheThreeFaults:
 
 
 class TestTheFocusedRunStaysFocused:
-    def test_only_landbank_is_an_accepted_mode(self):
+    def test_each_section_can_be_run_on_its_own(self):
         # A run that asks one question should print one answer: a job log
         # is readable only from its tail, and the full census buries it.
-        source = open(census.__file__, encoding="utf-8").read()
-        assert 'choices=("all", "landbank")' in source
+        # Every focused section needs a mode, or it can only be reached by
+        # running the whole thing.
+        import inspect
+        source = inspect.getsource(census.main)
+        for mode in ("landbank", "cashflow"):
+            assert f'"{mode}"' in source, mode
+            assert f'args.only == "{mode}"' in source, mode
 
     def test_the_section_runs_after_the_catalogue_in_a_full_census(self):
         source = open(census.__file__, encoding="utf-8").read()

@@ -43,6 +43,13 @@ Sections, in order:
      identical from the blocking table (the vendor has no such line, the
      item codes are wrong, the number is fetched and never wired) and this
      is what tells them apart. --only landbank runs it alone.
+  8. The cash flows and the borrowings, by item code, over the companies
+     whose record has neither. fcf blocks more symbols than any other
+     driver, and the debt extractor reads VAS 300 and 310 - total and
+     current liabilities - rather than borrowings, which is a wrong number
+     published rather than a refusal. Neither is guessed at: the codes are
+     ranked by size against revenue and against total assets. --only
+     cashflow runs it alone.
 
 Nothing here is a valuation. Read the output, then change the service.
 """
@@ -631,6 +638,68 @@ def pick_line_symbols(limit: Optional[int]) -> Dict[str, List[str]]:
     return groups
 
 
+def _print_codes_by_size(freq, shares, raw_values, names,
+                         denominator: str) -> Dict[int, Any]:
+    """One table of item codes, ranked by how big they are.
+
+    Ranked by size and not by how many companies carry the code. An earlier
+    run ranked by frequency, every code was carried by all 41 banks, and the
+    forty that got printed were an arbitrary slice in which the largest
+    asset line - the one that would have been the loan book - did not appear
+    at all. The vendor names none of these codes, so magnitude is the only
+    handle there is, and a table sorted by anything else throws it away.
+
+    The non-zero column is the other half. 12510 was carried by 112 of 112
+    developers and was zero in every one of them; a count of who carries a
+    code cannot tell that apart from a line genuinely populated.
+    """
+    def _median(code):
+        series = sorted(shares.get(code) or [])
+        return series[len(series) // 2] if series else None
+
+    ranked = sorted(freq, key=lambda c: (-abs(_median(c) or 0.0), -freq[c]))
+    shown = ranked[:_CODE_REPORT_CAP]
+    if len(freq) > len(shown):
+        print(f"  ({len(shown)} of {len(freq)} codes shown, largest"
+              f" first; the rest are in the JSON)")
+    print(f"  {'code':<10}{'n':>6}{'nonzero':>9}"
+          f"{('median x ' + denominator):>18}  what the vendor calls it")
+    rows = {}
+    for code in shown:
+        med = _median(code)
+        live = sum(1 for v in (raw_values.get(code) or []) if v != 0.0)
+        print(f"  {code:<10}{freq[code]:>6}{live:>9}"
+              f"{(f'{med:+.4f}' if med is not None else '-'):>18}"
+              f"  {names.get(code, '')[:38]}")
+        rows[code] = {"n": freq[code], "nonzero": live, "median_share": med,
+                      "vendor_name": names.get(code)}
+    print()
+    return rows
+
+
+def _tally(entries, sheet_key: str, denominator_of):
+    """Collect {code: how often, how big, what it is called} over payloads."""
+    freq: "collections.Counter[int]" = collections.Counter()
+    shares: Dict[int, List[float]] = {}
+    raw_values: Dict[int, List[float]] = {}
+    names: Dict[int, str] = {}
+    for entry in entries:
+        rows = entry.get(sheet_key) or {}
+        rows = {int(k): v for k, v in rows.items() if v is not None}
+        labels = entry.get("item_code_names") or {}
+        denom = denominator_of(entry, rows)
+        for code, value in rows.items():
+            freq[code] += 1
+            raw_values.setdefault(code, []).append(value)
+            if denom:
+                shares.setdefault(code, []).append(value / denom)
+            if code not in names:
+                label = labels.get(code) or labels.get(str(code))
+                if label:
+                    names[code] = str(label)
+    return freq, shares, raw_values, names
+
+
 def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
                           out: Dict[str, Any],
                           held: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -766,38 +835,8 @@ def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
                     if label:
                         names[code] = str(label)
 
-        # Ranked by size on the balance sheet, not by how many companies
-        # carry the code. The first run ranked by frequency, every code was
-        # carried by all 41 banks, and the forty that got printed were an
-        # arbitrary slice in which the largest asset line - the one that
-        # would be the loan book - did not appear at all. The vendor names
-        # none of these codes, so magnitude is the only handle there is,
-        # and a table sorted by anything else throws it away.
-        def _median(code):
-            series = sorted(shares.get(code) or [])
-            return series[len(series) // 2] if series else None
-
-        ranked = sorted(
-            freq,
-            key=lambda c: (-abs(_median(c) or 0.0), -freq[c]),
-        )
-        shown = ranked[:_CODE_REPORT_CAP]
-        if len(freq) > len(shown):
-            print(f"  ({len(shown)} of {len(freq)} codes shown, largest"
-                  f" first; the rest are in the JSON)")
-        print(f"  {'code':<10}{'n':>6}{'nonzero':>9}{'median x assets':>18}"
-              f"  what the vendor calls it")
-        rows = {}
-        for code in shown:
-            count = freq[code]
-            med = _median(code)
-            live = sum(1 for v in (raw_values.get(code) or []) if v != 0.0)
-            print(f"  {code:<10}{count:>6}{live:>9}"
-                  f"{(f'{med:+.4f}' if med is not None else '-'):>18}"
-                  f"  {names.get(code, '')[:38]}")
-            rows[code] = {"n": count, "nonzero": live, "median_share": med,
-                          "vendor_name": names.get(code)}
-        report[group]["codes_present"] = rows
+        report[group]["codes_present"] = _print_codes_by_size(
+            freq, shares, raw_values, names, "assets")
         print()
 
     out["landbank_and_loanbook"] = report
@@ -844,6 +883,162 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
     if limit:
         symbols = symbols[:limit]
     return symbols, revenue
+
+
+# --------------------------------------------------------------------------
+# 8. The cash flows and the borrowings, by item code
+# --------------------------------------------------------------------------
+#: What the service reads today for each, so a run states the codes it is
+#: testing rather than leaving the reader to go and look.
+CASH_FLOW_CODES = {"cfo": (31000, 31100), "capex": (32100, 32110, 32010)}
+DEBT_CODES = (13000, 13100)
+
+
+def pick_cashflow_symbols(limit: Optional[int]) -> List[str]:
+    """Companies whose record has no operating cash flow or no capex.
+
+    fcf blocks more symbols than any other driver and it is the only one
+    left with a plausible route: the 31 companies that are short of nothing
+    cannot be helped by any vendor, and regulated_asset_base is not a line
+    anybody reports. So the population is the companies that would benefit,
+    taken from what the record actually holds rather than from the audit's
+    blocking table - the table cannot say which of the two halves of
+    `cfo - capex` is the missing one, and the record can.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        raise SystemExit(f"No snapshot at {path}. Run the universe sync first.")
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+
+    symbols = []
+    for rec in stocks:
+        if not isinstance(rec, dict):
+            continue
+        sym = str(rec.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        if rec.get("cfo") is None or rec.get("capex") is None:
+            symbols.append(sym)
+    symbols.sort()
+    return symbols[:limit] if limit else symbols
+
+
+def cash_flows_and_borrowings(symbols: List[str], workers: int,
+                              out: Dict[str, Any]) -> None:
+    """Where operating cash flow, capex and borrowings actually are.
+
+    Two questions in one population because they are answered by the same
+    payloads. Neither is guessed at here.
+
+      cfo and capex   fcf blocks 149 symbols. The extractor reads 31000 /
+                      31100 and 32100 / 32110 / 32010, and an earlier
+                      measurement concluded the vendor carries neither -
+                      on the same kind of evidence that concluded the land
+                      bank was absent, and that was wrong. The codes were.
+
+      borrowings      Under the numbering this census recovered - itemCode
+                      is 1 + the three-digit VAS code + 0 - the debt
+                      extractor reads 13000 and 13100, which are VAS 300
+                      NO PHAI TRA and VAS 310 no ngan han: total
+                      liabilities and current liabilities, not borrowings.
+                      That is a wrong number being published, not a
+                      refusal: it inflates net_de_ratio across the whole
+                      screener for every company TradingView leaves out.
+                      VAS puts borrowings at 320 and 338, so 13200 and
+                      13380 - but neither appeared among the forty largest
+                      liability codes of 112 developers, so they are not
+                      assumed to exist. This says whether they do.
+
+    Cash flow is sized against revenue and the balance sheet against total
+    assets, because that is what makes each legible.
+    """
+    print("\n" + "=" * 74)
+    print(" 8. THE CASH FLOWS AND THE BORROWINGS, BY ITEM CODE")
+    print("=" * 74)
+    print(f"  {len(symbols)} companies whose record has no cfo or no capex\n")
+
+    fetched: List[Dict[str, Any]] = []
+
+    def work(sym: str) -> Dict[str, Any]:
+        try:
+            return fetch_vndirect_financials(sym) or {}
+        except Exception:
+            return {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in symbols]):
+            entry = fut.result()
+            if entry:
+                fetched.append(entry)
+
+    report: Dict[str, Any] = {"population": len(symbols),
+                              "answered": len(fetched)}
+
+    with_cf = [e for e in fetched if e.get("cash_flow_ttm_by_code")]
+    print("-" * 74)
+    print(f"  cash flow: cfo reads {CASH_FLOW_CODES['cfo']},"
+          f" capex reads {CASH_FLOW_CODES['capex']}")
+    print("-" * 74)
+    print(f"  {len(fetched):>5} of {len(symbols)} returned any payload")
+    print(f"  {len(with_cf):>5} of {len(fetched)} returned a coded"
+          f" cash flow statement")
+    for name, codes in CASH_FLOW_CODES.items():
+        live = sum(1 for e in with_cf
+                   if any(_cell_of(e, "cash_flow_ttm_by_code", c)
+                          for c in codes))
+        print(f"  {live:>5} of {len(with_cf)} carry a non-zero {name}")
+        report.setdefault("per_line", {})[name] = live
+    print()
+
+    if with_cf:
+        # Against revenue: operating cash flow runs at a few per cent to a
+        # few tens of per cent of sales, and capex likewise, so a code at
+        # 1.0 is revenue itself and one at 0.0001 is a rounding line.
+        freq, shares, raws, names = _tally(
+            with_cf, "cash_flow_ttm_by_code",
+            lambda entry, rows: _safe_float(entry.get("revenue_ttm")),
+        )
+        report["cash_flow_codes"] = _print_codes_by_size(
+            freq, shares, raws, names, "revenue")
+    else:
+        print("  No coded cash flow statement anywhere in the population;"
+              " the vendor does not serve one for these companies\n")
+
+    print("-" * 74)
+    print(f"  borrowings: debt reads {DEBT_CODES}"
+          f" = VAS 300 and VAS 310, which are not borrowings")
+    print("-" * 74)
+    with_bs = [e for e in fetched if e.get("balance_sheet_fq_by_code")]
+    print(f"  {len(with_bs):>5} of {len(fetched)} returned a coded"
+          f" balance sheet")
+    if with_bs:
+        freq, shares, raws, names = _tally(
+            with_bs, "balance_sheet_fq_by_code",
+            lambda entry, rows: next(
+                (rows[c] for c in _TOTAL_ASSET_CODES if rows.get(c)), None),
+        )
+        liabilities = collections.Counter(
+            {c: n for c, n in freq.items() if 13000 <= c < 14000})
+        print(f"  {len(liabilities)} distinct liability codes (13xxx)")
+        report["liability_codes"] = _print_codes_by_size(
+            liabilities, shares, raws, names, "assets")
+
+    out["cash_flows_and_borrowings"] = report
+
+
+def _cell_of(entry: Dict[str, Any], sheet_key: str, code: int):
+    """One figure from one of the by-code exports, either key type."""
+    rows = entry.get(sheet_key) or {}
+    value = rows.get(code)
+    if value is None:
+        value = rows.get(str(code))
+    return value
 
 
 def _held_lines() -> Dict[str, Dict[str, Any]]:
@@ -895,7 +1090,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     # only be read from its tail, so a run that asks one question should
     # print one answer. "landbank" runs section 7 alone: two sectors, a few
     # hundred requests, and a table short enough to survive the tail.
-    parser.add_argument("--only", choices=("all", "landbank"), default="all",
+    parser.add_argument("--only",
+                        choices=("all", "landbank", "cashflow"),
+                        default="all",
                         help="run one section instead of the whole census")
     args = parser.parse_args(argv)
 
@@ -905,6 +1102,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         groups = pick_line_symbols(args.limit or None)
         landbank_and_loanbook(groups, args.workers, out,
                               held=_held_lines())
+        _write(out, args.json)
+        return 0
+
+    if args.only == "cashflow":
+        cash_flows_and_borrowings(
+            pick_cashflow_symbols(args.limit or None), args.workers, out)
         _write(out, args.json)
         return 0
 
@@ -936,6 +1139,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # currently waiting on.
     groups = pick_line_symbols(args.limit or None)
     landbank_and_loanbook(groups, args.workers, out, held=_held_lines())
+    cash_flows_and_borrowings(
+        pick_cashflow_symbols(args.limit or None), args.workers, out)
 
     _write(out, args.json)
     return 0
