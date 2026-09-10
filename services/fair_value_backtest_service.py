@@ -23,7 +23,7 @@ import time
 import logging
 from datetime import date, datetime
 from dataclasses import dataclass, field, asdict
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Dict, List, Any, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -95,6 +95,14 @@ def _parse_iso_date(raw: Any) -> Optional[date]:
         return None
 
 
+def _quarters_between(earlier: str, later: str) -> Optional[int]:
+    """How many quarters older than ``later`` the ``earlier`` code is."""
+    a, b = _quarter_ordinal(earlier), _quarter_ordinal(later)
+    if a is None or b is None:
+        return None
+    return b - a
+
+
 def _quarter_ordinal(quarter_code: str) -> Optional[int]:
     """Maps "2021-Q3" to a sortable integer so horizons can be measured."""
     try:
@@ -151,6 +159,7 @@ def _fundamentals_diagnostics(
     skipped: int,
     unmatched_custom_symbols: Sequence[str],
     publication_lag_days: Optional[int] = None,
+    filing_age: Optional[Dict[int, int]] = None,
 ) -> Dict[str, Any]:
     """States plainly where this run's fundamentals came from.
 
@@ -178,6 +187,8 @@ def _fundamentals_diagnostics(
 
     info["is_evidence_of_skill"] = True
     info["lake_file"] = FUNDAMENTALS_LAKE_FILE
+    if filing_age:
+        info["filing_age_in_quarters"] = dict(sorted(filing_age.items()))
     # The assumption travels with the result. Two runs at different lags
     # render identically otherwise, and only one of them answers the
     # question that was asked.
@@ -798,6 +809,11 @@ class FairValueBacktestService:
             if use_point_in_time else None)
         pit_used = 0
         pit_skipped = 0
+        # How stale the filing used actually was, in quarters. A run whose
+        # filings are all one quarter old is using last quarter's report,
+        # which is what standing at quarter end means; a tail of older ones
+        # is companies that stopped filing.
+        pit_filing_age: "Counter[int]" = Counter()
         quarter_price_index: Dict[str, Dict[str, float]] = defaultdict(dict)
 
         # 3. Simulate Iterative Rebalance Rounds Across Real Timeline
@@ -874,9 +890,21 @@ class FairValueBacktestService:
 
                 # Format fundamental data for Valuation Engine
                 if use_point_in_time:
-                    filing = pit_fundamentals.get(
-                        sym, q_code, as_of=rebalance_date, quarter_end=quarter_end_date
-                    )
+                    # The newest filing public by this date, NOT this
+                    # quarter's. Standing at 31 March 2021 the market has
+                    # last year's Q4; Q1 ends that same day and is filed
+                    # weeks later. Asking for q_code here made the answer
+                    # None for every symbol at every lag - which reads as
+                    # a strict gate working rather than as a question that
+                    # could never be answered, and left the mode unable to
+                    # value anything at all.
+                    found = pit_fundamentals.latest_as_of(sym, rebalance_date)
+                    filing = None
+                    if found is not None:
+                        filing_quarter, filing = found
+                        age = _quarters_between(filing_quarter, q_code)
+                        if age is not None:
+                            pit_filing_age[age] += 1
                     if filing is None:
                         # No filing published by this date. Skipping is the
                         # only honest option: the alternative is to invent one.
@@ -1381,6 +1409,7 @@ class FairValueBacktestService:
                     unmatched_custom_symbols=unmatched_custom_symbols,
                     publication_lag_days=(
                         publication_lag_days if use_point_in_time else None),
+                    filing_age=dict(pit_filing_age) if use_point_in_time else None,
                 ),
             }
         )

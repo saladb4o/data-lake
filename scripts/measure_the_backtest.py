@@ -145,16 +145,21 @@ def main() -> int:
             FundamentalsMode.SNAPSHOT_PROJECTED, None)
 
     print()
-    header = "| run | " + " | ".join(name for _, name in COLUMNS) + " | valued | skipped |"
+    # in lake is printed because without it "valued 0" has two very
+    # different causes - the lake was not found, or it was found and
+    # nothing in it matched - and the table could not tell them apart.
+    header = ("| run | " + " | ".join(name for _, name in COLUMNS)
+              + " | in lake | valued | skipped |")
     print(header)
-    print("|---" * (len(COLUMNS) + 3) + "|")
+    print("|---" * (len(COLUMNS) + 4) + "|")
     for row in rows:
         if "error" in row:
             print(f"| {row['label']} | " + " | ".join(["ERROR"] * len(COLUMNS))
-                  + f" | - | - |")
+                  + " | - | - | - |")
             continue
         cells = " | ".join(_fmt(row["metrics"].get(key)) for key, _ in COLUMNS)
         print(f"| {row['label']} | {cells} | "
+              f"{_fmt(row.get('symbols_in_lake'))} | "
               f"{_fmt(row.get('symbol_quarters_valued'))} | "
               f"{_fmt(row.get('symbol_quarters_skipped_no_filing'))} |")
     print()

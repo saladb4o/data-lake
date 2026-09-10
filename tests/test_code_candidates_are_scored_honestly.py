@@ -137,3 +137,33 @@ class TestTheColumnsComeFromTheProbeNotFromHere:
         for field, prefix in (("capex", "capex"), ("da", "da")):
             for code in VNDIRECT_ITEM_CODES[field][0]:
                 assert f"{prefix}_{code}" in DIAGNOSTIC_CODES
+
+
+class TestLeadingAFieldThatAllFailsIsNotAWinner:
+    """The first real run scored capex_32100 at 0.3% and called it best."""
+
+    def _rows(self, matching):
+        rows, gp = [], 1000.0
+        for i in range(40):
+            value = -100.0 if i < matching else -9_999_999.0
+            rows.append((f"{2000 + i // 4}-Q{i % 4 + 1}", gp, 0.0, value))
+            gp += 100.0
+        return rows
+
+    def test_a_field_under_the_floor_names_no_winner(self, capsys):
+        from scripts.score_code_candidates import report, score
+        report(score(_series(self._rows(matching=1))))
+        out = capsys.readouterr().out
+        assert "no candidate reproduces" in out
+        assert "best:" not in out
+
+    def test_it_points_at_the_anchor_not_at_the_codes(self, capsys):
+        from scripts.score_code_candidates import report, score
+        report(score(_series(self._rows(matching=0))))
+        assert "Check the anchor before changing the codes" in \
+            capsys.readouterr().out
+
+    def test_a_candidate_above_the_floor_is_still_named(self, capsys):
+        from scripts.score_code_candidates import report, score
+        report(score(_series(self._rows(matching=39))))
+        assert "best:" in capsys.readouterr().out

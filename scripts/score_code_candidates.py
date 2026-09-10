@@ -66,6 +66,10 @@ def under_judgement(probe: Dict[str, Any]) -> Dict[str, Tuple[str, ...]]:
 
 TOLERANCE = 0.25  # a quarter's fixed-asset movement is noisy; be generous
 
+#: Below this, no candidate is named. Leading a field that all fails says
+#: nothing about which code is right.
+FLOOR = 0.20
+
 
 def _quarter_order(code: str) -> Tuple[int, int]:
     try:
@@ -153,6 +157,21 @@ def report(results: Dict[str, Any]) -> None:
         best = max(live, key=lambda kv: kv[1]["held"] / max(kv[1]["tested"], 1))
         rates = sorted(t["held"] / max(t["tested"], 1) for _, t in live)
         gap = (rates[-1] - rates[-2]) if len(rates) >= 2 else None
+
+        # A floor, because the first real run produced 0.3% and this
+        # called it "best". Leading a field that all fails is not
+        # evidence for a code; it is evidence against the anchor, or
+        # against every candidate. Naming a winner there would have sent
+        # the next change chasing the wrong thing.
+        if rates[-1] < FLOOR:
+            print(f"- **no candidate reproduces d({anchor})** - the best "
+                  f"manages {100.0 * rates[-1]:.1f}%, under the "
+                  f"{100.0 * FLOOR:.0f}% floor. Either these codes are all "
+                  "wrong, or the anchor does not mean what this test "
+                  "assumes. Check the anchor before changing the codes.")
+            print()
+            continue
+
         print(f"- best: **{best[0]}**"
               + (f", ahead of the next by {100.0 * gap:.1f} points"
                  if gap is not None else " (only one candidate answered)"))
