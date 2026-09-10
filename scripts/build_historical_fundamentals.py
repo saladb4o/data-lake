@@ -230,9 +230,51 @@ def build_symbol(symbol: str, size: int = 4000,
 
 
 def _universe_symbols(limit: Optional[int]) -> List[str]:
-    from services.stock_service import ALL_SYMBOLS_MAP
+    """The listed universe, or nothing at all.
+
+    A fresh checkout has no master list - data/*.json is gitignored - so
+    on a CI runner load_master_universe() finds no all_symbols.json and
+    falls back to a hardcoded VN30. "--universe" then means thirty
+    symbols, the build succeeds, and the artifact says nothing to
+    distinguish it from the real thing. That happened: a run asked for
+    the whole universe and produced a file byte-identical to a run
+    capped at forty.
+
+    So the listing is fetched when what we hold is implausibly small,
+    exactly as the screener sync does, and if it is still small this
+    refuses instead of quietly valuing the VN30. Both use the same
+    threshold, imported rather than restated.
+    """
+    from services.stock_service import ALL_SYMBOLS_MAP, load_master_universe
+    from scripts.sync_unified_market_data import MIN_PLAUSIBLE_UNIVERSE
 
     symbols = sorted(ALL_SYMBOLS_MAP.keys()) if ALL_SYMBOLS_MAP else []
+    if len(symbols) < MIN_PLAUSIBLE_UNIVERSE:
+        logger.info("only %d symbols on hand; fetching the listing...",
+                    len(symbols))
+        try:
+            from services.stock_service import sync_universe_from_vnstock
+            stats = sync_universe_from_vnstock(force=True)
+            logger.info("listing sync reports %s symbols",
+                        stats.get("total_symbols", 0))
+        except Exception as exc:
+            import traceback
+            logger.warning("listing sync failed: %s: %s",
+                           type(exc).__name__, exc)
+            traceback.print_exc()
+        load_master_universe()
+        from services.stock_service import ALL_SYMBOLS_MAP as reloaded
+        symbols = sorted(reloaded.keys()) if reloaded else []
+        logger.info("reloaded %d symbols", len(symbols))
+
+    if len(symbols) < MIN_PLAUSIBLE_UNIVERSE:
+        # A thin lake is worse than no lake: it is indistinguishable
+        # from a full one once it is a file on disk, and the backtest
+        # reads it as the population it had to choose from.
+        logger.error("only %d symbols available; refusing to build a lake "
+                     "that would look like the universe and is not",
+                     len(symbols))
+        return []
     return symbols[:limit] if limit else symbols
 
 
