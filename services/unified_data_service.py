@@ -2908,12 +2908,34 @@ def normalize_stock_data(
     )
 
     # Attach granular VNDIRECT metrics directly to normalized record if present
+    #
+    # These three lines are parsed by fetch_vndirect_financials from item
+    # codes 11420/12510, 112000 and 12110/12100, attached to the record here,
+    # and given NO provenance tier - so the copy to the top level, which
+    # admits a line only on the evidence of a tier, dropped every one of
+    # them. The engine asks for them by exactly these names:
+    #
+    #   landbank_fq   -> res.resolve("landbank",  ("landbank_fq",))    reit_affo_dcf
+    #   bank_loans_fq -> res.resolve("rwa", ("bank_loans_fq", "rwa"))  bank_equity_cash_flow
+    #   gross_ppe_fq  -> res.resolve("gross_ppe", ("gross_ppe_fq", ...))
+    #
+    # landbank blocks 123 symbols and rwa 41. Both were reported as
+    # sector-specific data no route carries, on the evidence of the blocking
+    # table - which cannot tell "nobody has this" apart from "somebody has
+    # this and it was never wired". The vendor has had them all along.
+    #
+    # Tier 3: a line the vendor states outright. Fail-closed by
+    # construction - a code the payload does not carry comes back None, is
+    # not tiered, and is not published, so the model stays refused rather
+    # than valuing a company on an absent land bank.
     if vnd:
         tri["delta_working_capital"] = vnd.get("delta_working_capital", 0.0)
-        tri["landbank_fq"] = vnd.get("landbank_fq")
-        tri["bank_loans_fq"] = vnd.get("bank_loans_fq")
-        tri["gross_ppe_fq"] = vnd.get("gross_ppe_fq")
         tri["capex_ttm"] = vnd.get("capex_ttm")
+        for _key in ("landbank_fq", "bank_loans_fq", "gross_ppe_fq"):
+            _value = _safe_float(vnd.get(_key))
+            if _value is not None and _value > 0:
+                tri[_key] = _value
+                tri["field_provenance"][_key] = 3
 
     mcap = tri["mcap"]
     if mcap >= 30000:
@@ -3297,12 +3319,42 @@ def _has_no_ebit_rung(entry: Optional[Dict[str, Any]]) -> bool:
                 or entry.get("operating_margin_fy") is not None)
 
 
-def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
-    """True when TradingView left at least one statement line empty.
+#: Sectors whose valuation model needs a line TradingView has no column for
+#: at all. ICB 8600 real estate is valued on its land bank and ICB 8300/8500
+#: banks and insurers on their gross loans, and neither figure exists
+#: anywhere in TV_COLUMNS - only VNDIRECT parses them, from item codes
+#: 11420/12510 and 112000.
+#:
+#: The completeness test below cannot see that. It asks whether TradingView
+#: filled the eight general statement lines, and for a real estate company
+#: whose income statement and balance sheet are fully covered the answer is
+#: yes, so the one vendor that could state its land bank is never called.
+#: The company is then refused for want of a number nobody asked for.
+#:
+#: This is the same shape as the cash-flow pair that was missing from
+#: _TV_REQUIRED_LINES: a question not asked, read downstream as an answer of
+#: no. Membership here does not assert the vendor has the line - a symbol
+#: whose payload lacks the item code comes back with nothing, is not tiered,
+#: and stays refused.
+_SECTORS_NEEDING_A_LINE_TRADINGVIEW_LACKS = frozenset({
+    "VNREAL", "VNREA", "8600",          # land bank -> reit_affo_dcf, p_affo
+    "VNFIN", "VNBNK", "VNINS", "8300", "8500",  # gross loans -> bank_equity_cash_flow
+})
 
-    A symbol TradingView covers fully costs no second request; one it covers
-    partially is exactly the case the overlay exists for.
+
+def _needs_vndirect_backfill(
+    tv_entry: Optional[Dict[str, Any]],
+    sector_code: Optional[str] = None,
+) -> bool:
+    """True when only VNDIRECT can answer something this symbol needs.
+
+    Either TradingView left one of the general statement lines empty, or the
+    symbol's sector is valued on a line TradingView does not carry at any
+    level of completeness - see the frozenset above.
     """
+    if sector_code and str(sector_code).strip().upper() in \
+            _SECTORS_NEEDING_A_LINE_TRADINGVIEW_LACKS:
+        return True
     if not tv_entry:
         return True
     return any(tv_entry.get(key) is None for key in _TV_REQUIRED_LINES)
@@ -3433,8 +3485,11 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # -----------------------------------------------------------------
     vnd_by_symbol: Dict[str, Dict[str, Any]] = {}
     needs_vnd = [
-        sym.upper().strip() for sym in master_symbols_map
-        if _needs_vndirect_backfill(tv_batch.get(sym.upper().strip()))
+        sym.upper().strip() for sym, meta in master_symbols_map.items()
+        if _needs_vndirect_backfill(
+            tv_batch.get(sym.upper().strip()),
+            (meta or {}).get("sector_code"),
+        )
     ]
     if needs_vnd:
         print(f"  🔎 {len(needs_vnd)} symbols missing statement lines; querying VNDIRECT Finfo...")
