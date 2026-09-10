@@ -35,6 +35,14 @@ Sections, in order:
      scale factors.
   6. VNDIRECT item-code relations across all three statements, by the
      matching pursuit in unified_data_service.
+  7. The land bank and the loan book, by item code, over the two sectors
+     whose models need them. Presence of the codes the service reads, the
+     count that actually reaches the record, and - for the companies that
+     carry none of them - what their balance sheet does carry, named by
+     the vendor and sized against total assets. Three faults look
+     identical from the blocking table (the vendor has no such line, the
+     item codes are wrong, the number is fetched and never wired) and this
+     is what tells them apart. --only landbank runs it alone.
 
 Nothing here is a valuation. Read the output, then change the service.
 """
@@ -58,6 +66,14 @@ from services.unified_data_service import (  # noqa: E402
     fetch_vndirect_financials,
     recover_item_code_relations,
 )
+
+#: The two sectors split apart. The service keeps one frozenset because it
+#: only asks "does this symbol need a VNDIRECT call at all"; here the two
+#: halves need different item codes, so they are named separately. A test
+#: asserts their union is still the service's set, because a sector added
+#: there and not here would be censused for the wrong line in silence.
+_LANDBANK_SECTORS = frozenset({"VNREAL", "VNREA", "8600"})
+_LOANBOOK_SECTORS = frozenset({"VNFIN", "VNBNK", "VNINS", "8300", "8500"})
 
 # --------------------------------------------------------------------------
 # Routes. Every URL here is confirmed against a client that uses it, not
@@ -534,6 +550,217 @@ def vndirect_relations(symbols: List[str], workers: int,
 
 
 # --------------------------------------------------------------------------
+# 7. The land bank and the loan book, by item code
+# --------------------------------------------------------------------------
+#: The codes the service reads for the two lines TradingView has no column
+#: for, and the sectors whose models need them. Kept next to the census
+#: rather than imported so that a run says which codes it tested even if
+#: the service has moved on since.
+LINE_CODES = {
+    "landbank": (11420, 12510),
+    "bank_loans": (112000,),
+}
+
+#: Total assets, tried in order, so a code can be reported as a share of
+#: the balance sheet rather than as a bare magnitude nobody can place.
+_TOTAL_ASSET_CODES = (12700, 10000, 11000, 100000, 130000)
+
+#: How many unmatched codes to name per group. A balance sheet runs to a
+#: hundred-odd lines; the ones worth reading are the large ones.
+_CODE_REPORT_CAP = 40
+
+
+def pick_line_symbols(limit: Optional[int]) -> Dict[str, List[str]]:
+    """The companies whose valuation needs a land bank or a loan book.
+
+    Picked by sector, not by what is missing, and that distinction is the
+    point. A symbol refused for want of a land bank and a symbol whose land
+    bank arrived are the same question here - "does the vendor carry this
+    line for this kind of company" - and selecting only the refused ones
+    would throw away every case where the answer is yes, leaving no
+    baseline to read the failures against.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"No snapshot at {path}. Run the universe sync first - the "
+            "population is taken from the snapshot's sector codes."
+        )
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+
+    groups: Dict[str, List[str]] = {"landbank": [], "bank_loans": []}
+    for rec in stocks:
+        if not isinstance(rec, dict):
+            continue
+        sym = str(rec.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        code = str(rec.get("sector_code") or "").strip().upper()
+        if code in _LANDBANK_SECTORS:
+            groups["landbank"].append(sym)
+        elif code in _LOANBOOK_SECTORS:
+            groups["bank_loans"].append(sym)
+    for name in groups:
+        groups[name].sort()
+        if limit:
+            groups[name] = groups[name][:limit]
+    return groups
+
+
+def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
+                          out: Dict[str, Any],
+                          held: Optional[Dict[str, Dict[str, Any]]] = None,
+                          ) -> None:
+    """Whether VNDIRECT carries the two lines, and under which codes.
+
+    Two runs have now reported `landbank` blocking 123 symbols and `rwa`
+    blocking 41, unchanged, after the request for them was wired and the
+    sector gate widened to ask. An unchanged count cannot tell a vendor
+    that does not carry the line from a pair of item codes read wrong, and
+    those need opposite fixes: the first is the end of the matter, the
+    second is a one-line change. Nothing short of looking at which codes
+    the payloads actually contain separates them, so that is what this
+    does - presence of the codes asked for, and, for the companies that
+    have none of them, what the balance sheet does carry, named by the
+    vendor and sized against total assets.
+
+    It proposes no code. It prints what is there.
+    """
+    print("\n" + "=" * 74)
+    print(" 7. THE LAND BANK AND THE LOAN BOOK, BY ITEM CODE")
+    print("=" * 74)
+
+    every = sorted({s for syms in groups.values() for s in syms})
+    print(f"  {len(every)} companies in the two sectors "
+          f"({len(groups['landbank'])} real estate, "
+          f"{len(groups['bank_loans'])} banks and insurers)\n")
+
+    fetched: Dict[str, Dict[str, Any]] = {}
+
+    def work(sym: str) -> Tuple[str, Dict[str, Any]]:
+        try:
+            return sym, (fetch_vndirect_financials(sym) or {})
+        except Exception:
+            return sym, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in every]):
+            sym, entry = fut.result()
+            fetched[sym] = entry
+
+    report: Dict[str, Any] = {}
+    for group, symbols in groups.items():
+        codes = LINE_CODES[group]
+        print("-" * 74)
+        print(f"  {group}: codes {', '.join(str(c) for c in codes)}"
+              f", {len(symbols)} companies")
+        print("-" * 74)
+
+        answered = [s for s in symbols if fetched.get(s, {}).get(
+            "balance_sheet_fq_by_code")]
+        print(f"  {len(answered):>5} of {len(symbols)} returned a coded "
+              f"balance sheet at all")
+        if not answered:
+            # No payloads means the route failed for this sector, which is
+            # a different finding from an absent line and must not be
+            # reported as one.
+            print("        so nothing here says anything about the line;"
+                  " the route is what failed")
+            report[group] = {"answered": 0, "of": len(symbols)}
+            continue
+
+        per_code = {}
+        for code in codes:
+            have = [s for s in answered
+                    if fetched[s]["balance_sheet_fq_by_code"].get(str(code))
+                    is not None
+                    or fetched[s]["balance_sheet_fq_by_code"].get(code)
+                    is not None]
+            per_code[code] = len(have)
+            print(f"  {len(have):>5} of {len(answered)} carry {code}")
+
+        missing = [
+            s for s in answered
+            if not any(
+                fetched[s]["balance_sheet_fq_by_code"].get(str(c)) is not None
+                or fetched[s]["balance_sheet_fq_by_code"].get(c) is not None
+                for c in codes
+            )
+        ]
+        # The count the sync publishes, for the same companies. If the
+        # vendor carries the code and the record still has no line, the
+        # fault is downstream of the fetch and the codes are not the
+        # problem at all - a third possibility neither run could see.
+        if held is not None:
+            key = "landbank_fq" if group == "landbank" else "bank_loans_fq"
+            reached = sum(1 for s in answered
+                          if (held.get(s) or {}).get(key) is not None)
+            print(f"  {reached:>5} of {len(answered)} reach the snapshot "
+                  f"as {key}")
+
+        print(f"  {len(missing):>5} of {len(answered)} carry none of them\n")
+        report[group] = {
+            "answered": len(answered), "of": len(symbols),
+            "per_code": per_code, "missing": len(missing),
+        }
+        if not missing:
+            print("  Every company that answered carries one of the codes,"
+                  " so the codes are right\n")
+            continue
+
+        # What those companies do have. Frequency says which lines exist
+        # for this company form; the share of total assets says which of
+        # them could be a land bank or a loan book, since a loan book is
+        # most of a bank's balance sheet and a land bank is a large
+        # fraction of a developer's. The vendor's own name settles it.
+        freq: "collections.Counter[int]" = collections.Counter()
+        shares: Dict[int, List[float]] = {}
+        names: Dict[int, str] = {}
+        for sym in missing:
+            sheet = fetched[sym]["balance_sheet_fq_by_code"]
+            sheet = {int(k): v for k, v in sheet.items()}
+            labels = fetched[sym].get("item_code_names") or {}
+            total = next((sheet[c] for c in _TOTAL_ASSET_CODES
+                          if sheet.get(c)), None)
+            for code, value in sheet.items():
+                if value is None:
+                    continue
+                freq[code] += 1
+                if total:
+                    shares.setdefault(code, []).append(value / total)
+                if code not in names:
+                    label = labels.get(code) or labels.get(str(code))
+                    if label:
+                        names[code] = str(label)
+
+        shown = freq.most_common(_CODE_REPORT_CAP)
+        if len(freq) > len(shown):
+            print(f"  ({len(shown)} of {len(freq)} codes shown;"
+                  f" the rest are in the JSON)")
+        print(f"  {'code':<10}{'n':>6}{'median x assets':>18}"
+              f"  what the vendor calls it")
+        rows = {}
+        for code, count in shown:
+            series = sorted(shares.get(code) or [])
+            med = series[len(series) // 2] if series else None
+            print(f"  {code:<10}{count:>6}"
+                  f"{(f'{med:+.4f}' if med is not None else '-'):>18}"
+                  f"  {names.get(code, '')[:44]}")
+            rows[code] = {"n": count, "median_share": med,
+                          "vendor_name": names.get(code)}
+        report[group]["codes_present"] = rows
+        print()
+
+    out["landbank_and_loanbook"] = report
+
+
+# --------------------------------------------------------------------------
 def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
     """Companies with no trustworthy operating line, and their revenue.
 
@@ -576,6 +803,43 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
     return symbols, revenue
 
 
+def _held_lines() -> Dict[str, Dict[str, Any]]:
+    """The two lines as the snapshot currently holds them, per symbol.
+
+    Read so the census can distinguish a third case from the two it was
+    written for: the vendor carries the code, and the number still does not
+    reach the record. That is a wiring fault, not a vendor one, and it
+    looks identical from the blocking table.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+    held = {}
+    for rec in stocks:
+        if isinstance(rec, dict) and rec.get("symbol"):
+            held[str(rec["symbol"]).upper().strip()] = {
+                "landbank_fq": rec.get("landbank_fq"),
+                "bank_loans_fq": rec.get("bank_loans_fq"),
+            }
+    return held
+
+
+def _write(out: Dict[str, Any], path: Optional[str]) -> None:
+    if not path:
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(out, handle, ensure_ascii=False, indent=2, default=str)
+    print(f"\nwrote {path}")
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=250,
@@ -584,9 +848,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--json", help="write the whole census to this path")
     parser.add_argument("--skip-survey", action="store_true",
                         help="catalogue and reachability only, no sampling")
+    # The full census prints well over a thousand lines and a job log can
+    # only be read from its tail, so a run that asks one question should
+    # print one answer. "landbank" runs section 7 alone: two sectors, a few
+    # hundred requests, and a table short enough to survive the tail.
+    parser.add_argument("--only", choices=("all", "landbank"), default="all",
+                        help="run one section instead of the whole census")
     args = parser.parse_args(argv)
 
     out: Dict[str, Any] = {}
+
+    if args.only == "landbank":
+        groups = pick_line_symbols(args.limit or None)
+        landbank_and_loanbook(groups, args.workers, out,
+                              held=_held_lines())
+        _write(out, args.json)
+        return 0
+
     cookies = _handshake_cookies()
     print(f"handshake returned {len(cookies)} cookies")
 
@@ -609,11 +887,14 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print_field_catalogue(out)
 
-    if args.json:
-        os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
-        with open(args.json, "w", encoding="utf-8") as handle:
-            json.dump(out, handle, ensure_ascii=False, indent=2)
-        print(f"\nwrote {args.json}")
+    # After the catalogue, deliberately. The catalogue is 1400 lines and
+    # whatever follows it is the only part of the log guaranteed to be
+    # readable; this section is the one that answers a question a run is
+    # currently waiting on.
+    groups = pick_line_symbols(args.limit or None)
+    landbank_and_loanbook(groups, args.workers, out, held=_held_lines())
+
+    _write(out, args.json)
     return 0
 
 

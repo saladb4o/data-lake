@@ -499,6 +499,26 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         "income_statement_ttm_by_code": {
             c: _sum_ttm([c]) for c in val_lookup if 20000 <= c < 30000
         },
+        # {itemCode: its value at the latest fiscal date} for the balance
+        # sheet. The income statement got this treatment because its codes
+        # were wrong; the balance sheet never did, and the land bank
+        # (11420/12510) and the loan book (112000) are balance-sheet codes.
+        # So when those come back empty there is no way to tell a vendor
+        # that carries neither line from a pair of codes read wrong - which
+        # is exactly the question a run has now failed to answer twice.
+        # Diagnostic only; never read as a number by anything that
+        # publishes.
+        "balance_sheet_fq_by_code": {
+            c: val_lookup[c].get(latest_d)
+            for c in val_lookup
+            # Two numbering schemes live side by side: the non-financial
+            # balance sheet runs 10000-19999 (assets 12700, cash 11100),
+            # and the bank one runs 100000-199999 (gross loans 112000).
+            # A range that covered only the first would have declared the
+            # loan book absent for every bank by construction.
+            if (10000 <= c < 20000 or 100000 <= c < 200000)
+            and val_lookup[c].get(latest_d) is not None
+        },
         # {itemCode: the vendor's own name for it}, taken from the rows just
         # parsed. Diagnostic only; never read as a number.
         "item_code_names": name_lookup,

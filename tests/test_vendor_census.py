@@ -39,12 +39,25 @@ class TestItOnlyMeasures:
         and the workflow uploads as an artifact."""
         src = Path(census.__file__).read_text()
         assert src.count('"w", encoding="utf-8"') == 1
-        assert 'if args.json:' in src
+        # The dump moved into _write() when a second exit path was added
+        # for the focused run; the property is unchanged, so the guard
+        # follows it rather than being dropped. Nothing writes unless a
+        # caller named a path.
+        import inspect
+        writer = inspect.getsource(census._write)
+        assert "if not path:" in writer and "return" in writer
+        assert '"w", encoding="utf-8"' in writer
 
     def test_the_snapshot_is_opened_read_only(self):
-        src = inspect.getsource(census.pick_symbols)
-        assert '"r", encoding="utf-8"' in src
-        assert '"w"' not in src
+        # Every reader of the snapshot, not just the first one written.
+        # The census now opens it three times - two populations and the
+        # lines it already holds - and one of them opening it for writing
+        # would let a measurement overwrite the thing being measured.
+        for func in (census.pick_symbols, census.pick_line_symbols,
+                     census._held_lines):
+            src = inspect.getsource(func)
+            assert '"r", encoding="utf-8"' in src, func.__name__
+            assert '"w"' not in src, func.__name__
 
 
 class TestItDescribesWhatCameBack:

@@ -23,7 +23,11 @@ on:
         required: false
         default: 'true'
       vendor_census:
-        description: 'Đo toàn bộ các nguồn dữ liệu (chậm, vài nghìn request)'
+        # 'landbank' asks one question - does VNDIRECT carry the land bank
+        # and the loan book, and under which item codes - in a few hundred
+        # requests and a table short enough to read from a log tail. 'true'
+        # is the whole survey, several thousand requests and 1400 lines.
+        description: 'Census nguồn dữ liệu: false | landbank | true'
         required: false
         default: 'false'
       census_limit:
@@ -107,7 +111,7 @@ jobs:
       # It writes no valuation input and cannot: it runs after the snapshot
       # is already built and never reads back into it.
       - name: Census the vendor routes
-        if: ${{ github.event.inputs.vendor_census == 'true' }}
+        if: ${{ github.event.inputs.vendor_census == 'true' || github.event.inputs.vendor_census == 'landbank' }}
         continue-on-error: true
         # The census shares the job's 60-minute budget with the sync, and it
         # is the step most likely to sit waiting: it talks to vendors nobody
@@ -124,10 +128,20 @@ jobs:
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
         run: |
+          if [ "${{ github.event.inputs.vendor_census }}" = "landbank" ]; then
+            ONLY=landbank
+          else
+            ONLY=all
+          fi
+          # Appended, not written: the audit below adds the coverage
+          # headline to the same summary, and the summary is the one
+          # channel that does not depend on reading a log from its tail.
           python scripts/vendor_census.py \
+            --only "$ONLY" \
             --limit "${{ github.event.inputs.census_limit || '0' }}" \
             --workers 8 \
-            --json "$DATA_LOCAL_DIR/vendor_census.json"
+            --json "$DATA_LOCAL_DIR/vendor_census.json" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       # The audit runs LAST, after the census, and that ordering is load-
       # bearing rather than tidy. A job log can only be read from its tail,
@@ -149,7 +163,7 @@ jobs:
         run: |
           python scripts/audit_valuation_coverage.py \
             --show-blocked 20 --json "$DATA_LOCAL_DIR/coverage.json" \
-            | tee "$GITHUB_STEP_SUMMARY"
+            | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload the snapshot
         uses: actions/upload-artifact@v4
