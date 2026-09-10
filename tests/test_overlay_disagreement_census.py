@@ -78,7 +78,7 @@ class TestThePopulation:
             lambda: str(snapshot))
         assert census.pick_overlay_symbols(None) == ["BBB"]
 
-    def test_the_pairs_match_the_overlay_in_the_service(self):
+    def test_the_vendor_keys_match_the_overlay_in_the_service(self):
         # The census must not keep its own idea of which VNDIRECT keys the
         # overlay reads. A key renamed in the service and not here would
         # make this section report a field as never compared, which reads
@@ -87,5 +87,51 @@ class TestThePopulation:
         from services import unified_data_service as uds
 
         source = inspect.getsource(uds)
-        for vnd_key in census.OVERLAY_PAIRS.values():
+        for _prov, vnd_key in census.OVERLAY_PAIRS.values():
             assert f'vnd.get("{vnd_key}")' in source, vnd_key
+
+    def test_the_value_key_and_the_tier_key_are_taken_from_the_service(self):
+        """The two names differ, and assuming they matched cost a run.
+
+        The service publishes equity under "equity" and tiers it as
+        "total_equity"; likewise debt. This section read
+        rec["total_equity"], found nothing for all 1,522 symbols, and
+        printed "0 compared" - which reads as agreement rather than as a
+        broken instrument. The debt question the run was dispatched to
+        answer went unanswered, and the borrowings scoring reported "this
+        cannot be decided from the snapshot" when what could not be
+        decided was a lookup.
+
+        _absolute_lines is a local inside a function and cannot be
+        imported, so the pairing is read out of the source.
+        """
+        import inspect
+        import re
+        from services import unified_data_service as uds
+
+        source = inspect.getsource(uds)
+        table = source[source.index("_absolute_lines = {"):]
+        table = table[:table.index("\n    }")]
+        published = dict(re.findall(
+            r'"([a-z_]+)":\s*\([a-z_0-9\.]+,\s*"([a-z_]+)"\)', table))
+        assert published, "the published-line table could not be read"
+        for value_key, (prov_key, _vnd) in census.OVERLAY_PAIRS.items():
+            assert value_key in published, value_key
+            assert published[value_key] == prov_key, (
+                f"{value_key} is tiered as {published[value_key]!r},"
+                f" not {prov_key!r}")
+
+    def test_a_field_nothing_was_compared_for_is_called_out(self,
+                                                           monkeypatch):
+        # A row of noughts reads as agreement and means the opposite. This
+        # is exactly how the equity and debt lookup bug presented: three
+        # quiet rows of zeros, and a run that had answered nothing looked
+        # like a run that had found no disagreement.
+        import io
+        import contextlib
+
+        monkeypatch.setattr(census, "_held_overlay_fields", dict)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            census.vendor_disagreement([], 1, {})
+        assert "NOTHING COMPARED" in buf.getvalue()

@@ -1182,7 +1182,12 @@ def _score_debt_candidates(entries) -> Dict[str, Any]:
             if not isinstance(rec, dict) or not rec.get("symbol"):
                 continue
             tiers = rec.get("field_provenance") or {}
-            value = rec.get("total_debt")
+            # The value is published as "debt" and tiered as
+            # "total_debt". Reading rec["total_debt"] found nothing for
+            # all 1,522 symbols, so this scoring silently had no yardstick
+            # and reported "cannot be decided from the snapshot" - a
+            # missing instrument dressed as a finding about the vendor.
+            value = rec.get("debt")
             if int(tiers.get("total_debt", 0) or 0) >= 3 and value:
                 known[str(rec["symbol"]).upper().strip()] = float(value)
 
@@ -1243,18 +1248,30 @@ def _score_debt_candidates(entries) -> Dict[str, Any]:
 #: number is wrong. That makes the disagreement rate the whole decision: if
 #: the vendors agree everywhere, the cascade is fine as it stands and the
 #: work is not worth doing.
+#: record value key -> (provenance key, VNDIRECT key).
+#:
+#: The value key and the provenance key are NOT the same name. The service
+#: publishes equity under "equity" while tiering it as "total_equity", and
+#: the same for debt, because _absolute_lines maps one to the other. The
+#: first version of this section assumed they matched. It was right for
+#: eight pairs of ten and wrong for exactly the two that mattered: the
+#: comparison read rec["total_equity"], found nothing, and printed "0
+#: compared" - which reads as agreement, not as a broken instrument, and
+#: the debt question the run was dispatched to answer went unanswered.
+#:
+#: A field that compares zero symbols is now called out rather than
+#: printed as a quiet row of noughts.
 OVERLAY_PAIRS = {
-    # record field      VNDIRECT key
-    "revenue":          "revenue_ttm",
-    "net_income":       "net_income_ttm",
-    "ebit":             "ebit_ttm",
-    "total_assets":     "total_assets_fq",
-    "total_equity":     "total_equity_fq",
-    "total_debt":       "total_debt_fq",
-    "cash":             "cash_fq",
-    "cfo":              "cfo_ttm",
-    "capex":            "capex_ttm",
-    "da":               "da_ttm",
+    "revenue":       ("revenue", "revenue_ttm"),
+    "net_income":    ("net_income", "net_income_ttm"),
+    "ebit":          ("ebit", "ebit_ttm"),
+    "total_assets":  ("total_assets", "total_assets_fq"),
+    "equity":        ("total_equity", "total_equity_fq"),
+    "debt":          ("total_debt", "total_debt_fq"),
+    "cash":          ("cash", "cash_fq"),
+    "cfo":           ("cfo", "cfo_ttm"),
+    "capex":         ("capex", "capex_ttm"),
+    "da":            ("da", "da_ttm"),
 }
 
 #: How far apart two figures may sit and still count as the same number.
@@ -1329,7 +1346,7 @@ def vendor_disagreement(symbols: List[str], workers: int,
     report: Dict[str, Any] = {"population": len(symbols),
                               "answered": len(fetched), "fields": {}}
 
-    for field, vnd_key in OVERLAY_PAIRS.items():
+    for field, (_prov, vnd_key) in OVERLAY_PAIRS.items():
         tally = {"agree": 0, "scaled": 0, "differ": 0}
         worst = (0.0, "")
         for sym, entry in fetched.items():
@@ -1345,9 +1362,13 @@ def vendor_disagreement(symbols: List[str], workers: int,
                     worst = (gap, sym)
         compared = sum(tally.values())
         share = (100.0 * tally["differ"] / compared) if compared else 0.0
+        # A row of noughts reads as agreement. It means the opposite:
+        # nothing was compared, and the reason is either that the field is
+        # never vendor-reported or that this table names it wrongly.
+        note = "  NOTHING COMPARED" if not compared else ""
         print(f"  {field:<16} {compared:>8} {tally['agree']:>7}"
               f" {tally['scaled']:>8} {tally['differ']:>8}"
-              f"   {share:>5.1f}% {worst[1]}")
+              f"   {share:>5.1f}% {worst[1]}{note}")
         report["fields"][field] = dict(tally, compared=compared)
 
     print("\n  A field that differs often is one where the cascade is"
@@ -1383,8 +1404,8 @@ def _held_overlay_fields() -> Dict[str, Dict[str, Any]]:
             continue
         tiers = rec.get("field_provenance") or {}
         row = {}
-        for field in OVERLAY_PAIRS:
-            if int(tiers.get(field, 0) or 0) == 3:
+        for field, (prov_key, _vnd) in OVERLAY_PAIRS.items():
+            if int(tiers.get(prov_key, 0) or 0) == 3:
                 row[field] = rec.get(field)
         if row:
             out[str(rec["symbol"]).upper().strip()] = row

@@ -292,7 +292,7 @@ class TestTheBorrowingCandidatesAreScoredNotChosen:
     def test_the_matching_combination_scores_higher(self, tmp_path,
                                                     monkeypatch, capsys):
         self._snap(tmp_path, monkeypatch, [
-            {"symbol": "AAA", "total_debt": 300.0,
+            {"symbol": "AAA", "debt": 300.0,
              "field_provenance": {"total_debt": 3}},
         ])
         entry = {"symbol": "AAA", "balance_sheet_fq_by_code": {
@@ -310,7 +310,7 @@ class TestTheBorrowingCandidatesAreScoredNotChosen:
         # Tier 2 was derived by this project. Matching it would only show
         # the census agrees with an earlier guess, not with a filing.
         self._snap(tmp_path, monkeypatch, [
-            {"symbol": "AAA", "total_debt": 300.0,
+            {"symbol": "AAA", "debt": 300.0,
              "field_provenance": {"total_debt": 2}},
         ])
         entry = {"symbol": "AAA",
@@ -322,7 +322,7 @@ class TestTheBorrowingCandidatesAreScoredNotChosen:
         # Absent is not disagreement here either: a payload that carries
         # no candidate says nothing about which candidate is right.
         self._snap(tmp_path, monkeypatch, [
-            {"symbol": "AAA", "total_debt": 300.0,
+            {"symbol": "AAA", "debt": 300.0,
              "field_provenance": {"total_debt": 3}},
         ])
         entry = {"symbol": "AAA", "balance_sheet_fq_by_code": {12700: 9.0}}
@@ -333,7 +333,7 @@ class TestTheBorrowingCandidatesAreScoredNotChosen:
         # The record keeps some figures in billions and the vendor sends
         # raw dong; a scale mismatch would rule out the right answer.
         self._snap(tmp_path, monkeypatch, [
-            {"symbol": "AAA", "total_debt": 300.0,
+            {"symbol": "AAA", "debt": 300.0,
              "field_provenance": {"total_debt": 3}},
         ])
         entry = {"symbol": "AAA",
