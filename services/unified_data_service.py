@@ -431,7 +431,42 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
     cash = _latest([11100])
     gross_ppe = _latest([12110, 12100])
     accum_deprec = _latest([12120])
-    landbank = _latest([11420, 12510]) # WIP Real Estate Inventory + Investment Properties
+    # The land bank is inventory, and the numbering is not the vendor's own.
+    #
+    # A census of all 112 developers that return a coded balance sheet
+    # settled both halves of this. 11420 appears in NONE of them and 12510
+    # appears in ALL of them with a value of zero in every single case, so
+    # the previous pair could never publish anything - which is exactly
+    # what the record showed: landbank_fq reached the snapshot for 0 of
+    # 112, and the `> 0` guard downstream was right to refuse a zero.
+    #
+    # The reason is legible once the scheme is: itemCode is 1 + the
+    # three-digit VAS balance-sheet code + 0. Confirmed on five independent
+    # lines by their median share of total assets -
+    #
+    #   12700 = 1.0000  VAS 270  TONG CONG TAI SAN
+    #   11000 = 0.6349  VAS 100  TAI SAN NGAN HAN
+    #   12000 = 0.3929  VAS 200  TAI SAN DAI HAN
+    #   11300 = 0.1341  VAS 130  Phai thu ngan han
+    #   11100 = 0.0195  VAS 110  Tien
+    #
+    # - which makes 11420 VAS 142, a line the standard form does not have,
+    # and 12510 VAS 251, long-term work in progress. A Vietnamese developer
+    # does not hold its pipeline there. It holds it in INVENTORY:
+    #
+    #   11400 = 0.2045  VAS 140  HANG TON KHO      106 of 112 non-zero
+    #   11410 = 0.2046  VAS 141  Hang ton kho      106 of 112 non-zero
+    #
+    # 11400 first because it is net of the obsolescence provision (VAS 149)
+    # and 11410 is gross; the net figure is the conservative one and the
+    # two differ by well under a percent of assets at the median.
+    #
+    # What this is not: inventory is the property pipeline at BOOK COST,
+    # including finished units, not a market appraisal of raw land. That is
+    # the right direction to be wrong in for model_18, whose rnav adds
+    # landbank_pipeline_val to cash and subtracts debt - a cost basis
+    # understates the RNAV rather than flattering it.
+    landbank = _latest([11400, 11410])
     unearned_revenue = _latest([13130]) # Short-term Customer Prepayments
     bank_loans = _latest([112000]) # Bank Gross Loans
     bank_loan_loss = _latest([112900]) # Bank Loan Loss Reserves
@@ -3020,9 +3055,20 @@ def normalize_stock_data(
     # landbank blocks 123 symbols and rwa 41. Both were reported as
     # sector-specific data no route carries, on the evidence of the blocking
     # table - which cannot tell "nobody has this" apart from "somebody has
-    # this and it was never wired". The vendor has had them all along.
+    # this and it was never wired". A census of every company in both
+    # sectors has since separated them, and the two answers are different:
     #
-    # Tier 3: a line the vendor states outright. Fail-closed by
+    #   landbank  the vendor carries it, under item codes nobody here had
+    #             read correctly. See the decoding note at fetch time.
+    #   rwa       the vendor does NOT carry it. 28 of the 41 companies in
+    #             these sectors return roughly ten top-level aggregates and
+    #             no asset-side detail at all, and no code in any of the 41
+    #             payloads sits anywhere near the 60-75% of total assets a
+    #             loan book occupies. Not wired, and not guessed at: the
+    #             model stays refused for want of a figure that is genuinely
+    #             absent, which is the correct outcome.
+    #
+    # Tier 3 for a line the vendor states outright. Fail-closed by
     # construction - a code the payload does not carry comes back None, is
     # not tiered, and is not published, so the model stays refused rather
     # than valuing a company on an absent land bank.
@@ -3049,7 +3095,16 @@ def normalize_stock_data(
             _value = _safe_float(vnd.get(_key))
             if _value is not None and _value > 0:
                 tri[_key] = _value
-                tri["field_provenance"][_key] = 3
+                # Tier 2, not 3, for the land bank alone. The vendor states
+                # an inventory balance; reading that balance as the land
+                # bank is this project's inference, sound for a developer
+                # and not something the vendor asserted. Tier 2 still
+                # clears the resolver's gate, so the distinction costs no
+                # coverage - it records that a judgement was made here,
+                # where tier 3 would claim the vendor made it.
+                tri["field_provenance"][_key] = (
+                    2 if _key == "landbank_fq" else 3
+                )
 
     mcap = tri["mcap"]
     if mcap >= 30000:

@@ -557,7 +557,11 @@ def vndirect_relations(symbols: List[str], workers: int,
 #: rather than imported so that a run says which codes it tested even if
 #: the service has moved on since.
 LINE_CODES = {
-    "landbank": (11420, 12510),
+    # 11400/11410 are VAS 140/141, inventory - where a Vietnamese developer
+    # holds its pipeline. The pair read before, 11420 and 12510, were VAS
+    # 142 (a line the standard form does not have) and VAS 251 (long-term
+    # work in progress, zero for all 112 companies censused).
+    "landbank": (11400, 11410),
     "bank_loans": (112000,),
 }
 

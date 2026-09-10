@@ -40,7 +40,7 @@ class TestTheCensusAsksAboutTheRightCompanies:
         source = open(uds.__file__, encoding="utf-8").read()
         for code in census.LINE_CODES["landbank"]:
             assert f"{code}" in source
-        assert "_latest([11420, 12510])" in source
+        assert "_latest([11400, 11410])" in source
         assert "_latest([112000])" in source
 
     def test_population_is_grouped_by_sector(self, tmp_path, monkeypatch):
@@ -148,12 +148,12 @@ class TestTheReportSeparatesTheThreeFaults:
     def test_a_carried_code_is_counted_as_carried(self, monkeypatch):
         report = self._run(
             monkeypatch,
-            {"NLG": {"balance_sheet_fq_by_code": {11420: 2.0e12},
+            {"NLG": {"balance_sheet_fq_by_code": {11400: 2.0e12},
                      "item_code_names": {}}},
             {"landbank": ["NLG"], "bank_loans": []},
         )
-        assert report["landbank"]["per_code"][11420]["present"] == 1
-        assert report["landbank"]["per_code"][11420]["nonzero"] == 1
+        assert report["landbank"]["per_code"][11400]["present"] == 1
+        assert report["landbank"]["per_code"][11400]["nonzero"] == 1
         assert report["landbank"]["missing"] == 0
 
     def test_a_route_that_answered_nothing_is_not_reported_as_an_absent_line(
@@ -201,17 +201,17 @@ class TestTheReportSeparatesTheThreeFaults:
         # for no one is not the line.
         report = self._run(
             monkeypatch,
-            {"KDH": {"balance_sheet_fq_by_code": {12510: 0.0,
+            {"KDH": {"balance_sheet_fq_by_code": {11400: 0.0,
                                                   12700: 5.0e12,
-                                                  11400: 3.5e12},
+                                                  11300: 3.5e12},
                      "item_code_names": {}}},
             {"landbank": ["KDH"], "bank_loans": []},
         )
-        assert report["landbank"]["per_code"][12510]["present"] == 1
-        assert report["landbank"]["per_code"][12510]["nonzero"] == 0
+        assert report["landbank"]["per_code"][11400]["present"] == 1
+        assert report["landbank"]["per_code"][11400]["nonzero"] == 0
         # and it is examined rather than declared solved
         assert report["landbank"]["missing"] == 1
-        assert 11400 in report["landbank"]["codes_present"]
+        assert 11300 in report["landbank"]["codes_present"]
 
     def test_the_codes_present_are_ranked_by_size_not_by_frequency(
             self, monkeypatch, capsys):

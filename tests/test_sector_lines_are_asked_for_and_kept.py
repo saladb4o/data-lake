@@ -99,9 +99,29 @@ class TestTheAnswerIsKept:
             f"record; without a tier it is dropped before the engine"
         )
 
+    #: The tier each line earns, and why they are not all the same. Two of
+    #: these are figures the vendor states outright. The land bank is not:
+    #: the vendor states an INVENTORY balance, and reading that balance as
+    #: the land bank is this project's inference - sound for a developer,
+    #: but ours rather than the vendor's. Tier 2 still clears the
+    #: resolver's gate, so recording the judgement costs no coverage.
+    EXPECTED_TIER = {"landbank_fq": 2, "bank_loans_fq": 3, "gross_ppe_fq": 3}
+
     @pytest.mark.parametrize("key", sorted(VENDOR_ANSWERED))
-    def test_a_stated_line_is_tier_three(self, answered, key):
-        assert answered["field_provenance"].get(key) == 3
+    def test_a_line_carries_the_tier_its_evidence_earns(self, answered, key):
+        assert answered["field_provenance"].get(key) == self.EXPECTED_TIER[key]
+
+    def test_every_answered_line_has_a_declared_tier(self):
+        # So a line added to VENDOR_ANSWERED cannot slip through the
+        # parametrised test above by having no expectation written for it.
+        assert set(self.EXPECTED_TIER) == set(VENDOR_ANSWERED)
+
+    @pytest.mark.parametrize("key", sorted(VENDOR_ANSWERED))
+    def test_every_stated_line_clears_the_gate(self, answered, key):
+        # The distinction between tier 2 and tier 3 is about what is
+        # claimed, not about what is usable: both must pass.
+        assert (answered["field_provenance"].get(key)
+                >= InputResolver.MIN_TRUSTED_UPSTREAM_TIER)
 
     @pytest.mark.parametrize("field,aliases", sorted(ENGINE_LOOKUP.items()))
     def test_the_engine_resolves_it_as_real(self, answered, field, aliases):
