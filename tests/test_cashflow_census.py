@@ -136,16 +136,104 @@ class TestItCensusesTheCodesInForce:
         source = open(uds.__file__, encoding="utf-8").read()
         assert f"_latest({list(census.DEBT_CODES)})" in source
 
-    def test_the_population_is_taken_from_the_record(self, tmp_path,
-                                                     monkeypatch):
+    @staticmethod
+    def _snapshot(tmp_path, monkeypatch, body):
         snapshot = tmp_path / "screener_snapshot.json"
-        snapshot.write_text(
-            '{"stocks": {'
-            '"AAA": {"symbol": "AAA", "cfo": 1.0, "capex": 2.0},'
-            '"BBB": {"symbol": "BBB", "cfo": 1.0},'
-            '"CCC": {"symbol": "CCC"}}}', encoding="utf-8")
-        monkeypatch.setattr(uds, "screener_snapshot_file", lambda: str(snapshot))
-        # The blocking table cannot say which half of `cfo - capex` is
-        # missing; the record can, so a company short of either is included
-        # and one holding both is not.
+        snapshot.write_text(body, encoding="utf-8")
+        monkeypatch.setattr(uds, "screener_snapshot_file",
+                            lambda: str(snapshot))
+
+    def test_the_population_is_chosen_by_tier_not_by_presence(
+            self, tmp_path, monkeypatch):
+        """A value that is present but untrustworthy is what blocks fcf.
+
+        The first version of this picker asked whether cfo and capex were
+        None and found three companies in 1,523: both ladders end in a
+        fallback - capex at tier 1 from D&A, then tier 0 - so the record
+        always carries a number. Selecting on presence measured a
+        population that had nothing to do with the driver being censused.
+        """
+        self._snapshot(tmp_path, monkeypatch,
+                       '{"stocks": {'
+                       '"AAA": {"symbol": "AAA", "cfo": 1.0, "capex": 2.0,'
+                       ' "field_provenance": {"cfo": 3, "capex": 3}},'
+                       '"BBB": {"symbol": "BBB", "cfo": 1.0, "capex": 2.0,'
+                       ' "field_provenance": {"cfo": 3, "capex": 1}},'
+                       '"CCC": {"symbol": "CCC", "cfo": 1.0, "capex": 2.0,'
+                       ' "field_provenance": {"cfo": 0, "capex": 0}}}}')
+        # BBB and CCC hold a number for both lines and are still refused.
         assert census.pick_cashflow_symbols(None) == ["BBB", "CCC"]
+
+    def test_a_company_with_no_tiers_at_all_is_included(self, tmp_path,
+                                                        monkeypatch):
+        self._snapshot(tmp_path, monkeypatch,
+                       '{"stocks": {"DDD": {"symbol": "DDD"}}}')
+        assert census.pick_cashflow_symbols(None) == ["DDD"]
+
+    def test_the_gate_has_not_drifted_from_the_engines(self):
+        # _TRUSTED is a copy, kept so the census need not import the
+        # valuation engine to ask a question about a vendor.
+        from services.valuation_engine import InputResolver
+        assert census._TRUSTED == InputResolver.MIN_TRUSTED_UPSTREAM_TIER
+
+class TestTheDecodingIsConfirmedByArithmetic:
+    """The vendor names no code, so an identity is the only real evidence.
+
+    A label can be guessed wrong and a magnitude can be a coincidence. An
+    identity that reproduces on hundreds of separate companies is the
+    statement's own arithmetic and cannot be talked into holding.
+
+    itemCode on the cash flow statement reads as 3 + the two-digit VAS B03
+    code + 00, which puts net cash from operations at 32000 - not at the
+    31000/31100 the extractor reads. On three companies the medians of
+    36000, 35000 and 37000 closed to four decimals. Three companies and a
+    median is not evidence, which is what these tests exist to enforce.
+    """
+
+    GOOD = {"cash_flow_ttm_by_code": {
+        37000: 300.0, 36000: 500.0, 35000: -200.0,
+        32000: -260.0, 33000: 40.0, 34000: 20.0}}
+    BAD = {"cash_flow_ttm_by_code": {
+        37000: 300.0, 36000: 500.0, 35000: 99.0,
+        32000: 1.0, 33000: 1.0, 34000: 1.0}}
+
+    def test_a_statement_that_closes_is_counted(self):
+        r = census._check_identities([self.GOOD], "cash_flow_ttm_by_code",
+                                     census.CASH_FLOW_IDENTITIES)
+        assert all(v["held"] == 1 and v["tested"] == 1 for v in r.values())
+
+    def test_a_statement_that_does_not_close_is_counted_against(self):
+        r = census._check_identities([self.GOOD, self.GOOD, self.BAD],
+                                     "cash_flow_ttm_by_code",
+                                     census.CASH_FLOW_IDENTITIES)
+        assert all(v["held"] == 2 and v["tested"] == 3 for v in r.values())
+
+    def test_a_company_missing_a_term_is_not_tested_rather_than_failed(self):
+        # Absent is not disagreement. Counting a missing line as a broken
+        # identity would make a sparse payload look like a wrong decoding.
+        r = census._check_identities(
+            [{"cash_flow_ttm_by_code": {37000: 300.0}}],
+            "cash_flow_ttm_by_code", census.CASH_FLOW_IDENTITIES)
+        assert all(v["tested"] == 0 and v["rate"] is None
+                   for v in r.values())
+
+    def test_it_is_checked_per_company_and_not_on_the_medians(self):
+        # A median satisfies an identity whenever one company happens to
+        # be the median of every term - likely at n=3, and meaningless.
+        # Two companies whose medians would close but neither of which
+        # closes on its own must score zero.
+        left = {"cash_flow_ttm_by_code": {37000: 300.0, 36000: 500.0,
+                                          35000: 0.0}}
+        right = {"cash_flow_ttm_by_code": {37000: 0.0, 36000: 0.0,
+                                           35000: -200.0}}
+        r = census._check_identities([left, right], "cash_flow_ttm_by_code",
+                                     census.CASH_FLOW_IDENTITIES)
+        assert r["cash at end = cash at start + net change"]["held"] == 0
+
+    def test_the_identity_the_extractor_contradicts_is_the_one_checked(self):
+        # cfo reads 31000/31100; the identity places net operating cash at
+        # 32000. If the identity is dropped the disagreement goes unnoticed.
+        targets = {t for _, _, terms in census.CASH_FLOW_IDENTITIES
+                   for t in terms}
+        assert 32000 in targets
+        assert 32000 not in census.CASH_FLOW_CODES["cfo"]

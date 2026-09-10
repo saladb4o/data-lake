@@ -893,6 +893,61 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
 CASH_FLOW_CODES = {"cfo": (31000, 31100), "capex": (32100, 32110, 32010)}
 DEBT_CODES = (13000, 13100)
 
+#: The resolver's gate. Duplicated rather than imported because the census
+#: must not import the valuation engine to ask a question about a vendor;
+#: a test asserts the two have not drifted.
+_TRUSTED = 2
+
+
+#: Relations that hold for every cash flow statement ever written, as
+#: (target, [terms]). They are how a numbering scheme is confirmed when the
+#: vendor names nothing: a label can be guessed wrong and a magnitude can
+#: be a coincidence, but an identity that reproduces on hundreds of
+#: companies is the statement's own arithmetic.
+#:
+#: Read against the scheme this census recovered from three companies -
+#: itemCode is 3 + the two-digit VAS B03 code + 00, so 32000 is VAS 20,
+#: net cash from operations. On that reading 36000 - 35000 - 37000 closed
+#: to four decimals at the median, which is suggestive and nothing more at
+#: n=3. These print the rate at which each holds per company.
+CASH_FLOW_IDENTITIES = (
+    ("cash at end = cash at start + net change", 37000, (36000, 35000)),
+    ("net change = operating + investing + financing",
+     35000, (32000, 33000, 34000)),
+)
+
+
+def _check_identities(entries, sheet_key: str, identities,
+                      tolerance: float = 0.02) -> Dict[str, Any]:
+    """How often each identity actually reproduces, per company.
+
+    Per company and not on the medians. A median satisfies an identity
+    whenever one company happens to be the median of every term, which is
+    likely at n=3 and says nothing; requiring it of each company
+    separately cannot be satisfied by coincidence at scale.
+    """
+    print("  Identities, checked per company:")
+    results = {}
+    for label, target, terms in identities:
+        held = tested = 0
+        for entry in entries:
+            rows = {int(k): v for k, v in
+                    (entry.get(sheet_key) or {}).items() if v is not None}
+            if target not in rows or any(t not in rows for t in terms):
+                continue
+            tested += 1
+            expected = sum(rows[t] for t in terms)
+            scale = max(abs(rows[target]), abs(expected), 1.0)
+            if abs(rows[target] - expected) / scale <= tolerance:
+                held += 1
+        rate = (100.0 * held / tested) if tested else None
+        print(f"    {label:<48}"
+              f"{(f'{rate:5.1f}%' if rate is not None else '    -')}"
+              f"  ({held}/{tested})")
+        results[label] = {"held": held, "tested": tested, "rate": rate}
+    print()
+    return results
+
 
 def pick_cashflow_symbols(limit: Optional[int]) -> List[str]:
     """Companies whose record has no operating cash flow or no capex.
@@ -900,10 +955,18 @@ def pick_cashflow_symbols(limit: Optional[int]) -> List[str]:
     fcf blocks more symbols than any other driver and it is the only one
     left with a plausible route: the 31 companies that are short of nothing
     cannot be helped by any vendor, and regulated_asset_base is not a line
-    anybody reports. So the population is the companies that would benefit,
-    taken from what the record actually holds rather than from the audit's
-    blocking table - the table cannot say which of the two halves of
-    `cfo - capex` is the missing one, and the record can.
+    anybody reports.
+
+    Selected by TIER, not by presence, and the difference is the whole
+    population. The first version of this asked `rec.get("cfo") is None`
+    and found three companies out of 1,523, because cfo and capex always
+    carry a value: both ladders end in a fallback, capex at tier 1 from
+    D&A and then at tier 0, so the record is never empty. What blocks fcf
+    is the resolver refusing a figure below the gate, and a value that is
+    present but untrustworthy is invisible to a presence test. That is the
+    same mistake as counting an item code as carried when every value of
+    it is zero - present is not usable - and it turned a census of 149
+    companies into a census of three.
     """
     from services.unified_data_service import screener_snapshot_file
 
@@ -923,7 +986,9 @@ def pick_cashflow_symbols(limit: Optional[int]) -> List[str]:
         sym = str(rec.get("symbol") or "").upper().strip()
         if not sym:
             continue
-        if rec.get("cfo") is None or rec.get("capex") is None:
+        tiers = rec.get("field_provenance") or {}
+        if any(int(tiers.get(name, 0) or 0) < _TRUSTED
+               for name in ("cfo", "capex")):
             symbols.append(sym)
     symbols.sort()
     return symbols[:limit] if limit else symbols
@@ -1006,6 +1071,8 @@ def cash_flows_and_borrowings(symbols: List[str], workers: int,
         )
         report["cash_flow_codes"] = _print_codes_by_size(
             freq, shares, raws, names, "revenue")
+        report["identities"] = _check_identities(
+            with_cf, "cash_flow_ttm_by_code", CASH_FLOW_IDENTITIES)
     else:
         print("  No coded cash flow statement anywhere in the population;"
               " the vendor does not serve one for these companies\n")
