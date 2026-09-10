@@ -2201,6 +2201,40 @@ def reconstruct_financial_triangles(
         div_yield = 0.0
         field_provenance["dividend_yield"] = 0
 
+    # Dividend per share, from the yield that was already here.
+    #
+    # dividend_per_share is the largest blocking driver at 162 symbols, and
+    # nothing in this file has ever written it. The resolver asks
+    # res.resolve("dividend_per_share", ("dividend_per_share",)) - one key,
+    # no aliases - and no producer emits that key, so the ask has never once
+    # been answered and utilities_3stage_ddm has been suppressed for every
+    # company in the universe since it was written.
+    #
+    # The ingredient was never missing. div_yield is measured above, carries
+    # its own provenance tier, and is normalised to a percentage two lines
+    # up: the vendor sends either 5.0 or 0.05 for a 5% yield, and the
+    # `0 < abs(x) <= 1.0` branch settles which. So the dividend is
+    # price * yield / 100, in dong per share, from two figures already held.
+    # Measured, tiered, connected to nothing - the fifteenth time in this
+    # audit, and the purest: a consumer asking by a name no producer writes.
+    #
+    # Offered only for a yield that was actually reported and is positive.
+    # The else-branch above sets div_yield to 0.0 at tier 0, and a zero
+    # dividend is not a small dividend - it means the vendor said nothing.
+    # Emitting 0.0 would hand the DDM a number to divide by and turn a
+    # refusal into an answer, which is the failure this whole gate exists to
+    # prevent. Absent, the resolver imputes it and the model stays suppressed,
+    # exactly as it does today.
+    #
+    # price is an input, so the fabricated 10000.0 fallback poisons this the
+    # same way it poisons pe and eps above.
+    if div_yield_raw is not None and div_yield > 0 and price > 0:
+        dividend_per_share = round(price * div_yield / 100.0, 2)
+        _prop("dividend_per_share", 2,
+              field_provenance["dividend_yield"], price_tier)
+    else:
+        dividend_per_share = None
+
     # -------------------------------------------------------------
     # 6. CFO to PAT Ratio (Cash Conversion Ratio)
     # -------------------------------------------------------------
@@ -2539,6 +2573,11 @@ def reconstruct_financial_triangles(
         "peg_sales": peg_sales,
         "eps": eps,
         "dividend_yield": div_yield,
+        # Omitted entirely when the yield was not reported: the resolver
+        # treats an absent key as missing and imputes it, which is the
+        # behaviour a fabricated zero would destroy.
+        **({"dividend_per_share": dividend_per_share}
+           if dividend_per_share is not None else {}),
         "roe": roe,
         "roa": roa,
         "gross_margin": gross_margin,
@@ -2848,6 +2887,16 @@ def normalize_stock_data(
             "total_assets", "total_liabilities", "equity", "debt", "cash",
             "revenue", "net_income", "ebit", "ebitda", "cfo", "capex",
             "shares_out",
+            # Added by hand, which is the point: the comment above says a
+            # line published upstream "arrives here on its own", and the code
+            # under it is still a hand-written list. Deriving
+            # dividend_per_share in the triangles was not enough - the value
+            # was computed, tiered, and dropped at this copy, which is the
+            # same defect this audit has found fourteen times and nearly
+            # reproduced here. Making the copy automatic is the real fix and
+            # is a change of its own; it would pull every triangle key to the
+            # top level at once and move tiers nobody has measured.
+            "dividend_per_share",
         )
         if tri.get(key) is not None
     }
