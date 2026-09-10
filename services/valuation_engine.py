@@ -2657,7 +2657,34 @@ class ValuationEngine:
                                   lambda: cfo - abs(total_capex)),
                           impute=lambda: cfo * 0.7)
         fcf_per_share = safe_div(fcf, shares, 0.0)
-        affo = res.resolve("affo", ("affo",), impute=lambda: net_income * 0.9)
+        # AFFO had no derivation at all: every company in the universe fell
+        # to the impute, so it was marked imputed for all of them and both
+        # models that declare it - p_affo and reit_affo_dcf - have been
+        # suppressed for every symbol since they were written. Nothing in
+        # this repository writes the key "affo" either, so the ask has never
+        # once been answered. That is the same shape as dividend_per_share
+        # and utilities_3stage_ddm: a consumer asking by a name no producer
+        # emits, read downstream as a data gap.
+        #
+        # CFO - capex, and not net income + D&A. NI + D&A is FFO, and AFFO
+        # is FFO less the capex needed to keep the portfolio earning;
+        # publishing FFO under the name AFFO overstates it by exactly the
+        # figure the name exists to subtract. Cash from operations less
+        # capital spending is the recognised cash-basis proxy and errs the
+        # other way: total capex includes development spending, not only
+        # maintenance, so for a developer mid-build this understates AFFO.
+        # Understating a valuation input is the side to be wrong on here.
+        #
+        # Derived from cfo and capex directly rather than from fcf, which
+        # carries its own impute (cfo * 0.7): a derivation whose input was
+        # invented is an assumption wearing a formula, and the resolver
+        # would still record it as DERIVED. A company without both lines
+        # keeps the impute, stays marked imputed, and its models stay
+        # refused - unchanged from today.
+        affo = res.resolve("affo", ("affo",),
+                           derive=(("cfo", "capex"),
+                                   lambda: cfo - abs(total_capex)),
+                           impute=lambda: net_income * 0.9)
         dividend_per_share = res.resolve("dividend_per_share", ("dividend_per_share",),
                                          impute=lambda: eps * 0.3)
         roe = _as_rate(res.resolve("roe", ("roe",), impute=lambda: 15.0))
