@@ -1443,6 +1443,46 @@ def _write(out: Dict[str, Any], path: Optional[str]) -> None:
     print(f"\nwrote {path}")
 
 
+#: The sections a run can ask for by name, and the only place they are
+#: declared. The workflow forwards whatever it was given straight to
+#: --only rather than keeping its own list, because when it kept one the
+#: two fell out of step and a census dispatched as "cashflow" was silently
+#: skipped while the job still reported success.
+FOCUSED_SECTIONS = {
+    "landbank": lambda args, out: landbank_and_loanbook(
+        pick_line_symbols(args.limit or None), args.workers, out,
+        held=_held_lines()),
+    "cashflow": lambda args, out: cash_flows_and_borrowings(
+        pick_cashflow_symbols(args.limit or None), args.workers, out),
+    "overlay": lambda args, out: vendor_disagreement(
+        pick_overlay_symbols(args.limit or None), args.workers, out),
+}
+
+
+def _sections(value: str) -> Tuple[str, ...]:
+    """Parse --only, rejecting a name that does not exist.
+
+    Rejecting rather than ignoring, because the failure this guards
+    against is a section that silently did not run: the job still
+    succeeds, the log still looks like a measurement, and nothing says
+    the question was never asked.
+    """
+    names = tuple(n.strip() for n in value.split(",") if n.strip())
+    if not names:
+        raise argparse.ArgumentTypeError("--only was given nothing to run")
+    if names == ("all",):
+        return names
+    unknown = [n for n in names if n not in FOCUSED_SECTIONS]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"no such section: {', '.join(unknown)}."
+            f" Known: all, {', '.join(FOCUSED_SECTIONS)}")
+    if "all" in names:
+        raise argparse.ArgumentTypeError(
+            "'all' runs every section and cannot be combined with one")
+    return names
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=250,
@@ -1455,30 +1495,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     # only be read from its tail, so a run that asks one question should
     # print one answer. "landbank" runs section 7 alone: two sectors, a few
     # hundred requests, and a table short enough to survive the tail.
-    parser.add_argument("--only",
-                        choices=("all", "landbank", "cashflow", "overlay"),
-                        default="all",
-                        help="run one section instead of the whole census")
+    # A comma-separated list, not one name. A run of the workflow costs
+    # about twenty minutes, and asking two questions in one run costs
+    # nothing beyond the requests each section makes - so the sections a
+    # run can answer together should not be split across two runs by the
+    # shape of an argument.
+    parser.add_argument("--only", default="all", type=_sections,
+                        help="comma-separated sections, or 'all'"
+                             f" ({', '.join(FOCUSED_SECTIONS)})")
     args = parser.parse_args(argv)
 
     out: Dict[str, Any] = {}
 
-    if args.only == "landbank":
-        groups = pick_line_symbols(args.limit or None)
-        landbank_and_loanbook(groups, args.workers, out,
-                              held=_held_lines())
-        _write(out, args.json)
-        return 0
-
-    if args.only == "cashflow":
-        cash_flows_and_borrowings(
-            pick_cashflow_symbols(args.limit or None), args.workers, out)
-        _write(out, args.json)
-        return 0
-
-    if args.only == "overlay":
-        vendor_disagreement(
-            pick_overlay_symbols(args.limit or None), args.workers, out)
+    if args.only != ("all",):
+        for name in args.only:
+            FOCUSED_SECTIONS[name](args, out)
         _write(out, args.json)
         return 0
 
@@ -1512,6 +1543,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     landbank_and_loanbook(groups, args.workers, out, held=_held_lines())
     cash_flows_and_borrowings(
         pick_cashflow_symbols(args.limit or None), args.workers, out)
+    vendor_disagreement(pick_overlay_symbols(args.limit or None),
+                        args.workers, out)
 
     _write(out, args.json)
     return 0

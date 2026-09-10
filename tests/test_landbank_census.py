@@ -251,16 +251,51 @@ class TestTheReportSeparatesTheThreeFaults:
 
 
 class TestTheFocusedRunStaysFocused:
-    def test_each_section_can_be_run_on_its_own(self):
+    def test_every_focused_section_is_reachable_by_name(self):
         # A run that asks one question should print one answer: a job log
         # is readable only from its tail, and the full census buries it.
-        # Every focused section needs a mode, or it can only be reached by
+        # Every focused section needs a name, or it can only be reached by
         # running the whole thing.
+        for name in ("landbank", "cashflow", "overlay"):
+            assert name in census.FOCUSED_SECTIONS, name
+
+    def test_several_sections_can_be_asked_for_in_one_run(self):
+        # A workflow run costs about twenty minutes. Two questions the
+        # same run could answer should not be split across two runs by the
+        # shape of an argument.
+        assert census._sections("cashflow,overlay") == ("cashflow",
+                                                        "overlay")
+
+    def test_a_name_that_does_not_exist_is_rejected_not_ignored(self):
+        # The failure this guards against is a section that silently did
+        # not run: the job succeeds, the log looks like a measurement, and
+        # nothing says the question was never asked.
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            census._sections("cashflow,nosuchthing")
+        with pytest.raises(argparse.ArgumentTypeError):
+            census._sections("")
+
+    def test_all_cannot_be_combined_with_a_named_section(self):
+        # It would run that section twice and read as though the list were
+        # honoured.
+        import argparse
+
+        with pytest.raises(argparse.ArgumentTypeError):
+            census._sections("all,cashflow")
+
+    def test_the_full_census_runs_every_focused_section(self):
+        # Otherwise "all" is not all, and a section reachable only by name
+        # is one nobody runs by default.
         import inspect
         source = inspect.getsource(census.main)
-        for mode in ("landbank", "cashflow"):
-            assert f'"{mode}"' in source, mode
-            assert f'args.only == "{mode}"' in source, mode
+        tail = source[source.index("_handshake_cookies()"):]
+        for name, func in census.FOCUSED_SECTIONS.items():
+            called = {"landbank": "landbank_and_loanbook",
+                      "cashflow": "cash_flows_and_borrowings",
+                      "overlay": "vendor_disagreement"}[name]
+            assert called in tail, name
 
     def test_the_workflow_can_reach_every_mode(self):
         """The workflow must not carry a second, shorter list of sections.
@@ -275,9 +310,7 @@ class TestTheFocusedRunStaysFocused:
         to --only, which rejects a name it does not have. This pins that:
         no list of section names in the workflow at all.
         """
-        import inspect
         import pathlib
-        import re
 
         workflow = pathlib.Path(__file__).resolve().parents[1] / (
             ".github/workflows/screener_sync.yml")
@@ -287,12 +320,8 @@ class TestTheFocusedRunStaysFocused:
         # Comments explain the trap by naming it; only what the runner
         # executes can fall out of step with the script.
         step = "\n".join(line for line in step.splitlines()
-                         if not line.lstrip().startswith("#"))
-        modes = set(re.findall(r'choices=\(([^)]*)\)',
-                               inspect.getsource(census.main))[0]
-                    .replace('"', "").replace(" ", "").split(","))
-        assert "cashflow" in modes and "landbank" in modes
-        for mode in modes - {"all"}:
+                          if not line.lstrip().startswith("#"))
+        for mode in census.FOCUSED_SECTIONS:
             # A section name hard-coded in the workflow is the thing that
             # went wrong; the value is forwarded, never matched.
             assert f"'{mode}'" not in step, (
