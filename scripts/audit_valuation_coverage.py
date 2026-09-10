@@ -162,7 +162,31 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             for driver in (model.diagnostics or {}).get("imputed_drivers", []):
                 blocked[driver] += 1
+        # Two lists, because they answer two different questions.
+        #
+        # blocked_by is capped at five for the per-symbol rows, where a
+        # twelve-item list would be unreadable. blocked_all is every driver
+        # the applicable models complained about, and it is what the
+        # aggregate table counts.
+        #
+        # Counting the capped list is what the aggregate did, and it made the
+        # table lie by omission whenever a driver was fixed. Wiring cash
+        # removed it from 150 symbols' complaints, and affo rose 117 -> 124,
+        # landbank 113 -> 117, invested_capital 28 -> 30, with roe appearing
+        # at 28 where it had not been listed - not because anything new
+        # blocked them, but because each symbol's sixth reason was promoted
+        # into a top-five that had just lost a member. The table moved in
+        # response to a fix elsewhere, which is the one thing a measurement
+        # must never do.
+        #
+        # This table is what the whole prioritisation reads: it is where
+        # "wire cash next, it blocks 150" comes from. A ranking that reshuffles
+        # itself every time something is fixed cannot be used to decide what
+        # to fix. Same defect as the hardcoded REFUSED label - a reporting
+        # artefact steering decisions - and found the same way, by a number
+        # moving when nothing behind it had.
         row["blocked_by"] = [d for d, _ in blocked.most_common(5)]
+        row["blocked_all"] = [d for d, _ in blocked.most_common()]
         # Which sector this symbol was valued as, and whether that sector is
         # one SECTOR_MODEL_MAP knows. A sector it does not know falls through
         # to all 22 models, so the symbol is judged against bank, REIT and
@@ -246,7 +270,7 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
 
     drivers = collections.Counter()
     for row in rows:
-        for driver in row["blocked_by"]:
+        for driver in row.get("blocked_all") or row["blocked_by"]:
             drivers[driver] += 1
     if drivers:
         print("\nMost common blocking drivers:")
