@@ -32,6 +32,14 @@ on:
         description: 'Giữ lại các mã đã có trong lake (true/false)'
         required: false
         default: 'false'
+      full_pass:
+        # One run that answers every open question instead of one run per
+        # question. Builds the screener snapshot, the price lake and the
+        # fundamentals lake, then scores the capex/depreciation codes,
+        # sweeps the backtest across publication lags and audits coverage.
+        description: 'Chạy trọn gói đo đạc thay vì chỉ build lake (true/false)'
+        required: false
+        default: 'false'
 
 concurrency:
   group: fundamentals-lake
@@ -43,6 +51,7 @@ permissions:
 jobs:
   build:
     name: Build the quarterly lake
+    if: ${{ github.event.inputs.full_pass != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
@@ -202,3 +211,54 @@ jobs:
           path: data/historical_fundamentals.json
           retention-days: 14
           if-no-files-found: error
+
+  measure:
+    name: Measure everything in one pass
+    if: ${{ github.event.inputs.full_pass == 'true' }}
+    runs-on: ubuntu-latest
+    # The pass builds three lakes and then runs every measurement that
+    # reads them. The one unknown is the price sync, which has never run
+    # on a runner and takes no limit, so the budget is generous.
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the measurement pass
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh
+
+      # if: always() throughout. A pass that lost a stage still built
+      # whatever came before it, and that is the expensive part.
+      - name: Upload everything the pass produced
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: measurement_pass
+          path: |
+            data/historical_fundamentals.json
+            data/screener_snapshot.json
+            data/historical_prices.json
+            data/coverage.json
+            data/backtest_sweep.json
+            data/code_candidates.json
+            data/code_candidates_probe.json
+          retention-days: 14
+          if-no-files-found: warn
