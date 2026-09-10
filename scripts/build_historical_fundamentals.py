@@ -98,6 +98,36 @@ STOCK_FIELDS = frozenset({"total_assets", "equity", "debt",
                           "total_liabilities", "cash", "gross_ppe"})
 
 
+#: Item codes to record alongside the lake so the two unresolved fields
+#: can be judged without a second pass over the universe.
+#:
+#: capex and depreciation are the only lines the extractor reads whose
+#: correctness has never been established. capex differs from the other
+#: vendor for 70.8% of companies and its first code is near-always zero;
+#: depreciation is the one field still missing for a fifth of the lake.
+#:
+#: The point is NOT to read these into the lake. It is that a filing
+#: contains its own arithmetic: capex should move gross fixed assets, and
+#: the period's depreciation should move accumulated depreciation. Those
+#: deltas are an independent yardstick - independent because they come
+#: from the balance sheet, which no cash-flow code we are judging feeds.
+#: Scoring a candidate against a figure the same extractor produced is
+#: how three measurements today returned a perfect score for nothing.
+DIAGNOSTIC_CODES: Dict[str, Tuple[int, ...]] = {
+    # Balance-sheet anchors, differenced quarter over quarter.
+    "gross_ppe": (12110, 12100),
+    "accumulated_depreciation": (12120,),
+    # The candidates themselves, each read on its own rather than as a
+    # chain, so a code that never answers is visible as a column of nulls
+    # instead of hiding behind the one before it.
+    "capex_32100": (32100,),
+    "capex_32110": (32110,),
+    "capex_32010": (32010,),
+    "da_31110": (31110,),
+    "da_31010": (31010,),
+}
+
+
 def _quarter_code(fiscal_date: str) -> Optional[str]:
     """Maps a fiscal date to the "2021-Q1" code the backtest indexes by."""
     try:
@@ -144,8 +174,15 @@ def _fetch_raw(symbol: str, size: int) -> List[Dict[str, Any]]:
 
 
 def build_symbol(symbol: str, size: int = 4000,
-                 lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS) -> Dict[str, Any]:
-    """Returns {quarter_code: record} for one symbol; empty when unavailable."""
+                 lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
+                 diagnostics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Returns {quarter_code: record} for one symbol; empty when unavailable.
+
+    When ``diagnostics`` is given, the raw values of DIAGNOSTIC_CODES are
+    recorded into it per quarter as well. They are deliberately kept out
+    of the lake: they exist to judge two of its fields, and a yardstick
+    that lives in the thing it measures stops being one.
+    """
     rows = _fetch_raw(symbol.upper().strip(), size)
     if not rows:
         return {}
@@ -237,6 +274,17 @@ def build_symbol(symbol: str, size: int = 4000,
         record["fiscal_date"] = fiscal
         quarters[code] = record
 
+        if diagnostics is not None:
+            probe = {}
+            for name, codes in DIAGNOSTIC_CODES.items():
+                for item in codes:
+                    value = by_code.get(item, {}).get(fiscal)
+                    if value is not None:
+                        probe[name] = value
+                        break
+            if probe:
+                diagnostics.setdefault(symbol.upper(), {})[code] = probe
+
     return quarters
 
 
@@ -309,6 +357,8 @@ def main() -> int:
     parser.add_argument("--lag-days", type=int, default=DEFAULT_PUBLICATION_LAG_DAYS,
                         help="Assumed days from quarter end to publication.")
     parser.add_argument("--out", default=None, help="Output path.")
+    parser.add_argument("--diagnostics-out", default=None,
+                        help="Also write the code-candidate probe here.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -331,11 +381,15 @@ def main() -> int:
         logger.error("no symbols to fetch")
         return 1
 
+    diagnostics: Optional[Dict[str, Any]] = (
+        {} if args.diagnostics_out else None)
+
     ok = 0
     for index, symbol in enumerate(symbols, start=1):
         symbol = symbol.upper().strip()
         try:
-            quarters = build_symbol(symbol, lag_days=args.lag_days)
+            quarters = build_symbol(symbol, lag_days=args.lag_days,
+                                    diagnostics=diagnostics)
         except Exception as exc:  # one bad symbol must not end the pass
             logger.warning("[%d/%d] %s failed: %s", index, len(symbols), symbol, exc)
             continue
@@ -356,6 +410,15 @@ def main() -> int:
     with open(tmp_path, "w", encoding="utf-8") as handle:
         json.dump(lake, handle, ensure_ascii=False)
     os.replace(tmp_path, out_path)
+
+    if diagnostics is not None:
+        os.makedirs(os.path.dirname(args.diagnostics_out) or ".", exist_ok=True)
+        with open(args.diagnostics_out, "w", encoding="utf-8") as handle:
+            json.dump({"codes": {k: list(v) for k, v in
+                                 DIAGNOSTIC_CODES.items()},
+                       "symbols": diagnostics}, handle, ensure_ascii=False)
+        logger.info("wrote %s: %d symbols probed",
+                    args.diagnostics_out, len(diagnostics))
 
     logger.info("wrote %s: %d symbols (%d fetched this pass)",
                 out_path, len(lake["symbols"]), ok)
