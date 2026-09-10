@@ -106,6 +106,33 @@ def worst_tier(record: Dict[str, Any]) -> Optional[int]:
     return min(numeric) if numeric else None
 
 
+#: The tier the resolver insists on. Kept here as a name rather than a bare
+#: 2 so that a report and the engine cannot drift apart silently.
+TRUSTED = 2
+
+
+def starved_core(record: Dict[str, Any]) -> List[str]:
+    """Which CORE drivers sit below the gate, named.
+
+    worst_tier answers "how bad is the weakest one" and that is what the
+    histogram needs. It cannot answer "what would a new vendor have to
+    supply", because a minimum names no driver: a universe reported as
+    tier 1 says nothing about whether the missing thing is revenue for
+    everybody or debt for everybody, and those are different projects.
+    """
+    tiers = record.get("field_provenance")
+    if not isinstance(tiers, dict):
+        return []
+    out = []
+    for key in CORE_DRIVERS:
+        value = tiers.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if int(value) < TRUSTED:
+            out.append(key)
+    return out
+
+
 def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
     from services.valuation_engine import ValuationEngine
 
@@ -114,6 +141,7 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
     row: Dict[str, Any] = {
         "symbol": symbol,
         "worst_tier": worst_tier(record),
+        "starved_core": starved_core(record),
         "active_models": 0,
         "fair_value": 0.0,
         "blocked_by": [],
@@ -309,6 +337,50 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
         for (sector, known, offered), count in by_sector.most_common(15):
             print(f"  {sector or '(none)':<16} {'yes' if known else 'NO':<7}"
                   f" {offered:>14}  {count:>7}")
+
+    # The other half of the refusals, and the half that decides whether the
+    # data work is finished. gated_out above is the group whose drivers ARE
+    # trusted and are turned away anyway: a model-map problem. This is the
+    # complement - the companies refused because a driver the gate needs is
+    # a stand-in or a fabrication - and it is the only group any new vendor
+    # or any extractor fix can ever move.
+    #
+    # Reported by driver, not by count, because the count alone has been
+    # read as a work queue twice and is not one. "89 refused" says nothing
+    # about whether there is anything left to do; "89 refused, all of them
+    # short of nothing, or all of them short of revenue" are opposite
+    # answers, and only the second is a task.
+    starved = [
+        r for r in refused
+        if r["worst_tier"] is not None and r["worst_tier"] < 2
+    ]
+    print(f"\nRefused for want of trustworthy data: {len(starved)}"
+          f" of {len(refused)} refusals")
+    if starved:
+        missing = collections.Counter()
+        for row in starved:
+            for driver in row.get("starved_core") or []:
+                missing[driver] += 1
+        print("  CORE driver below the gate    symbols   share of the group")
+        for driver, count in missing.most_common():
+            share = 100.0 * count / len(starved)
+            print(f"  {driver:<28} {count:>7}   {share:>16.1f}%")
+        # A company short of every core driver at once is one the vendor
+        # returned nothing for. A company short of one is a company one
+        # extractor away from being valued, and those are worth naming.
+        narrow = [r for r in starved if len(r.get("starved_core") or []) == 1]
+        if narrow:
+            by_driver = collections.Counter(
+                (r["starved_core"] or ["?"])[0] for r in narrow)
+            print(f"  {len(narrow)} of the {len(starved)} are short of exactly"
+                  f" one driver: "
+                  + ", ".join(f"{d} x{n}" for d, n in by_driver.most_common()))
+            print("  Those are the ones a single extractor fix can reach.")
+        blank = [r for r in starved
+                 if len(r.get("starved_core") or []) >= len(CORE_DRIVERS) - 1]
+        if blank:
+            print(f"  {len(blank)} are short of every core driver at once -"
+                  f" no vendor on this route returned anything for them.")
 
     if refused and show_blocked:
         print(f"\nFirst {min(show_blocked, len(refused))} refused symbols:")

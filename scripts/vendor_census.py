@@ -1099,6 +1099,181 @@ def cash_flows_and_borrowings(symbols: List[str], workers: int,
     out["cash_flows_and_borrowings"] = report
 
 
+# --------------------------------------------------------------------------
+# 9. Where the two vendors disagree
+# --------------------------------------------------------------------------
+#: The overlay in unified_data_service maps a VNDIRECT key onto a
+#: TradingView one, and each of those ends up in a record field under a
+#: third name. Kept here so a run states which pairs it compared.
+#:
+#: The overlay is a cascade, not a union: `if not tv.get(x) and vnd.get(x)`.
+#: When TradingView answers, VNDIRECT is never consulted, so two vendors
+#: never meet and a disagreement between them cannot be noticed. Whether
+#: that matters is a measurement nobody has taken - it is assumed to be
+#: harmless because the two are assumed to agree - and this section takes
+#: it.
+#:
+#: Note what a union would and would not buy. It cannot raise a tier: a
+#: figure two vendors both report is still tier 3, the same as one vendor
+#: reporting it, so this is not a coverage lever and no amount of agreement
+#: makes it one. What it buys is the chance to notice that the published
+#: number is wrong. That makes the disagreement rate the whole decision: if
+#: the vendors agree everywhere, the cascade is fine as it stands and the
+#: work is not worth doing.
+OVERLAY_PAIRS = {
+    # record field      VNDIRECT key
+    "revenue":          "revenue_ttm",
+    "net_income":       "net_income_ttm",
+    "ebit":             "ebit_ttm",
+    "total_assets":     "total_assets_fq",
+    "total_equity":     "total_equity_fq",
+    "total_debt":       "total_debt_fq",
+    "cash":             "cash_fq",
+    "cfo":              "cfo_ttm",
+    "capex":            "capex_ttm",
+    "da":               "da_ttm",
+}
+
+#: How far apart two figures may sit and still count as the same number.
+#: Vendors round, restate and cut a TTM window a quarter differently, so an
+#: exact match is not the question; an order of magnitude is.
+_AGREE = 0.02
+
+#: A record field the engine keeps in billions while the vendor sends raw
+#: dong. A comparison that did not separate this would report every such
+#: field as a total disagreement and send the next run chasing a unit.
+_BILLION = 1e9
+
+
+def _agreement(held: Optional[float],
+               vendor: Optional[float]) -> Optional[str]:
+    """How one pair of figures relates: agree, scaled, or differ.
+
+    Returns None when either side is absent, because a missing figure is
+    not a disagreement - and counting it as one is what would make a
+    sparse vendor look like a contradictory one.
+    """
+    if held is None or vendor is None:
+        return None
+    try:
+        held, vendor = float(held), float(vendor)
+    except (TypeError, ValueError):
+        return None
+    if held == 0.0 and vendor == 0.0:
+        return "agree"
+    for scale, label in ((1.0, "agree"), (_BILLION, "scaled"),
+                         (1.0 / _BILLION, "scaled")):
+        base = max(abs(held), abs(vendor * scale))
+        if base and abs(held - vendor * scale) / base <= _AGREE:
+            return label
+    return "differ"
+
+
+def vendor_disagreement(symbols: List[str], workers: int,
+                        out: Dict[str, Any]) -> None:
+    """How often the two vendors give different answers for one field.
+
+    The population is deliberately the companies the cascade actually
+    resolved - a company VNDIRECT alone supplied would agree with itself
+    and pad the agreement rate towards a conclusion that nothing is wrong.
+    """
+    print("\n" + "=" * 74)
+    print(" 9. WHERE THE TWO VENDORS DISAGREE")
+    print("=" * 74)
+    print(f"  {len(symbols)} companies whose record holds a vendor-reported"
+          f" figure\n")
+
+    held = _held_overlay_fields()
+
+    fetched: Dict[str, Dict[str, Any]] = {}
+
+    def work(sym: str):
+        try:
+            return sym, fetch_vndirect_financials(sym) or {}
+        except Exception:
+            return sym, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in symbols]):
+            sym, entry = fut.result()
+            if entry:
+                fetched[sym] = entry
+
+    print(f"  {len(fetched)} of {len(symbols)} returned a payload\n")
+    print("  field            compared   agree   scaled   DIFFER   worst")
+    print("  " + "-" * 66)
+
+    report: Dict[str, Any] = {"population": len(symbols),
+                              "answered": len(fetched), "fields": {}}
+
+    for field, vnd_key in OVERLAY_PAIRS.items():
+        tally = {"agree": 0, "scaled": 0, "differ": 0}
+        worst = (0.0, "")
+        for sym, entry in fetched.items():
+            record = held.get(sym) or {}
+            verdict = _agreement(record.get(field), entry.get(vnd_key))
+            if verdict is None:
+                continue
+            tally[verdict] += 1
+            if verdict == "differ":
+                a, b = float(record[field]), float(entry[vnd_key])
+                gap = abs(a - b) / max(abs(a), abs(b), 1.0)
+                if gap > worst[0]:
+                    worst = (gap, sym)
+        compared = sum(tally.values())
+        share = (100.0 * tally["differ"] / compared) if compared else 0.0
+        print(f"  {field:<16} {compared:>8} {tally['agree']:>7}"
+              f" {tally['scaled']:>8} {tally['differ']:>8}"
+              f"   {share:>5.1f}% {worst[1]}")
+        report["fields"][field] = dict(tally, compared=compared)
+
+    print("\n  A field that differs often is one where the cascade is"
+          " publishing")
+    print("  one vendor's number while another vendor says something else,"
+          " and")
+    print("  nothing in the pipeline can currently tell which is right.")
+    out["vendor_disagreement"] = report
+
+
+def _held_overlay_fields() -> Dict[str, Dict[str, Any]]:
+    """The overlay fields as the snapshot holds them, for vendor-fed rows.
+
+    Only tier 3 is taken. A tier-4 figure came from a filing and outranks
+    both vendors, a tier-2 one was triangulated rather than reported, and
+    tier 1 is a stand-in; comparing any of those against a vendor measures
+    something other than whether the two vendors agree.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        raise SystemExit(f"No snapshot at {path}. Run the universe sync first.")
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for rec in stocks:
+        if not isinstance(rec, dict) or not rec.get("symbol"):
+            continue
+        tiers = rec.get("field_provenance") or {}
+        row = {}
+        for field in OVERLAY_PAIRS:
+            if int(tiers.get(field, 0) or 0) == 3:
+                row[field] = rec.get(field)
+        if row:
+            out[str(rec["symbol"]).upper().strip()] = row
+    return out
+
+
+def pick_overlay_symbols(limit: Optional[int]) -> List[str]:
+    """Companies carrying at least one vendor-reported overlay field."""
+    symbols = sorted(_held_overlay_fields())
+    return symbols[:limit] if limit else symbols
+
+
 def _cell_of(entry: Dict[str, Any], sheet_key: str, code: int):
     """One figure from one of the by-code exports, either key type."""
     rows = entry.get(sheet_key) or {}
@@ -1158,7 +1333,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # print one answer. "landbank" runs section 7 alone: two sectors, a few
     # hundred requests, and a table short enough to survive the tail.
     parser.add_argument("--only",
-                        choices=("all", "landbank", "cashflow"),
+                        choices=("all", "landbank", "cashflow", "overlay"),
                         default="all",
                         help="run one section instead of the whole census")
     args = parser.parse_args(argv)
@@ -1175,6 +1350,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.only == "cashflow":
         cash_flows_and_borrowings(
             pick_cashflow_symbols(args.limit or None), args.workers, out)
+        _write(out, args.json)
+        return 0
+
+    if args.only == "overlay":
+        vendor_disagreement(
+            pick_overlay_symbols(args.limit or None), args.workers, out)
         _write(out, args.json)
         return 0
 
