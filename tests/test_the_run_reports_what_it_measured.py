@@ -111,12 +111,21 @@ class TestTheBacktestPrintsWhereTheUniverseWent:
             skipped=0, unmatched_custom_symbols=[])
         assert "funnel" not in info
 
-    def test_the_sweep_defaults_to_the_two_lag_extremes(self):
-        from scripts.measure_the_backtest import DEFAULT_LAGS, DEFAULT_STRATEGIES
-        # Five lags returned five identical rows. Interior points between
-        # endpoints that agree cannot disagree, so they were dropped and
-        # the freed budget went to an axis that does vary.
-        assert DEFAULT_LAGS == (20, 90)
+    def test_the_sweep_reaches_past_the_quarter_boundary(self):
+        from scripts.measure_the_backtest import (
+            DEFAULT_LAGS, DEFAULT_STRATEGIES, QUARTER_DAYS)
+        # This used to assert DEFAULT_LAGS == (20, 90), on the reasoning
+        # that five lags had returned five identical rows so the interior
+        # points had nothing to say. The rows were identical because the
+        # simulation stands at quarter end and every lag under a quarter
+        # makes the same filing public - not because the assumption does
+        # not matter. Run 34616175758 swept past the boundary and
+        # peter_lynch_garp went from 9.34% CAGR to -0.05%: a 9.39-point
+        # spread that the old sweep could not have seen. So the
+        # requirement is the opposite one, and it is about reach rather
+        # than about any particular value.
+        assert any(lag > QUARTER_DAYS for lag in DEFAULT_LAGS), DEFAULT_LAGS
+        assert any(lag <= QUARTER_DAYS for lag in DEFAULT_LAGS), DEFAULT_LAGS
         assert len(DEFAULT_STRATEGIES) >= 2
 
 
