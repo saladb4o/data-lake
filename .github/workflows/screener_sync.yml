@@ -49,6 +49,16 @@ on:
         description: 'BOOTSTRAP: chạy trọn gói đo đạc (true/false)'
         required: false
         default: 'false'
+      filings_for:
+        # One symbol, its latest BCTC, parsed - two minutes, no lake. The
+        # PDF pipeline has never been measured on a document it fetched
+        # itself: extracted_bctc_lake.json was built on a Windows machine
+        # and every local_path in it still says C:\\Users\\Admin. CafeF is
+        # refused from the dev container, so this is the only place the
+        # question can be asked at all.
+        description: 'Tải và parse BCTC mới nhất của MỘT mã: nhập mã (trống = tắt)'
+        required: false
+        default: ''
       analyse_run:
         # The expensive stages are fetches; every measurement that reads
         # them is seconds of arithmetic. Paying 43 minutes of universe +
@@ -572,3 +582,34 @@ jobs:
             data/capex_match.json
           retention-days: 14
           if-no-files-found: warn
+
+  filings:
+    name: One symbol's latest filings, fetched and parsed
+    if: github.event.inputs.filings_for != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Fetch and parse
+        timeout-minutes: 15
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+        run: |
+          python scripts/fetch_one_symbols_filings.py \
+            "${{ github.event.inputs.filings_for }}" \
+            --limit 3 | tee -a "$GITHUB_STEP_SUMMARY"
