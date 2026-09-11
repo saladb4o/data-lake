@@ -1,8 +1,8 @@
 """Daily prices for the whole universe, quarterised into the price lake.
 
-Sources, in the order they are tried: DNSE's chart endpoint, then SSI's,
-then TCBS's, then a yfinance batch download, then vnstock per symbol. Each symbol is counted against the
-source that actually answered for it, and the tally is printed - because
+Two sources, in the order they are tried: DNSE's chart endpoint, then
+vnstock per symbol. Each symbol is counted against the source that
+actually answered for it, and the tally is printed - because
 this header used to say "TRADINGVIEW & VCI DATA FEEDS" and the saved
 payload used to say "TradingView & Yahoo Finance Live Data Feeds" while
 the code reached for neither TradingView nor VCI. A label nobody can
@@ -100,36 +100,11 @@ QUARTER_MILESTONES = [
     {"code": "2026-Q1", "start": "2026-01-01", "end": "2026-03-31", "year": 2026, "quarter": 1}
 ]
 
-def fetch_from_yfinance(symbol: str) -> Optional[pd.DataFrame]:
-    """Fallback fetcher using Yahoo Finance (yfinance) for Vietnamese stocks."""
-    try:
-        import yfinance as yf
-        ticker_str = f"{symbol}.VN"
-        df = yf.download(ticker_str, start="2016-01-01", end="2026-03-31", progress=False)
-        if df is not None and not df.empty and len(df) >= 10:
-            df = df.reset_index()
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = [c[0].lower() if isinstance(c, tuple) else str(c).lower() for c in df.columns]
-            else:
-                df.columns = [str(c).lower() for c in df.columns]
-            
-            if 'date' in df.columns:
-                df['time'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
-            elif 'datetime' in df.columns:
-                df['time'] = pd.to_datetime(df['datetime']).dt.strftime('%Y-%m-%d')
-            
-            if 'close' in df.columns and 'time' in df.columns:
-                return df[['time', 'open', 'high', 'low', 'close', 'volume']]
-    except Exception:
-        logger.debug("fetch_from_yfinance: swallowed Exception", exc_info=True)
-    return None
-
 def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
     """
     Multi-source raw candle fetcher with graceful fallbacks:
     Priority 1: Vietcap (VCI) Data Feed
     Priority 2: KBSV / DNSE Data Feed
-    Priority 3: Yahoo Finance (yfinance)
     """
     from vnstock import Quote
     
@@ -142,11 +117,6 @@ def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
                 return df
         except Exception:
             continue
-
-    # 2. Try yfinance Fallback
-    yf_df = fetch_from_yfinance(symbol)
-    if yf_df is not None and not yf_df.empty:
-        return yf_df
 
     return None
 
@@ -233,26 +203,19 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
                      exchanges: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Syncs real prices for all provided symbols concurrently and saves to JSON.
 
-    Three sources, tried in order, and counted. The order changed: this
-    used to lead with a yfinance batch download and fall back to vnstock
-    per symbol, while the file header and the saved payload both claimed
-    "TradingView" - which nothing in here touched. TradingView is now
-    actually tried, first, and the tally at the end says which source
-    answered for how many symbols so the claim can be checked rather than
-    asserted.
+    Two sources, tried in order, and counted. This used to lead with a
+    yfinance batch download and fall back to vnstock per symbol, while
+    the file header and the saved payload both claimed "TradingView" -
+    which nothing in here touched. The tally at the end says which
+    source answered for how many symbols, so the claim can be checked
+    rather than asserted; it is what retired SSI, TCBS and yfinance.
     """
     os.makedirs(DATA_DIR, exist_ok=True)
-    import yfinance as yf
 
-    # yfinance prints a block per ticker it cannot find, and the universe
-    # carries hundreds of delisted and UPCOM tickers Yahoo never listed.
-    # Run 34570149277 spent most of its price log on "$XXX.VN: possibly
-    # delisted; no timezone found", which buried the one table the stage
-    # exists to produce. The failures are expected and already counted -
-    # a symbol yfinance cannot answer for simply is not in its row of the
-    # tally - so they are silenced rather than reported one by one.
-    for noisy in ("yfinance", "yfinance.data", "yfinance.ticker",
-                  "peewee", "urllib3"):
+    # vnstock's transitive dependencies log per-request noise of their
+    # own. Kept from when yfinance was in this path and buried the one
+    # table the stage exists to produce.
+    for noisy in ("peewee", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.CRITICAL)
 
     # exchanges is accepted and unused by the broker sources - both key on
@@ -322,40 +285,17 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
         symbols_to_fetch = [s for s in symbols_to_fetch if s not in existing_store]
         print(f"📦 Still to fetch after {source}: {len(symbols_to_fetch)}")
 
-    # Fast batch fetch using yfinance (50 tickers per batch)
+    # DNSE answered for 1,364 of the 1,400 symbols on run 34586582908.
+    # yfinance was asked for the 36 it missed and answered for none of
+    # them, while printing one "possibly delisted" block per ticker; it
+    # has never been measured carrying a single symbol of this lake. A
+    # source that costs noise and returns nothing is removed, not
+    # silenced. vnstock stays as the last resort: it answered for 3.
     BATCH_SIZE = 50
     success_count = 0
 
     for i in range(0, len(symbols_to_fetch), BATCH_SIZE):
         chunk = symbols_to_fetch[i:i + BATCH_SIZE]
-        tickers_str = " ".join([f"{s}.VN" for s in chunk])
-        
-        try:
-            yf_data = yf.download(tickers_str, start="2016-01-01", end="2026-03-31", group_by="ticker", progress=False, threads=True)
-            for sym in chunk:
-                ticker_key = f"{sym}.VN"
-                try:
-                    if len(chunk) == 1:
-                        df = yf_data
-                    else:
-                        if hasattr(yf_data.columns, 'levels') and ticker_key in yf_data.columns.levels[0]:
-                            df = yf_data[ticker_key].dropna(how="all")
-                        else:
-                            df = None
-                    if df is not None and not df.empty and len(df) >= 10:
-                        df = df.reset_index()
-                        df.columns = [c.lower() for c in df.columns]
-                        res = compute_stock_quarterly_returns(sym, df)
-                        if res and res.get("total_quarters", 0) >= 4:
-                            existing_store[sym] = res
-                            record("yfinance")
-                            success_count += 1
-                            if success_count % 15 == 0 or success_count <= 5:
-                                print(f"  ✓ [{success_count}] {sym}: {res['total_quarters']} Quarters ({res['earliest_quarter']} -> {res['latest_quarter']})")
-                except Exception:
-                    logger.debug("sync_all_symbols: swallowed Exception", exc_info=True)
-        except Exception as e:
-            print(f"  ⚠️ Batch download error: {e}")
 
         # Fallback individual fetch for remaining missed symbols in chunk
         for sym in chunk:

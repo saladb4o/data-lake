@@ -203,13 +203,14 @@ def build_symbol(symbol: str, size: int = 4000,
     of the lake: they exist to judge two of its fields, and a yardstick
     that lives in the thing it measures stops being one.
 
-    When ``code_names`` is given, the vendor's own label for each item
-    code is collected into it. VNDIRECT sends itemName on every row it
-    returns - unified_data_service.fetch_vndirect_financials has been
-    reading it all along - so the numeric scheme this audit has been
-    decoding by magnitude and by arithmetic identity was never actually
-    anonymous. Recording the labels costs one extra dict assignment per
-    code and turns "is 32100 capex?" from an inference into a reading.
+    When ``code_names`` is given, any human label the vendor attaches to
+    an item code is collected into it - and ``key_census`` records every
+    key the vendor actually sends, so a run that names nothing says what
+    it saw instead of only that it failed. Two runs have now named zero
+    codes out of 1,380 symbols: itemName, itemVnName and itemEnName were
+    guessed and absent, and a sweep for any non-numeric string field
+    found none either. The key census is what turns that into a fact
+    about the endpoint rather than another failed guess.
     """
     rows = _fetch_raw(symbol.upper().strip(), size)
     if not rows:
@@ -218,6 +219,16 @@ def build_symbol(symbol: str, size: int = 4000,
     # itemCode -> fiscalDate -> value
     by_code: Dict[int, Dict[str, float]] = defaultdict(dict)
     for row in rows:
+        if key_census is not None:
+            # Every key on the row, not the ones a label is expected
+            # under, and before any guard that might skip the row.
+            # Guessing three names named nothing; sweeping for a string
+            # field named nothing; both failures look identical from the
+            # outside and neither says what the vendor does send. This
+            # does, at one dict bump per key.
+            for seen in row:
+                key_census[seen] = key_census.get(seen, 0) + 1
+
         fiscal = row.get("fiscalDate")
         value = row.get("numericValue")
         if not fiscal or value is None:
@@ -228,17 +239,12 @@ def build_symbol(symbol: str, size: int = 4000,
         except (TypeError, ValueError):
             continue
         if code_names is not None and item not in code_names:
-            # Three key names were guessed here - itemName, itemVnName,
-            # itemEnName - on the belief that VNDIRECT labels every row.
-            # Run 34570149277 built the whole lake and named zero codes,
-            # so the belief was wrong: this endpoint does not send any of
-            # them. The census beside it worked on the same rows, which
-            # is what proves the loop ran and the guess missed.
-            #
-            # So stop guessing. Take the first string field that is not
-            # one of the numeric/bookkeeping keys, and record which key it
-            # came from, so one build says what the vendor actually calls
-            # its label instead of another round of three more guesses.
+            # Two runs have now named zero codes across 1,380 symbols:
+            # itemName/itemVnName/itemEnName were guessed and absent,
+            # and this sweep for any non-numeric string field found none
+            # either. It stays because it costs nothing and would catch
+            # a label the day the endpoint starts sending one; the key
+            # census above is what says whether that day has come.
             for key, value in row.items():
                 if key in _NOT_A_LABEL or not isinstance(value, str):
                     continue
@@ -246,8 +252,6 @@ def build_symbol(symbol: str, size: int = 4000,
                 if not text or text.replace(".", "").replace("-", "").isdigit():
                     continue
                 code_names[item] = text
-                if key_census is not None:
-                    key_census[key] = key_census.get(key, 0) + 1
                 break
 
     # One tick per symbol that files the code at all, not per row: the
@@ -488,7 +492,7 @@ def main() -> int:
                                       sorted((code_names or {}).items())},
                        "code_counts": {str(k): v for k, v in
                                        sorted((code_counts or {}).items())},
-                       "label_keys": dict(sorted((key_census or {}).items(),
+                       "vendor_row_keys": dict(sorted((key_census or {}).items(),
                                                  key=lambda kv: -kv[1])),
                        "symbols": diagnostics}, handle, ensure_ascii=False)
         logger.info("wrote %s: %d symbols probed, %d codes named",

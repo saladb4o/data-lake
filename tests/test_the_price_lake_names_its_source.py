@@ -6,8 +6,8 @@ with a vnstock fallback and never contacting TradingView at all. A label
 nobody can check was read as evidence that TradingView already carried
 the lake.
 
-It is now DNSE, then yfinance, then vnstock, and the lake records which
-one answered for each symbol. SSI and TCBS were tried on a full pass,
+It is now DNSE, then vnstock, and the lake records which one answered
+for each symbol. SSI, TCBS and yfinance were each tried on a full pass,
 answered for nobody, and were deleted rather than left flagged off.
 These tests pin the parser's refusals and the ordering; whether the
 endpoint answers at all is a question only a runner can settle, and the
@@ -109,9 +109,17 @@ class TestTheLakeRecordsWhoAnswered:
         assert "TradingView & Yahoo Finance Live Data Feeds" not in body
         assert "by_source" in body
 
-    def test_the_broker_is_tried_before_yfinance_and_vnstock(self):
+    def test_the_broker_is_tried_before_the_fallback(self):
         body = self._body()
-        assert body.index("_fetch_from_broker") < body.index("yf.download")
+        assert body.index("_fetch_from_broker") < body.index('record("vnstock")')
+
+    def test_yfinance_is_gone_from_the_price_path(self):
+        import scripts.sync_historical_prices as sync
+        # It answered for 0 of the 36 DNSE missed on run 34586582908,
+        # has never been measured carrying one symbol of this lake, and
+        # printed a "possibly delisted" block per ticker while doing it.
+        assert not hasattr(sync, "fetch_from_yfinance")
+        assert "yf.download" not in self._body()
 
     def test_a_source_measured_at_zero_is_gone_not_flagged_off(self):
         import services.broker_prices as bp

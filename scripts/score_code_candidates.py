@@ -257,21 +257,28 @@ def main() -> int:
     code_counts = probe.get("code_counts") or {}
     report(results, code_names)
     if not code_names:
-        print("- the probe carries no vendor labels. Rebuild the lake: the "
-              "builder records itemName now, and without it every row above "
-              "is arithmetic with nothing to check it against.")
+        print("- **the vendor sends no label for any code.** Guessing "
+              "`itemName`/`itemVnName`/`itemEnName` named nothing, and a "
+              "sweep for any non-numeric string field named nothing "
+              "either. The row keys below are what it does send; a "
+              "catalogue has to come from somewhere other than this "
+              "endpoint, or every row above stays arithmetic with "
+              "nothing to check it against.")
         print()
 
     census(code_names, code_counts)
 
-    # Which key the labels came out of. Three key names were guessed for
-    # this and all three were absent; printing the winner means the next
-    # build can read the field by name instead of sweeping for it.
-    label_keys = probe.get("label_keys") or {}
-    if label_keys:
-        print("- the vendor's label arrived under: "
-              + ", ".join(f"`{k}` ({v:,} codes)"
-                          for k, v in list(label_keys.items())[:5]))
+    # What the vendor's rows are actually made of. Two runs named zero
+    # codes, and "named nothing" reads the same whether the label is
+    # under a key nobody tried or absent entirely. This separates them.
+    row_keys = probe.get("vendor_row_keys") or {}
+    if row_keys:
+        print("### Every key the vendor puts on a statement row")
+        print()
+        print("| key | rows carrying it |")
+        print("|---|---:|")
+        for key, count in list(row_keys.items())[:25]:
+            print(f"| `{key}` | {count:,} |")
         print()
 
     if args.json:
