@@ -58,7 +58,8 @@ def _f(value):
     return out if out == out and abs(out) != float("inf") else None
 
 
-def section_scale(stocks, lake) -> None:
+def section_scale(stocks, lake) -> bool:
+    """True when the lake and the screener agree on a scale."""
     print("## 1. Is the price lake on the screener's scale?")
     print()
     ratios, missing, zero = [], 0, 0
@@ -81,7 +82,7 @@ def section_scale(stocks, lake) -> None:
           f"(no lake entry: {missing}; a price missing or zero: {zero})")
     if not ratios:
         print("\n- nothing to compare.\n")
-        return
+        return True
 
     # Buckets, not a mean: one symbol off by a thousand would drag an
     # average into a range no symbol actually occupies, and the whole
@@ -122,6 +123,33 @@ def section_scale(stocks, lake) -> None:
     for ratio, sym, snap, close in worst:
         print(f"| {sym} | {snap:,.0f} | {close:,.2f} | {ratio:.4f} |")
     print()
+
+    # The verdict, and it is a gate rather than a note. A price on the
+    # wrong scale does not announce itself anywhere downstream: the
+    # backtest still runs, still prints a return, and simply stops using
+    # the filings. Run 34605559771 found every one of 1,367 symbols off
+    # by ~941 and nothing in the repository had noticed.
+    #
+    # Judged on the population, not on outliers: a genuinely mispriced
+    # symbol is a data point, a whole lake an order of magnitude out is
+    # a unit error. A tenth of the universe is far past either.
+    off = sum(count for name, count in buckets.items()
+              if not name.startswith("same scale"))
+    share = off / len(ratios)
+    if share > 0.10:
+        print(f"- **The lake is not on the screener's scale.** "
+              f"{off:,} of {len(ratios):,} symbols ({share:.1%}) sit more "
+              f"than a factor of two away, median ratio {mid[0]:.3f}. "
+              "Prices are compared absolutely against a fair value built "
+              "from dong fundamentals, so this is not cosmetic: it reads "
+              "as a ~100% discount on every symbol and the eps/bvps "
+              "floors win against every real figure.")
+        print()
+        return False
+    print(f"- Lake and screener agree on a scale: "
+          f"{len(ratios) - off:,} of {len(ratios):,} within a factor of two.")
+    print()
+    return True
 
 
 def section_splits(lake) -> None:
@@ -246,11 +274,14 @@ def main() -> int:
           f"({'found' if lake else 'MISSING'} at {prices_path})")
     print()
 
-    section_scale(stocks, lake)
+    on_scale = section_scale(stocks, lake)
     section_splits(lake)
     section_fcf(stocks)
     section_one_driver_short(stocks)
-    return 0
+    # Non-zero, so the stage goes red and the pass names it. Everything
+    # above still printed: a gate that swallows its own evidence is the
+    # reason this took four runs to find.
+    return 0 if on_scale else 1
 
 
 if __name__ == "__main__":

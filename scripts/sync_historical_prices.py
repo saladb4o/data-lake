@@ -120,6 +120,59 @@ def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
 
     return None
 
+#: A listed Vietnamese share trades in dong, and the exchanges enforce a
+#: floor: nothing stays listed below 1,000 VND. So a daily series whose
+#: typical close sits under this is not a penny stock, it is a series
+#: quoted in thousands.
+DONG_FLOOR = 1000.0
+
+#: What such a series has to be multiplied by to become dong.
+THOUSANDS_TO_DONG = 1000.0
+
+
+def normalise_to_dong(symbol: str, df: pd.DataFrame) -> Optional[str]:
+    """Put one symbol's candles into dong, in place. Returns what it did.
+
+    Run 34605559771 compared every symbol in the lake against the
+    screener's own price and found the screener higher by a factor of
+    ~941 for **all 1,367 of them** - EVS at 4,800 against a lake close
+    of 5.10. DNSE quotes in thousands of dong, and so did the yfinance
+    and vnstock path before it, which is why switching vendors moved the
+    backtest by 0.01 and looked like confirmation that the scale was
+    fine. Two sources wrong the same way cannot check each other.
+
+    It is not a cosmetic difference. `fair_value_backtest_service`
+    compares this price *absolutely* against a fair value built from
+    dong fundamentals, so a close of 5.10 reads as a ~100% discount on
+    every symbol, and the eps/bvps floors at the top of that comparison
+    (50 and 500) win against every real figure. That is the reason the
+    lag sweep has never moved: the filings were never reaching the
+    arithmetic.
+
+    Decided per symbol from the data rather than by multiplying every
+    source by a constant. A constant is a claim about a vendor that
+    nothing re-checks - the exact shape of the "TradingView" label this
+    file used to carry - and it would silently double the prices the day
+    a source starts sending dong.
+    """
+    if df is None or df.empty or "close" not in df.columns:
+        return None
+    closes = pd.to_numeric(df["close"], errors="coerce").dropna()
+    closes = closes[closes > 0]
+    if closes.empty:
+        return None
+    # The median, not the mean or the last bar: a decade of history can
+    # contain one bad print, and one bad print must not decide the unit
+    # for the whole series.
+    if float(closes.median()) >= DONG_FLOOR:
+        return "dong"
+    for column in ("open", "high", "low", "close"):
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce") \
+                * THOUSANDS_TO_DONG
+    return "thousands"
+
+
 def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, Any]:
     """Quarterly open/high/low/close/volume and returns from daily candles.
 
@@ -235,6 +288,10 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
     # that needs a venue would otherwise have to re-derive it.
     exchanges = exchanges or {}
     by_source: Dict[str, int] = {}
+    # Which scale each symbol's candles arrived on, counted the same way
+    # the sources are. A source that changes units is then a number that
+    # moves rather than a backtest that quietly stops using its filings.
+    by_unit: Dict[str, int] = {}
 
     def record(source: str) -> None:
         by_source[source] = by_source.get(source, 0) + 1
@@ -287,6 +344,9 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
                     continue
                 if df is None or len(df) < 10:
                     continue
+                unit = normalise_to_dong(sym, df)
+                if unit:
+                    by_unit[unit] = by_unit.get(unit, 0) + 1
                 res = compute_stock_quarterly_returns(sym, df)
                 if res and res.get("total_quarters", 0) >= 4:
                     existing_store[sym] = res
@@ -315,6 +375,9 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
                 try:
                     df = fetch_stock_raw_candles(sym)
                     if df is not None and len(df) >= 10:
+                        unit = normalise_to_dong(sym, df)
+                        if unit:
+                            by_unit[unit] = by_unit.get(unit, 0) + 1
                         res = compute_stock_quarterly_returns(sym, df)
                         if res and res.get("total_quarters", 0) >= 4:
                             existing_store[sym] = res
@@ -365,6 +428,19 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
     tally.append("|---|---:|")
     for source, count in sorted(by_source.items(), key=lambda kv: -kv[1]):
         tally.append(f"| {source} | {count:,} |")
+    tally.append("")
+    tally.append("| scale the candles arrived on | symbols |")
+    tally.append("|---|---:|")
+    for unit, count in sorted(by_unit.items(), key=lambda kv: -kv[1]):
+        tally.append(f"| {unit} | {count:,} |")
+    if by_unit.get("thousands"):
+        tally.append("")
+        tally.append(f"**{by_unit['thousands']:,}** symbols were quoted in "
+                     "thousands of dong and multiplied by 1,000 on the way "
+                     "in. The backtest compares this price absolutely "
+                     "against a fair value built from dong fundamentals, "
+                     "so a series left in thousands reads as a ~100% "
+                     "discount on every symbol.")
     print()
     for line in tally:
         print(line)

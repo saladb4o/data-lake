@@ -185,3 +185,90 @@ class TestNoUncheckableClaimSurvivesInThePricePath:
             "scripts/sync_historical_prices.py", encoding="utf-8").read()
         assert "price_universe.md" in body
         assert "filtered out before any fetch" in body
+
+
+class TestThePriceLakeIsInDong:
+    """Run 34605559771 compared the lake against the screener's own price.
+
+    Every one of 1,367 symbols came back a factor of ~941 apart - EVS at
+    4,800 against a lake close of 5.10. DNSE quotes in thousands of dong,
+    and so did the yfinance/vnstock path before it, which is why swapping
+    vendors moved the backtest by 0.01 and read as confirmation that the
+    scale was fine. Two sources wrong the same way cannot check each
+    other.
+
+    It is not cosmetic. `fair_value_backtest_service` compares this price
+    absolutely against a fair value built from dong fundamentals, so a
+    close of 5.10 is a ~100% discount on every symbol and the eps/bvps
+    floors beat every real figure - which is why the lag sweep has never
+    moved off 0.00 points.
+    """
+
+    def _frame(self, closes):
+        import pandas as pd
+
+        return pd.DataFrame({
+            "time": [f"2020-01-{i + 1:02d}" for i in range(len(closes))],
+            "open": closes, "high": closes, "low": closes,
+            "close": closes, "volume": [1] * len(closes)})
+
+    def test_a_series_in_thousands_is_multiplied_into_dong(self):
+        import scripts.sync_historical_prices as sync
+
+        df = self._frame([5.10, 5.20, 4.90])
+        assert sync.normalise_to_dong("EVS", df) == "thousands"
+        assert df["close"].tolist() == [5100.0, 5200.0, 4900.0]
+        # Every OHLC column, not just close: a quarter's high and low are
+        # read from the same frame and would otherwise stay in thousands.
+        assert df["high"].iloc[0] == 5100.0
+        assert df["low"].iloc[0] == 5100.0
+        assert df["open"].iloc[0] == 5100.0
+
+    def test_a_series_already_in_dong_is_left_alone(self):
+        import scripts.sync_historical_prices as sync
+
+        df = self._frame([48000.0, 47500.0, 49000.0])
+        assert sync.normalise_to_dong("FPT", df) == "dong"
+        assert df["close"].tolist() == [48000.0, 47500.0, 49000.0]
+
+    def test_one_bad_print_does_not_decide_the_unit(self):
+        import scripts.sync_historical_prices as sync
+
+        # A decade of dong prices with a single stray decimal in it. A
+        # mean would be dragged; the median is not, and the unit must be
+        # decided for the series rather than by its worst bar.
+        df = self._frame([48000.0, 47500.0, 0.48, 49000.0, 48500.0])
+        assert sync.normalise_to_dong("FPT", df) == "dong"
+
+    def test_the_scale_each_symbol_arrived_on_is_counted(self):
+        import inspect
+
+        import scripts.sync_historical_prices as sync
+
+        body = inspect.getsource(sync.sync_all_symbols)
+        # Counted next to the sources, for the same reason: a vendor that
+        # changes units should be a number that moves, not a backtest
+        # that quietly stops using its filings.
+        assert "by_unit" in body
+        assert "normalise_to_dong" in body
+
+    def test_the_normalisation_is_applied_on_every_path(self):
+        import inspect
+
+        import scripts.sync_historical_prices as sync
+
+        body = inspect.getsource(sync.sync_all_symbols)
+        # Once for the broker loop and once for the vnstock fallback. A
+        # source normalised on one path and not the other puts two scales
+        # in one file, which is worse than one wrong scale.
+        assert body.count("normalise_to_dong") == 2
+
+    def test_the_probe_refuses_a_lake_off_the_screeners_scale(self):
+        import inspect
+
+        import scripts.probe_the_open_questions as probe
+
+        body = inspect.getsource(probe.main)
+        # The stage has to go red. A gate that only prints is how a
+        # thousand-fold error survived every run that measured it.
+        assert "return 0 if on_scale else 1" in body
