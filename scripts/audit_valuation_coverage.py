@@ -412,9 +412,11 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
             "     the feed, not the engine.\n"
             "\n"
             "Note: scripts/build_historical_fundamentals.py fills the\n"
-            "point-in-time lake used by the backtest and the sector-weight\n"
-            "calibration. It is NOT read by the live screener path, so it\n"
-            "will not move the numbers in this report.\n"
+            "quarterly lake. The live path now reads it, but only to fill\n"
+            "lines this request's VNDIRECT fetch did not return - same\n"
+            "vendor, same endpoint, same item codes. So a rebuild helps a\n"
+            "company whose fetch failed and changes nothing for a company\n"
+            "whose fetch succeeded and simply has no such line filed.\n"
         )
 
 

@@ -3007,6 +3007,142 @@ def reconstruct_financial_triangles(
     }
     return result
 
+
+#: One parsed copy of the lake per process. It is tens of megabytes and
+#: does not change while the process runs; re-reading it per symbol would
+#: make a fallback more expensive than the fetch it stands in for.
+_FUNDAMENTALS_LAKE: Any = None
+_FUNDAMENTALS_LAKE_LOADED = False
+
+
+def _get_fundamentals_lake():
+    """The lake provider, loaded once. None when there is no lake."""
+    global _FUNDAMENTALS_LAKE, _FUNDAMENTALS_LAKE_LOADED
+    if _FUNDAMENTALS_LAKE_LOADED:
+        return _FUNDAMENTALS_LAKE
+    _FUNDAMENTALS_LAKE_LOADED = True
+    try:
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+        provider = PointInTimeFundamentals.from_lake()
+        _FUNDAMENTALS_LAKE = None if provider.is_empty else provider
+    except Exception as exc:
+        logger.debug("fundamentals lake unavailable: %s", exc)
+        _FUNDAMENTALS_LAKE = None
+    return _FUNDAMENTALS_LAKE
+
+
+# --- the quarterly lake as a fallback witness -----------------------------
+#: Lake field -> the key ``fetch_vndirect_financials`` publishes it under.
+#: Balance-sheet lines only: a balance is a balance whenever it was filed,
+#: so the latest quarter's figure is directly the ``_fq`` value.
+_LAKE_STOCK_KEYS: Dict[str, str] = {
+    "total_assets": "total_assets_fq",
+    "equity": "total_equity_fq",
+    "debt": "total_debt_fq",
+    "cash": "cash_fq",
+    "gross_ppe": "gross_ppe_fq",
+}
+
+#: Lake field -> the ``_ttm`` key, for lines that are a flow over the
+#: quarter rather than a balance at its end. These are summed over four
+#: consecutive quarters and published ONLY when all four are present.
+#: Annualising two quarters by doubling would put a number that never
+#: happened into a field whose name promises twelve months, and every
+#: multiple built on it would be wrong by whatever the business did in
+#: the quarters nobody had.
+_LAKE_FLOW_KEYS: Dict[str, str] = {
+    "revenue": "revenue_ttm",
+    "net_income": "net_income_ttm",
+    "ebit": "ebit_ttm",
+    "cfo": "cfo_ttm",
+    "capex": "capex_ttm",
+    "depreciation": "da_ttm",
+}
+
+_LAKE_TTM_QUARTERS = 4
+
+
+def _lake_quarter_order(code: str) -> Tuple[int, int]:
+    try:
+        year, quarter = str(code).split("-Q")
+        return int(year), int(quarter)
+    except (ValueError, AttributeError):
+        return (-1, -1)
+
+
+def _lake_quarters_are_consecutive(codes: List[str]) -> bool:
+    """True when ``codes`` (newest first) are four unbroken quarters.
+
+    A gap means the sum spans more than a year while claiming to be one.
+    """
+    orders = [_lake_quarter_order(c) for c in codes]
+    for newer, older in zip(orders, orders[1:]):
+        if newer == (-1, -1) or older == (-1, -1):
+            return False
+        expected = (newer[0], newer[1] - 1) if newer[1] > 1 else (newer[0] - 1, 4)
+        if older != expected:
+            return False
+    return True
+
+
+def load_lake_symbol_data(symbol: str) -> Dict[str, Any]:
+    """The quarterly lake's view of one symbol, shaped like ``vnd``.
+
+    The lake is built by scripts/build_historical_fundamentals.py from
+    api-finfo.vndirect.com.vn/v4/financial_statements - the same URL
+    fetch_vndirect_financials calls, reading the same item-code table.
+    So this is not a new source and must not be described as one: it is
+    the same vendor's answer, fetched earlier and kept.
+
+    What it adds is availability. A live fetch that times out, is rate
+    limited, or exhausts its retries returns {} and every statement line
+    for that company is gone for the whole request. The lake still has
+    the last quarter that was successfully fetched, and a figure filed
+    three months ago is a filed figure - unlike a sector median, which
+    is a figure about other companies.
+
+    Returns {} when the lake is absent, has nothing for the symbol, or
+    has too little of a quarter to be worth reading.
+    """
+    try:
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+    except Exception:
+        return {}
+
+    provider = _get_fundamentals_lake()
+    if provider is None:
+        return {}
+    quarters = provider.quarters_for(symbol)
+    if not quarters:
+        return {}
+
+    ordered = sorted(quarters, key=_lake_quarter_order, reverse=True)
+    latest = quarters.get(ordered[0]) or {}
+
+    out: Dict[str, Any] = {}
+    for field, key in _LAKE_STOCK_KEYS.items():
+        value = _safe_float(latest.get(field))
+        if value is not None:
+            out[key] = value
+
+    window = ordered[:_LAKE_TTM_QUARTERS]
+    if (len(window) == _LAKE_TTM_QUARTERS
+            and _lake_quarters_are_consecutive(window)):
+        for field, key in _LAKE_FLOW_KEYS.items():
+            values = [_safe_float((quarters.get(c) or {}).get(field))
+                      for c in window]
+            if all(v is not None for v in values):
+                total = sum(values)
+                out[key] = abs(total) if key == "capex_ttm" else total
+        out["ttm_quarters_used"] = _LAKE_TTM_QUARTERS
+
+    if not out:
+        return {}
+    out["latest_fiscal_date"] = latest.get("fiscal_date") or ordered[0]
+    out["lake_quarter"] = ordered[0]
+    return out
+
+
 def load_source0_symbol_data(symbol: str) -> Optional[Dict[str, Any]]:
     """
     Loads L2 extracted filings (BCTC + Corporate Actions) for a symbol from PDF Lake.
@@ -3121,7 +3257,30 @@ def normalize_stock_data(
     tv = tv_data or {}
     vn = vnstock_data or {}
     yf = yf_data or {}
-    vnd = vndirect_data or {}
+    # Copied, not aliased: the lake fill below writes into this dict, and
+    # fetch_vndirect_financials hands out the object it caches. Mutating
+    # it would write lake figures into the cache under the live fetch's
+    # name, where the next request could not tell them apart.
+    vnd = dict(vndirect_data or {})
+
+    # The lake stands in for lines this request's live VNDIRECT fetch did
+    # not return. It fills gaps only - a key vnd already answered is left
+    # alone, because the live fetch is this quarter and the lake is as
+    # old as the last build. Same vendor, same endpoint, same item-code
+    # table; the tier does not change, only the availability does.
+    lake = load_lake_symbol_data(symbol)
+    if lake:
+        filled = [k for k, v in lake.items()
+                  if v is not None and vnd.get(k) is None
+                  and k not in ("latest_fiscal_date", "lake_quarter",
+                                "ttm_quarters_used")]
+        for key in filled:
+            vnd[key] = lake[key]
+        if filled:
+            vnd.setdefault("latest_fiscal_date", lake.get("latest_fiscal_date"))
+            vnd["lake_quarter"] = lake.get("lake_quarter")
+            vnd["lake_filled_fields"] = sorted(filled)
+            sources_used.append("fundamentals_lake")
 
     s0 = source0_data
     if s0 is None:
@@ -3261,6 +3420,15 @@ def normalize_stock_data(
     # construction - a code the payload does not carry comes back None, is
     # not tiered, and is not published, so the model stays refused rather
     # than valuing a company on an absent land bank.
+    # Say so on the record when a line came from the lake rather than from
+    # this request's fetch. The figures are the same vendor's and carry the
+    # same tier, but they are as old as the last lake build, and a reader
+    # who cannot tell has no way to notice a lake that stopped being
+    # rebuilt.
+    if vnd.get("lake_filled_fields"):
+        tri["lake_filled_fields"] = vnd["lake_filled_fields"]
+        tri["lake_quarter"] = vnd.get("lake_quarter")
+
     if vnd:
         tri["capex_ttm"] = vnd.get("capex_ttm")
         # delta_working_capital was attached untiered and read straight off
@@ -3449,6 +3617,15 @@ def normalize_stock_data(
         # The copies under "_metadata" stay for backwards compatibility.
         "field_provenance": tri["field_provenance"],
         "is_imputed": is_imputed,
+
+        # Which statement lines came from the lake rather than from this
+        # request's fetch, and how old they are. Top level rather than
+        # buried in _metadata because the coverage audit reads from here,
+        # and "how much of this universe is being carried by a lake that
+        # may have stopped being rebuilt" is a question it should be able
+        # to ask without knowing where to dig.
+        "lake_filled_fields": tri.get("lake_filled_fields") or [],
+        "lake_quarter": tri.get("lake_quarter"),
 
         "_metadata": {
             "sources_used": sources_used,

@@ -207,6 +207,22 @@ class PointInTimeFundamentals:
             return None
         return date.fromordinal(quarter_end.toordinal() + self._lag_days)
 
+    def quarters_for(self, symbol: str) -> Dict[str, Dict[str, Any]]:
+        """Every quarter the lake holds for ``symbol``, newest last.
+
+        Deliberately free of any as-of restriction: the backtest needs
+        point-in-time and uses ``latest_as_of`` for it, but a live quote
+        is being asked about today and wants whatever was filed most
+        recently. A caller that wanted point-in-time and reached for
+        this would be asking the wrong question, so the name says which
+        one it answers.
+        """
+        payload = self._symbols.get(str(symbol).upper())
+        if not isinstance(payload, dict):
+            return {}
+        quarters = payload.get("quarters")
+        return dict(quarters) if isinstance(quarters, dict) else {}
+
     def latest_as_of(
         self,
         symbol: str,
