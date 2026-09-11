@@ -1,10 +1,15 @@
-"""
-=============================================================================
-HISTORICAL PRICE LAKE SYNCHRONIZER (TRADINGVIEW & VCI DATA FEEDS)
-=============================================================================
-Fetches and caches 100% real historical close prices and quarterly returns
-for all major Vietnamese stocks across HOSE, HNX, and UPCOM.
-Saves to data/historical_prices.json for sub-millisecond real-price backtesting.
+"""Daily prices for the whole universe, quarterised into the price lake.
+
+Sources, in the order they are tried: DNSE's chart endpoint, then SSI's,
+then TCBS's, then a yfinance batch download, then vnstock per symbol. Each symbol is counted against the
+source that actually answered for it, and the tally is printed - because
+this header used to say "TRADINGVIEW & VCI DATA FEEDS" and the saved
+payload used to say "TradingView & Yahoo Finance Live Data Feeds" while
+the code reached for neither TradingView nor VCI. A label nobody can
+check is worse than no label: it was read as evidence that TradingView
+was already carrying the lake.
+
+Output: data/historical_prices.json, keyed by symbol then quarter.
 """
 
 import os
@@ -201,10 +206,54 @@ def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, 
         "quarters": quarters_data
     }
 
-def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str, Any]:
-    """Syncs real prices for all provided symbols concurrently and saves to JSON."""
+#: Broker endpoints, in the order they are asked. DNSE and SSI each answer
+#: a decade in one request; TCBS caps a response at 365 points, so ten
+#: years costs ten requests per symbol, and it is reported to have closed
+#: its unauthenticated endpoints since these URLs were written - so it
+#: goes last and only sees what the other two had nothing for.
+BROKER_SOURCES = ("dnse", "ssi", "tcbs")
+
+#: How many symbols a broker may fail on before the stage stops asking it.
+#: Large enough that a handful of delisted tickers cannot trip it, small
+#: enough that a dead endpoint costs a minute rather than half an hour.
+PROBE_BEFORE_GIVING_UP = 40
+
+
+def _fetch_from_broker(source: str, symbol: str) -> Optional[pd.DataFrame]:
+    """Daily candles from one broker, shaped like every other fetcher here."""
+    from services import broker_prices
+    fetch = {"dnse": broker_prices.fetch_dnse,
+             "ssi": broker_prices.fetch_ssi,
+             "tcbs": broker_prices.fetch_tcbs}[source]
+    rows = fetch(symbol)
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
+def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
+                     exchanges: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Syncs real prices for all provided symbols concurrently and saves to JSON.
+
+    Three sources, tried in order, and counted. The order changed: this
+    used to lead with a yfinance batch download and fall back to vnstock
+    per symbol, while the file header and the saved payload both claimed
+    "TradingView" - which nothing in here touched. TradingView is now
+    actually tried, first, and the tally at the end says which source
+    answered for how many symbols so the claim can be checked rather than
+    asserted.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
     import yfinance as yf
+
+    # exchanges is accepted and unused by the broker sources - both key on
+    # the bare ticker - but the master list knows it and a future source
+    # that needs a venue would otherwise have to re-derive it.
+    exchanges = exchanges or {}
+    by_source: Dict[str, int] = {}
+
+    def record(source: str) -> None:
+        by_source[source] = by_source.get(source, 0) + 1
 
     existing_store = {}
     if os.path.exists(OUTPUT_FILE):
@@ -219,6 +268,50 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
     symbols_to_fetch = [s for s in symbols_list if s not in existing_store or len(existing_store[s].get("quarters", {})) < 8]
 
     print(f"📦 Cached stocks: {len(existing_store)} | Stocks to fetch: {len(symbols_to_fetch)}")
+
+    # --- sources 1 and 2: the brokers' own chart endpoints ----------------
+    # Concurrent because each symbol is an independent HTTPS request. A
+    # source that answers for nobody is dropped after PROBE_BEFORE_GIVING_UP
+    # symbols rather than being asked 1,500 times: neither endpoint has
+    # ever been reached from a machine that could test it, and a dead one
+    # would otherwise cost the stage half an hour of timeouts.
+    for source in BROKER_SOURCES:
+        if not symbols_to_fetch:
+            break
+        print(f"🌐 {source}: asking for {len(symbols_to_fetch)} symbols...")
+        started_source = time.time()
+        answered = 0
+        attempted = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_fetch_from_broker, source, sym): sym
+                       for sym in symbols_to_fetch}
+            for future in as_completed(futures):
+                sym = futures[future]
+                attempted += 1
+                if answered == 0 and attempted > PROBE_BEFORE_GIVING_UP:
+                    for pending in futures:
+                        pending.cancel()
+                    print(f"  ⚠️ {source} answered for none of the first "
+                          f"{PROBE_BEFORE_GIVING_UP}; not asking it for the "
+                          f"rest. Read this as the endpoint being wrong, "
+                          f"not as the universe having no prices.")
+                    break
+                try:
+                    df = future.result()
+                except Exception:
+                    logger.debug("%s fetch failed for %s", source, sym, exc_info=True)
+                    continue
+                if df is None or len(df) < 10:
+                    continue
+                res = compute_stock_quarterly_returns(sym, df)
+                if res and res.get("total_quarters", 0) >= 4:
+                    existing_store[sym] = res
+                    record(source)
+                    answered += 1
+        print(f"🌐 {source} answered for {answered} of {len(symbols_to_fetch)} "
+              f"in {round(time.time() - started_source, 1)}s")
+        symbols_to_fetch = [s for s in symbols_to_fetch if s not in existing_store]
+        print(f"📦 Still to fetch after {source}: {len(symbols_to_fetch)}")
 
     # Fast batch fetch using yfinance (50 tickers per batch)
     BATCH_SIZE = 50
@@ -246,6 +339,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                         res = compute_stock_quarterly_returns(sym, df)
                         if res and res.get("total_quarters", 0) >= 4:
                             existing_store[sym] = res
+                            record("yfinance")
                             success_count += 1
                             if success_count % 15 == 0 or success_count <= 5:
                                 print(f"  ✓ [{success_count}] {sym}: {res['total_quarters']} Quarters ({res['earliest_quarter']} -> {res['latest_quarter']})")
@@ -263,6 +357,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                         res = compute_stock_quarterly_returns(sym, df)
                         if res and res.get("total_quarters", 0) >= 4:
                             existing_store[sym] = res
+                            record("vnstock")
                             success_count += 1
                 except Exception:
                     logger.debug("sync_all_symbols: swallowed Exception", exc_info=True)
@@ -273,7 +368,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                 "version": "3.5-unified-expanded",
                 "last_updated": datetime.datetime.now().isoformat(),
                 "total_symbols": len(existing_store),
-                "source": "TradingView & Yahoo Finance Live Data Feeds",
+                "source": ", ".join(f"{k}:{v}" for k, v in sorted(by_source.items())) or "none",
                 "symbols": existing_store
             }
             with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -284,7 +379,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
         "version": "3.5-unified-expanded",
         "last_updated": datetime.datetime.now().isoformat(),
         "total_symbols": len(existing_store),
-        "source": "TradingView & Yahoo Finance Live Data Feeds",
+        "source": ", ".join(f"{k}:{v}" for k, v in sorted(by_source.items())) or "none",
         "symbols": existing_store
     }
 
@@ -293,6 +388,26 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
 
     elapsed = round(time.time() - start_time, 2)
     print(f"✨ Successfully synced {len(existing_store)} stocks in {elapsed}s to {OUTPUT_FILE}")
+    # The tally is the point of this pass. Whether vnstock can be dropped
+    # is decided by the number next to it, not by preference: a source
+    # that answered for nobody costs nothing to remove, and one that
+    # answered for hundreds is carrying the backtest.
+    print()
+    print("| price source | symbols it answered for |")
+    print("|---|---:|")
+    for source, count in sorted(by_source.items(), key=lambda kv: -kv[1]):
+        print(f"| {source} | {count:,} |")
+    quiet = [s for s in BROKER_SOURCES if not by_source.get(s)]
+    if quiet:
+        print()
+        print(f"- **{', '.join(quiet)} answered for nobody.** These "
+              "endpoints were read out of vietfin's working code but have "
+              "never been reached from a machine that could test them, so "
+              "this is their first real trial. Read a zero as the endpoint "
+              "or the parameters being wrong, not as the universe having "
+              "no prices - yfinance and vnstock below say whether the "
+              "prices exist.")
+    print()
     return payload
 
 if __name__ == "__main__":
@@ -319,4 +434,7 @@ if __name__ == "__main__":
     syms = [x[0] for x in valid_stocks]
     
     print(f"📋 Loaded {len(syms)} clean 3-letter stock symbols across HOSE, HNX, UPCOM.")
-    sync_all_symbols(syms, max_workers=10)
+    # The exchange is known here and TradingView needs it. Passing it turns
+    # a three-request guess per symbol into one request.
+    sync_all_symbols(syms, max_workers=10,
+                     exchanges={sym: ex for sym, ex in valid_stocks})
