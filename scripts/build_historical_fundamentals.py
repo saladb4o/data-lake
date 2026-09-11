@@ -183,7 +183,8 @@ def _fetch_raw(symbol: str, size: int) -> List[Dict[str, Any]]:
 def build_symbol(symbol: str, size: int = 4000,
                  lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
                  diagnostics: Optional[Dict[str, Any]] = None,
-                 code_names: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
+                 code_names: Optional[Dict[int, str]] = None,
+                 code_counts: Optional[Dict[int, int]] = None) -> Dict[str, Any]:
     """Returns {quarter_code: record} for one symbol; empty when unavailable.
 
     When ``diagnostics`` is given, the raw values of DIAGNOSTIC_CODES are
@@ -222,6 +223,16 @@ def build_symbol(symbol: str, size: int = 4000,
                      or row.get("itemEnName") or "")
             if isinstance(label, str) and label.strip():
                 code_names[item] = label.strip()
+
+    # One tick per symbol that files the code at all, not per row: the
+    # question this answers is "how much of the universe reports this
+    # line", and a symbol with twenty quarters would otherwise outvote
+    # twenty symbols with one. Without it the scorer can only grade the
+    # codes somebody already guessed, and a wrong guess looks the same as
+    # a line the vendor does not publish.
+    if code_counts is not None:
+        for code in by_code:
+            code_counts[code] = code_counts.get(code, 0) + 1
 
     shares_by_date = by_code.get(52001) or by_code.get(52002) or {}
 
@@ -409,6 +420,7 @@ def main() -> int:
         {} if args.diagnostics_out else None)
     #: itemCode -> the vendor's own label, accumulated across symbols.
     code_names: Optional[Dict[int, str]] = {} if args.diagnostics_out else None
+    code_counts: Optional[Dict[int, int]] = {} if args.diagnostics_out else None
 
     ok = 0
     for index, symbol in enumerate(symbols, start=1):
@@ -416,7 +428,8 @@ def main() -> int:
         try:
             quarters = build_symbol(symbol, lag_days=args.lag_days,
                                     diagnostics=diagnostics,
-                                    code_names=code_names)
+                                    code_names=code_names,
+                                    code_counts=code_counts)
         except Exception as exc:  # one bad symbol must not end the pass
             logger.warning("[%d/%d] %s failed: %s", index, len(symbols), symbol, exc)
             continue
@@ -445,6 +458,8 @@ def main() -> int:
                                  DIAGNOSTIC_CODES.items()},
                        "code_names": {str(k): v for k, v in
                                       sorted((code_names or {}).items())},
+                       "code_counts": {str(k): v for k, v in
+                                       sorted((code_counts or {}).items())},
                        "symbols": diagnostics}, handle, ensure_ascii=False)
         logger.info("wrote %s: %d symbols probed, %d codes named",
                     args.diagnostics_out, len(diagnostics),

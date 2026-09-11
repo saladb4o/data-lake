@@ -419,6 +419,16 @@ jobs:
           LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
         run: bash scripts/run_the_measurement_pass.sh codes
 
+      - name: What the lake could fill
+        timeout-minutes: 20
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh lakefill
+
       - name: Backtest sweep
         timeout-minutes: 90
         if: always()
@@ -454,6 +464,6 @@ jobs:
             data/backtest_sweep.json
             data/code_candidates.json
             data/code_candidates_probe.json
-            data/new_sources.json
+            data/lake_fill.json
           retention-days: 14
           if-no-files-found: warn

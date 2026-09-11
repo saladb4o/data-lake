@@ -160,6 +160,7 @@ def _fundamentals_diagnostics(
     unmatched_custom_symbols: Sequence[str],
     publication_lag_days: Optional[int] = None,
     filing_age: Optional[Dict[int, int]] = None,
+    funnel: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """States plainly where this run's fundamentals came from.
 
@@ -172,6 +173,11 @@ def _fundamentals_diagnostics(
         "symbol_quarters_valued": used,
         "symbol_quarters_skipped_no_filing": skipped,
     }
+    # Reported in every mode. snapshot_projected walks the identical loop,
+    # so its funnel is the control that says which stage the point-in-time
+    # shortfall belongs to.
+    if funnel:
+        info["funnel"] = dict(funnel)
     if unmatched_custom_symbols:
         info["unmatched_custom_symbols"] = list(unmatched_custom_symbols)
         info["notes"] = [
@@ -809,6 +815,14 @@ class FairValueBacktestService:
             if use_point_in_time else None)
         pit_used = 0
         pit_skipped = 0
+        # The funnel, counted in symbol-quarters. "valued 131 of 1,381 in
+        # lake" invited the reading that the lake covered 131 companies,
+        # which it does not: the valuation loop only ever sees what the
+        # screening strategy passed, and that runs on today's snapshot.
+        # Without these four numbers the shortfall has four possible
+        # causes and the table cannot tell them apart.
+        funnel_stage1 = 0
+        funnel_no_price = 0
         # How stale the filing used actually was, in quarters. A run whose
         # filings are all one quarter old is using last quarter's report,
         # which is what standing at quarter end means; a tail of older ones
@@ -875,6 +889,7 @@ class FairValueBacktestService:
                 sym = item.get("symbol")
                 if not sym:
                     continue
+                funnel_stage1 += 1
 
                 sym_quarters = price_db.get(sym, {}).get("quarters", {}) if isinstance(price_db.get(sym), dict) else {}
                 q_price_data = sym_quarters.get(q_code, {})
@@ -883,6 +898,7 @@ class FairValueBacktestService:
                 p_in = float(q_price_data.get("start_price") or q_price_data.get("open") or q_price_data.get("close_price") or q_price_data.get("close") or 0.0)
                 if p_in <= 0:
                     # Stock did not trade or was not listed in this quarter: strictly skip, NO fallback to synthetic prices
+                    funnel_no_price += 1
                     continue
                 # Observed prices accumulate as the simulation walks forward, so
                 # forward-horizon error scoring can only ever see the past.
@@ -1410,6 +1426,14 @@ class FairValueBacktestService:
                     publication_lag_days=(
                         publication_lag_days if use_point_in_time else None),
                     filing_age=dict(pit_filing_age) if use_point_in_time else None,
+                    funnel={
+                        "universe": len(quant_universe),
+                        "strategy_passed": funnel_stage1,
+                        "no_price_that_quarter": funnel_no_price,
+                        "no_filing": pit_skipped if use_point_in_time else 0,
+                        "valued": pit_used if use_point_in_time else (
+                            funnel_stage1 - funnel_no_price),
+                    },
                 ),
             }
         )

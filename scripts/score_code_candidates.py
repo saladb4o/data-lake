@@ -210,6 +210,33 @@ def report(results: Dict[str, Any],
         print()
 
 
+def census(code_names: Dict[str, str], code_counts: Dict[str, int],
+           limit: int = 40) -> None:
+    """The codes the universe actually files, by how many file them.
+
+    The candidate table above can only grade codes somebody already
+    guessed. When every guess scores near zero the table says the guesses
+    were wrong and stops there - it cannot say which code was right. This
+    can: the vendor names its own lines, so the capex row and the
+    depreciation row are readable off the labels without another vendor,
+    another request, or another run.
+    """
+    if not code_counts:
+        print("- no per-code census in this probe; rebuild the lake to get "
+              "one. Without it a failed candidate is a dead end rather "
+              "than a pointer at the right code.")
+        print()
+        return
+    ranked = sorted(code_counts.items(), key=lambda kv: (-kv[1], kv[0]))
+    print(f"### What the vendor files, top {limit} codes by symbols filing")
+    print()
+    print("| code | the vendor calls it | symbols filing |")
+    print("|---|---|---:|")
+    for code, count in ranked[:limit]:
+        print(f"| {code} | {code_names.get(code, '-') or '-'} | {count:,} |")
+    print()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("probe", help="JSON written by --diagnostics-out")
@@ -227,6 +254,7 @@ def main() -> int:
     print()
     results = score(probe)
     code_names = probe.get("code_names") or {}
+    code_counts = probe.get("code_counts") or {}
     report(results, code_names)
     if not code_names:
         print("- the probe carries no vendor labels. Rebuild the lake: the "
@@ -234,9 +262,12 @@ def main() -> int:
               "is arithmetic with nothing to check it against.")
         print()
 
+    census(code_names, code_counts)
+
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
-            json.dump({"anchors": results, "code_names": code_names},
+            json.dump({"anchors": results, "code_names": code_names,
+                       "code_counts": code_counts},
                       handle, ensure_ascii=False, indent=2)
     return 0
 

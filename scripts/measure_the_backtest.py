@@ -43,12 +43,21 @@ from services.point_in_time_fundamentals import (  # noqa: E402
 
 logger = logging.getLogger("measure_the_backtest")
 
-#: Lags to sweep, in days from quarter end. 20 and 30 are the statutory
-#: deadlines for quarterly and consolidated quarterly reports; 45 is what
-#: the lake assumes; 90 is the annual deadline and stands in for a filer
-#: who is late every time. A result that survives 90 is not resting on
-#: the assumption.
-DEFAULT_LAGS = (20, 30, 45, 60, 90)
+#: Lags to sweep, in days from quarter end. 20 is the statutory deadline
+#: for a quarterly report and 90 the annual one, so they bracket every
+#: filer from prompt to chronically late. Only the two extremes are swept
+#: by default: a previous pass ran 20/30/45/60/90 and returned five rows
+#: identical to two decimal places, and three interior points between two
+#: endpoints that agree cannot disagree. The endpoints are kept because
+#: they are what would show the lag mattering if it ever did.
+DEFAULT_LAGS = (20, 90)
+
+#: The axis that is swept in the freed slots. The lag turned out not to
+#: move the result; the screening strategy decides which symbols reach
+#: the valuation loop at all, so it is the axis with something to say.
+#: peter_lynch_garp is the historical default, all_universe removes the
+#: screen entirely, and the gap between them is the cost of the screen.
+DEFAULT_STRATEGIES = ("peter_lynch_garp", "all_universe")
 
 #: Metrics worth a column. Ratios that the service withholds rather than
 #: inflates come back as None and print as "-".
@@ -81,6 +90,8 @@ def _row(label: str, payload: Any) -> Dict[str, Any]:
         "symbol_quarters_skipped_no_filing": diag.get(
             "symbol_quarters_skipped_no_filing"),
         "symbols_in_lake": diag.get("symbols_in_lake"),
+        "filing_age_in_quarters": diag.get("filing_age_in_quarters"),
+        "funnel": diag.get("funnel"),
         "is_evidence_of_skill": diag.get("is_evidence_of_skill"),
         "warning": diag.get("warning"),
         "trades": len(payload.trades or []),
@@ -96,7 +107,9 @@ def main() -> int:
     parser.add_argument("--start-year", type=int, default=2021)
     parser.add_argument("--end-year", type=int, default=None)
     parser.add_argument("--top-k", type=int, default=10)
-    parser.add_argument("--strategy", default="peter_lynch_garp")
+    parser.add_argument("--strategies", nargs="+",
+                        default=list(DEFAULT_STRATEGIES),
+                        help="Screening strategies to sweep.")
     parser.add_argument("--model", default="composite_fair_value")
     parser.add_argument("--skip-snapshot", action="store_true",
                         help="Omit the snapshot_projected contrast row.")
@@ -111,11 +124,12 @@ def main() -> int:
     service = FairValueBacktestService()
     rows: List[Dict[str, Any]] = []
 
-    def run(label: str, mode: str, lag: Optional[int]) -> None:
+    def run(label: str, mode: str, lag: Optional[int],
+            strategy: str) -> None:
         started = time.time()
         try:
             payload = service.run_backtest(
-                screening_strategy=args.strategy,
+                screening_strategy=strategy,
                 valuation_model_id=args.model,
                 top_k=args.top_k,
                 start_year=args.start_year,
@@ -127,10 +141,12 @@ def main() -> int:
         except Exception as exc:  # one row must not end the sweep
             import traceback
             traceback.print_exc()
-            rows.append({"label": label, "error": f"{type(exc).__name__}: {exc}"})
+            rows.append({"label": label, "strategy": strategy,
+                         "error": f"{type(exc).__name__}: {exc}"})
             print(f"  {label}: FAILED ({type(exc).__name__}: {exc})")
             return
         row = _row(label, payload)
+        row["strategy"] = strategy
         row["seconds"] = round(time.time() - started, 1)
         rows.append(row)
         print(f"  {label}: {row['seconds']}s, "
@@ -138,11 +154,13 @@ def main() -> int:
 
     print("## Backtest sweep")
     print()
-    for lag in args.lags:
-        run(f"point_in_time, lag {lag}d", FundamentalsMode.POINT_IN_TIME, lag)
+    for strategy in args.strategies:
+        for lag in args.lags:
+            run(f"point_in_time, {strategy}, lag {lag}d",
+                FundamentalsMode.POINT_IN_TIME, lag, strategy)
     if not args.skip_snapshot:
         run("snapshot_projected (not evidence)",
-            FundamentalsMode.SNAPSHOT_PROJECTED, None)
+            FundamentalsMode.SNAPSHOT_PROJECTED, None, args.strategies[0])
 
     print()
     # in lake is printed because without it "valued 0" has two very
@@ -164,18 +182,68 @@ def main() -> int:
               f"{_fmt(row.get('symbol_quarters_skipped_no_filing'))} |")
     print()
 
+    # Where the universe went. The metrics table answers "what did it
+    # earn"; without this one, "on how much" has no answer at all, and
+    # 131 valued out of 1,381 in the lake reads as a lake problem when
+    # every stage above it may be the one doing the cutting.
+    funnelled = [r for r in rows if "error" not in r and r.get("funnel")]
+    if funnelled:
+        print("### Where the universe went (symbol-quarters)")
+        print()
+        print("| run | universe | strategy passed | no price | "
+              "no filing | valued |")
+        print("|---|---:|---:|---:|---:|---:|")
+        for row in funnelled:
+            f = row["funnel"]
+            print(f"| {row['label']} | {_fmt(f.get('universe'))} | "
+                  f"{_fmt(f.get('strategy_passed'))} | "
+                  f"{_fmt(f.get('no_price_that_quarter'))} | "
+                  f"{_fmt(f.get('no_filing'))} | {_fmt(f.get('valued'))} |")
+        print()
+
+    # How stale the filings actually were. This is the measurement that
+    # says whether the lag sweep measured anything: if every lag selects
+    # filings of the same age, the lag could not have bitten, and rows
+    # that agree are the expected result rather than a bug to hunt.
+    aged = [r for r in rows if "error" not in r and r.get("filing_age_in_quarters")]
+    if aged:
+        print("### Age of the filing actually used")
+        print()
+        print("| run | filings by age in quarters |")
+        print("|---|---|")
+        for row in aged:
+            ages = row["filing_age_in_quarters"] or {}
+            cells = ", ".join(f"{k}q x{v}" for k, v in
+                              sorted(ages.items(), key=lambda kv: int(kv[0])))
+            print(f"| {row['label']} | {cells or '-'} |")
+        print()
+        signatures = {json.dumps(r["filing_age_in_quarters"], sort_keys=True)
+                      for r in aged}
+        if len(signatures) == 1 and len(aged) > 1:
+            print("- every run selected filings of **identical** ages. The "
+                  "lag assumption cannot be moving the result, because it "
+                  "is not moving which filing gets read. Rows that agree "
+                  "below are that, not a stuck parameter.")
+            print()
+
     # The spread across lags is the finding, not any single row. State it
-    # rather than leaving it to be eyeballed out of the table.
+    # rather than leaving it to be eyeballed out of the table. It is taken
+    # within one strategy: two strategies see different companies, so a
+    # spread across both would measure the screen, not the lag.
+    for strategy in args.strategies:
+        swept = [r for r in rows if "error" not in r
+                 and r.get("strategy") == strategy
+                 and r["label"].startswith("point_in_time")]
+        cagrs = [r["metrics"].get("cagr_pct") for r in swept
+                 if r["metrics"].get("cagr_pct") is not None]
+        if len(cagrs) >= 2:
+            spread = max(cagrs) - min(cagrs)
+            print(f"- {strategy}: CAGR across lags {min(cagrs):.2f}% .. "
+                  f"{max(cagrs):.2f}% (spread **{spread:.2f} points**)")
+    print("  A wide spread means the return is bought with the "
+          "publication-date assumption rather than with the filings.")
     swept = [r for r in rows
              if "error" not in r and r["label"].startswith("point_in_time")]
-    cagrs = [r["metrics"].get("cagr_pct") for r in swept
-             if r["metrics"].get("cagr_pct") is not None]
-    if len(cagrs) >= 2:
-        spread = max(cagrs) - min(cagrs)
-        print(f"- CAGR across lags {min(cagrs):.2f}% .. {max(cagrs):.2f}% "
-              f"(spread **{spread:.2f} points**)")
-        print("  A wide spread means the return is bought with the "
-              "publication-date assumption rather than with the filings.")
     valued = [r.get("symbol_quarters_valued") for r in swept
               if r.get("symbol_quarters_valued") is not None]
     if valued and max(valued) == 0:

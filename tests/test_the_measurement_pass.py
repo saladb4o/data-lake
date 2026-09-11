@@ -19,7 +19,8 @@ PASS = os.path.join(ROOT, "scripts", "run_the_measurement_pass.sh")
 
 STAGES = ("sync_unified_market_data", "sync_historical_prices",
           "build_historical_fundamentals", "score_code_candidates",
-          "measure_the_backtest", "audit_valuation_coverage")
+          "measure_the_lake_fill", "measure_the_backtest",
+          "audit_valuation_coverage")
 
 
 @pytest.fixture

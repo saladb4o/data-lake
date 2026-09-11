@@ -13,6 +13,7 @@
 #   historical prices             the backtest cannot run without them
 #   fundamentals lake + probe     one fetch, two outputs
 #   candidate scoring             reads the probe, fetches nothing
+#   lake fill                     reads the lake and the snapshot
 #   backtest sweep                reads all three lakes
 #   coverage audit                reads the snapshot
 #
@@ -93,6 +94,12 @@ if [ -f "$DATA/code_candidates_probe.json" ]; then
       --json '$DATA/code_candidates.json' | tee -a '$SUMMARY'"
 fi
 
+# Reads the lake and the snapshot, fetches nothing, and answers whether
+# the lake-to-payload route wired in this branch carries anything at all.
+stage lakefill "what the lake could fill" \
+  bash -c "set -o pipefail; python scripts/measure_the_lake_fill.py \
+    --json '$DATA/lake_fill.json' | tee -a '$SUMMARY'"
+
 stage backtest "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
     --lags $LAGS --json '$DATA/backtest_sweep.json' | tee -a '$SUMMARY'"
@@ -120,7 +127,8 @@ if [ ${#WANTED[@]} -eq 0 ] || wanted audit; then
   echo "| file | bytes |"
   echo "|---|---:|"
   for f in historical_fundamentals screener_snapshot historical_prices \
-           coverage backtest_sweep code_candidates code_candidates_probe; do
+           coverage backtest_sweep code_candidates code_candidates_probe \
+           lake_fill; do
     if [ -f "$DATA/$f.json" ]; then
       echo "| $f.json | $(wc -c < "$DATA/$f.json") |"
     else
