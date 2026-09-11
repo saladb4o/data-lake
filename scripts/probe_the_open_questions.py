@@ -21,8 +21,12 @@ asking all four costs the same as asking one.
    sitting on -50%, -66% or -75% far more often than chance.
 
 3. `fcf` blocks 141 symbols. It is derived as cfo - |capex| and imputed
-   as cfo * 0.7, so it is missing only when *cfo* is missing. Whether
-   capex matters at all here has never been checked.
+   as cfo * 0.7. This entry used to say it could therefore only be
+   missing when *cfo* is missing; the first run of the section showed
+   cfo present at tier 3 for 1,514 of 1,524 symbols while capex sits
+   below the gate for 193, and the impute is itself below the gate. So
+   capex is what blocks it, and the answer arrived by contradicting the
+   question.
 
 4. Four symbols are short of exactly one core driver, revenue. The audit
    says those are "the ones a single extractor fix can reach" and has
@@ -198,8 +202,18 @@ def section_splits(lake) -> None:
 def section_fcf(rows_source) -> None:
     print("## 3. What actually blocks `fcf`")
     print()
-    print("`fcf` resolves as cfo - |capex|, and imputes as cfo * 0.7, so "
-          "capex alone can never block it.")
+    # This line used to end "so capex alone can never block it", which the
+    # first run of this very section disproved: cfo is tier 3 for 1,514 of
+    # 1,524 while capex is below the gate for 193, and 141 symbols are
+    # blocked by fcf. Falling back to the impute is not the same as
+    # resolving - an imputed driver is a formula standing in for a figure,
+    # and the gate counts it as blocked. The claim was mine, it was written
+    # as an aside rather than measured, and the table under it was the
+    # thing that refuted it.
+    print("`fcf` resolves as cfo - |capex| and otherwise imputes as "
+          "cfo * 0.7. The impute is not a resolution: it is below the "
+          "provenance gate, so capex under the gate blocks `fcf` even "
+          "though cfo is present.")
     print()
     tiers = collections.Counter()
     pairs = collections.Counter()

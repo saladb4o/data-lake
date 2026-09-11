@@ -43,18 +43,24 @@ from services.point_in_time_fundamentals import (  # noqa: E402
 
 logger = logging.getLogger("measure_the_backtest")
 
-#: Lags to sweep, in days from quarter end. 20 is the statutory deadline
-#: for a quarterly report and 90 the annual one, so they bracket every
-#: filer from prompt to chronically late. Only the two extremes are swept
-#: by default: a previous pass ran 20/30/45/60/90 and returned five rows
-#: identical to two decimal places, and three interior points between two
-#: endpoints that agree cannot disagree. The endpoints are kept because
-#: they are what would show the lag mattering if it ever did.
-DEFAULT_LAGS = (20, 90)
+#: How long a quarter is, in days. The sweep is built around this number
+#: rather than around the filing deadlines, for the reason below.
+QUARTER_DAYS = 90
 
-#: The axis that is swept in the freed slots. The lag turned out not to
-#: move the result; the screening strategy decides which symbols reach
-#: the valuation loop at all, so it is the axis with something to say.
+#: Lags to sweep, in days from quarter end. The simulation stands at
+#: quarter end and treats a filing as public at quarter end + lag, so
+#: every lag shorter than a quarter selects the same filing - the
+#: previous quarter's - and the rows are identical by construction.
+#: 20/30/45/60/90 are all shorter than a quarter, which is why five runs
+#: came back agreeing to two decimal places and were read as "the lag
+#: does not matter". They never reached the lag. A sweep has to straddle
+#: the boundary to ask anything: 20 is the statutory quarterly deadline,
+#: 90 the annual one and the last value still inside the quarter, and
+#: 100/135/190 push the filing one, two and three quarters late.
+DEFAULT_LAGS = (20, 90, 100, 135, 190)
+
+#: The other axis. The screening strategy decides which symbols reach the
+#: valuation loop at all, so it has something to say whatever the lag does.
 #: peter_lynch_garp is the historical default, all_universe removes the
 #: screen entirely, and the gap between them is the cost of the screen.
 DEFAULT_STRATEGIES = ("peter_lynch_garp", "all_universe")
@@ -220,10 +226,27 @@ def main() -> int:
         signatures = {json.dumps(r["filing_age_in_quarters"], sort_keys=True)
                       for r in aged}
         if len(signatures) == 1 and len(aged) > 1:
-            print("- every run selected filings of **identical** ages. The "
-                  "lag assumption cannot be moving the result, because it "
-                  "is not moving which filing gets read. Rows that agree "
-                  "below are that, not a stuck parameter.")
+            straddles = [lag for lag in args.lags if lag > QUARTER_DAYS]
+            if not straddles:
+                # Not a finding. Every lag under a quarter lands before the
+                # next rebalance date, so the same filing is selected at
+                # each and the rows below cannot differ. Saying "the
+                # assumption does not matter" here would be reporting the
+                # geometry of the sweep as a property of the data.
+                print(f"- every run selected filings of **identical** ages, "
+                      f"and none of the swept lags ({', '.join(str(l) for l in args.lags)}) "
+                      f"exceeds a quarter ({QUARTER_DAYS} days). Standing at "
+                      "quarter end, every one of them makes the previous "
+                      "quarter's filing public and this quarter's not yet, "
+                      "so identical rows are **arithmetic, not evidence**. "
+                      "This sweep has not tested the assumption. Sweep a "
+                      "lag past the boundary to test it.")
+            else:
+                print("- every run selected filings of **identical** ages, "
+                      f"including {len(straddles)} lag(s) past the quarter "
+                      "boundary that would have pushed the filing a quarter "
+                      "late. The result does not rest on the publication-date "
+                      "assumption.")
             print()
 
     # The spread across lags is the finding, not any single row. State it
@@ -241,7 +264,9 @@ def main() -> int:
             print(f"- {strategy}: CAGR across lags {min(cagrs):.2f}% .. "
                   f"{max(cagrs):.2f}% (spread **{spread:.2f} points**)")
     print("  A wide spread means the return is bought with the "
-          "publication-date assumption rather than with the filings.")
+          "publication-date assumption rather than with the filings. A zero "
+          f"spread means that only if some swept lag exceeds {QUARTER_DAYS} "
+          "days; below that the lag cannot change which filing is read.")
     swept = [r for r in rows
              if "error" not in r and r["label"].startswith("point_in_time")]
     valued = [r.get("symbol_quarters_valued") for r in swept

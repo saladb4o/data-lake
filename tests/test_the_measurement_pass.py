@@ -177,3 +177,25 @@ class TestEveryStageHasABoundOfItsOwn:
                     assert step.get("timeout-minutes"), (
                         f"{step['name']} in {path} has no bound; a hang there "
                         "would burn the job")
+
+
+class TestTheLagSweepCanReachTheAssumption:
+    """A sweep whose values all land inside one quarter asks nothing.
+
+    The backtest stands at quarter end and treats a filing as public at
+    quarter end + lag, so every lag shorter than a quarter selects the
+    previous quarter's filing and the rows are identical by construction.
+    Five such rows were reported as "the lag does not matter" for several
+    runs running. The sweep has to cross the boundary to have a question
+    in it.
+    """
+
+    def test_the_default_sweep_crosses_the_quarter_boundary(self):
+        from scripts import measure_the_backtest as mb
+        assert any(lag > mb.QUARTER_DAYS for lag in mb.DEFAULT_LAGS)
+
+    def test_the_pass_sweeps_a_lag_past_the_quarter_boundary(self):
+        body = open("scripts/run_the_measurement_pass.sh", encoding="utf-8").read()
+        line = next(l for l in body.splitlines() if l.startswith("LAGS="))
+        lags = [int(tok) for tok in line.split(":-", 1)[1].rstrip('"}').split()]
+        assert any(lag > 92 for lag in lags), line

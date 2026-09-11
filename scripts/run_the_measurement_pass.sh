@@ -35,7 +35,18 @@ set -uo pipefail
 DATA="${DATA_LOCAL_DIR:?DATA_LOCAL_DIR must be set}"
 SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
 LIMIT="${LAKE_LIMIT:-0}"
-LAGS="${BACKTEST_LAGS:-20 30 45 60 90}"
+# The simulation stands at quarter end and treats a filing as public at
+# quarter end + lag, so a lag shorter than a quarter always selects the
+# same filing - the previous quarter's - whatever its value. 20/30/45/60/90
+# are all shorter than the 90-92 days a quarter lasts, which is why five
+# rows came back identical to two decimal places for run after run. That
+# was read as "the assumption does not matter"; it means the sweep never
+# reached the assumption. These straddle the boundary instead: 20 is the
+# statutory quarterly deadline, 90 the annual one and the last value that
+# still lands inside the quarter, and 100/135/190 push the filing one, two
+# and three quarters late. If the rows still agree, the result genuinely
+# does not rest on the lag.
+LAGS="${BACKTEST_LAGS:-20 90 100 135 190}"
 mkdir -p "$DATA"
 
 FAILED=()
