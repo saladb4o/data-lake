@@ -121,6 +121,17 @@ stage backtest "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
     --lags $LAGS --json '$DATA/backtest_sweep.json' | tee -a '$SUMMARY'"
 
+# The one stage here that does reach the network, and it is two requests
+# per symbol against a vendor that names its lines. VNDIRECT sends eight
+# keys per statement row and none is a label, so capex is read from 32100
+# on the VAS numbering convention alone and has scored 0.3% against its
+# anchor for three runs. capex below the gate blocks fcf, which is the
+# third most common blocking driver in the universe at 141 symbols.
+stage capexmatch "which code is capex" \
+  bash -c "set -o pipefail; python scripts/match_capex_to_vietcap.py \
+    --probe '$DATA/code_candidates_probe.json' \
+    --json '$DATA/capex_match.json' | tee -a '$SUMMARY'"
+
 # Reads the snapshot and the price lake, fetches nothing, and answers
 # four questions that have each been guessed at least once: the price
 # scale, split adjustment, what really blocks fcf, and which symbols are

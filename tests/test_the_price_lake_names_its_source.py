@@ -272,3 +272,30 @@ class TestThePriceLakeIsInDong:
         # The stage has to go red. A gate that only prints is how a
         # thousand-fold error survived every run that measured it.
         assert "return 0 if on_scale else 1" in body
+
+
+class TestTheCarriedOverLakeCannotKeepTheOldScale:
+    """A rerun on a pre-normalisation lake must not trust what it finds.
+
+    The sync refetches only symbols it is missing or that hold fewer than
+    eight quarters, so a lake built while the prices were in thousands
+    would survive a rerun untouched and be merged, symbol by symbol, with
+    records in dong. Nothing downstream compares two symbols' scales
+    against each other, so the seam would be invisible.
+    """
+
+    def test_a_written_record_says_what_scale_it_is_on(self):
+        import pandas as pd
+        import scripts.sync_historical_prices as sync
+        dates = pd.date_range("2020-01-01", periods=400, freq="D")
+        df = pd.DataFrame({"time": dates, "open": 50000.0, "high": 50000.0,
+                           "low": 50000.0, "close": 50000.0, "volume": 1000})
+        out = sync.compute_stock_quarterly_returns("AAA", df)
+        assert out["price_unit"] == sync.PRICE_UNIT == "dong"
+
+    def test_a_cached_record_without_the_stamp_is_refetched(self):
+        import scripts.sync_historical_prices as sync
+        body = inspect.getsource(sync.sync_all_symbols)
+        # The deep-enough test alone is what let the old scale through.
+        assert 'price_unit") == PRICE_UNIT' in body
+        assert "stale_scale" in body

@@ -129,6 +129,13 @@ DONG_FLOOR = 1000.0
 #: What such a series has to be multiplied by to become dong.
 THOUSANDS_TO_DONG = 1000.0
 
+#: Stamped on every record this file writes. The sync keeps symbols it
+#: already has rather than refetching them, so without a stamp there is
+#: no way to tell a record written after the normalisation from one
+#: written before it, and a rerun on a lake built in thousands would
+#: carry the old scale forward under the new code.
+PRICE_UNIT = "dong"
+
 
 def normalise_to_dong(symbol: str, df: pd.DataFrame) -> Optional[str]:
     """Put one symbol's candles into dong, in place. Returns what it did.
@@ -235,6 +242,14 @@ def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, 
 
     return {
         "symbol": symbol,
+        # What scale these numbers are on, written down rather than
+        # assumed. The sync carries records forward between runs without
+        # refetching, so a lake built before normalise_to_dong existed
+        # would otherwise sit in thousands forever, mixed symbol by
+        # symbol with dong records and invisible to every table
+        # downstream. A record that does not carry this stamp is not
+        # trusted to be in dong - see PRICE_UNIT below.
+        "price_unit": PRICE_UNIT,
         "total_quarters": len(quarters_data),
         "earliest_quarter": list(quarters_data.keys())[0] if quarters_data else None,
         "latest_quarter": list(quarters_data.keys())[-1] if quarters_data else None,
@@ -306,9 +321,30 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
 
     print(f"🚀 Starting Real Price Lake Sync for {len(symbols_list)} stocks...")
     start_time = time.time()
-    symbols_to_fetch = [s for s in symbols_list if s not in existing_store or len(existing_store[s].get("quarters", {})) < 8]
+    # A carried-over record is only usable if it is deep enough AND says
+    # what scale it is on. The second half is the one that was missing:
+    # every lake built before the normalisation is in thousands, and
+    # reusing it would produce a file half in dong and half not, with
+    # nothing downstream able to see the seam.
+    def _is_usable(record: Any) -> bool:
+        if not isinstance(record, dict):
+            return False
+        if len(record.get("quarters", {})) < 8:
+            return False
+        return record.get("price_unit") == PRICE_UNIT
+
+    stale_scale = sum(
+        1 for sym in symbols_list
+        if isinstance(existing_store.get(sym), dict)
+        and len(existing_store[sym].get("quarters", {})) >= 8
+        and existing_store[sym].get("price_unit") != PRICE_UNIT)
+    symbols_to_fetch = [s for s in symbols_list if not _is_usable(existing_store.get(s))]
 
     print(f"📦 Cached stocks: {len(existing_store)} | Stocks to fetch: {len(symbols_to_fetch)}")
+    if stale_scale:
+        print(f"♻️  {stale_scale} cached symbols carry no '{PRICE_UNIT}' stamp "
+              "and are refetched rather than trusted: they predate the scale "
+              "normalisation and are in thousands.")
 
     # --- sources 1 and 2: the brokers' own chart endpoints ----------------
     # Concurrent because each symbol is an independent HTTPS request. A

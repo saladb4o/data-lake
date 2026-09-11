@@ -448,14 +448,22 @@ jobs:
           LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
         run: bash scripts/run_the_measurement_pass.sh backtest
 
-      - name: Four questions, no fetches
-        timeout-minutes: 15
+      - name: Which item code is capex
+        timeout-minutes: 25
         if: always()
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh capexmatch
+
+      - name: Four questions, no fetches
+        timeout-minutes: 15
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
         run: bash scripts/run_the_measurement_pass.sh probe
 
       - name: Coverage audit
@@ -484,6 +492,7 @@ jobs:
             data/code_candidates.json
             data/code_candidates_probe.json
             data/lake_fill.json
+            data/capex_match.json
           retention-days: 14
           if-no-files-found: warn
 
@@ -560,5 +569,6 @@ jobs:
             data/backtest_sweep.json
             data/code_candidates.json
             data/lake_fill.json
+            data/capex_match.json
           retention-days: 14
           if-no-files-found: warn

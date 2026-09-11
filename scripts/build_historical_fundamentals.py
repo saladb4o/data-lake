@@ -190,12 +190,38 @@ _NOT_A_LABEL = frozenset({
 })
 
 
+def _days_between(fiscal: Any, created: Any) -> Optional[int]:
+    """Days from a fiscal date to the date the vendor stamped the row.
+
+    Both arrive as strings of whatever shape the endpoint feels like,
+    so anything unparseable is None rather than a zero - a zero here
+    would read as "filed the day the quarter ended", which is the one
+    answer that cannot be true.
+    """
+    def _d(raw: Any) -> Optional[date]:
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        text = raw.strip()[:10]
+        for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d"):
+            try:
+                return datetime.strptime(text, fmt).date()
+            except ValueError:
+                continue
+        return None
+
+    start, end = _d(fiscal), _d(created)
+    if start is None or end is None:
+        return None
+    return (end - start).days
+
+
 def build_symbol(symbol: str, size: int = 4000,
                  lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
                  diagnostics: Optional[Dict[str, Any]] = None,
                  code_names: Optional[Dict[int, str]] = None,
                  code_counts: Optional[Dict[int, int]] = None,
-                 key_census: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+                 key_census: Optional[Dict[str, int]] = None,
+                 filing_lag_days: Optional[List[int]] = None) -> Dict[str, Any]:
     """Returns {quarter_code: record} for one symbol; empty when unavailable.
 
     When ``diagnostics`` is given, the raw values of DIAGNOSTIC_CODES are
@@ -211,6 +237,15 @@ def build_symbol(symbol: str, size: int = 4000,
     guessed and absent, and a sweep for any non-numeric string field
     found none either. The key census is what turns that into a fact
     about the endpoint rather than another failed guess.
+   
+    When ``filing_lag_days`` is given, the gap between each row's
+    ``fiscalDate`` and its ``createdDate`` is appended to it. That is the
+    only thing on this endpoint that carries a date the vendor wrote
+    rather than one the company reported, and the backtest currently
+    assumes 45 days for every filing in the universe on no measurement at
+    all. It is a vendor ingest date, not a filing date, so it is an upper
+    bound rather than the number itself - and an upper bound measured
+    across the whole lake beats a round number nobody chose.
     """
     rows = _fetch_raw(symbol.upper().strip(), size)
     if not rows:
@@ -228,6 +263,14 @@ def build_symbol(symbol: str, size: int = 4000,
             # does, at one dict bump per key.
             for seen in row:
                 key_census[seen] = key_census.get(seen, 0) + 1
+
+        if filing_lag_days is not None:
+            gap = _days_between(row.get("fiscalDate"), row.get("createdDate"))
+            # Negative gaps mean the vendor stamped a row before the
+            # quarter it describes had ended, which is a backfill rather
+            # than an ingest, and says nothing about filing speed.
+            if gap is not None and gap >= 0:
+                filing_lag_days.append(gap)
 
         fiscal = row.get("fiscalDate")
         value = row.get("numericValue")
@@ -452,6 +495,10 @@ def main() -> int:
     code_names: Optional[Dict[int, str]] = {} if args.diagnostics_out else None
     code_counts: Optional[Dict[int, int]] = {} if args.diagnostics_out else None
     key_census: Optional[Dict[str, int]] = {} if args.diagnostics_out else None
+    #: Gathered on every run, not only a diagnostics one: this is the
+    #: number the backtest's whole lag assumption rests on and it has
+    #: never been measured.
+    filing_lag_days: List[int] = []
 
     ok = 0
     for index, symbol in enumerate(symbols, start=1):
@@ -461,7 +508,8 @@ def main() -> int:
                                     diagnostics=diagnostics,
                                     code_names=code_names,
                                     code_counts=code_counts,
-                                    key_census=key_census)
+                                    key_census=key_census,
+                                    filing_lag_days=filing_lag_days)
         except Exception as exc:  # one bad symbol must not end the pass
             logger.warning("[%d/%d] %s failed: %s", index, len(symbols), symbol, exc)
             continue
@@ -476,6 +524,40 @@ def main() -> int:
     lake["source"] = "vndirect_finfo_quarterly"
     lake["filing_dates_estimated"] = True
     lake["publication_lag_days"] = args.lag_days
+
+    # What the vendor's own timestamps say about how late a filing is,
+    # printed rather than only stored. DEFAULT_PUBLICATION_LAG_DAYS is 45
+    # and was inherited, not chosen; run 34616175758 showed the backtest's
+    # entire return turns on whether that number is under or over a
+    # quarter, so the distribution behind it is worth a line in the log.
+    #
+    # createdDate is when VNDIRECT wrote the row, not when the company
+    # filed, so every figure here is an upper bound on the true lag. It
+    # still answers the question that matters: whether the median filing
+    # lands inside the quarter (where the lag is inert) or past it.
+    if filing_lag_days:
+        ordered = sorted(filing_lag_days)
+        def _pct(p: float) -> int:
+            return ordered[min(len(ordered) - 1, int(len(ordered) * p))]
+        past_quarter = sum(1 for d in ordered if d > 90)
+        print()
+        print("### How late the vendor stamped each filing")
+        print()
+        print(f"- rows with both dates: **{len(ordered):,}**")
+        print("| percentile | days after quarter end |")
+        print("|---|---:|")
+        for label, p in (("p10", 0.10), ("median", 0.50), ("p75", 0.75),
+                         ("p90", 0.90), ("p99", 0.99)):
+            print(f"| {label} | {_pct(p):,} |")
+        print()
+        print(f"- **{past_quarter:,}** of {len(ordered):,} "
+              f"({past_quarter / len(ordered):.1%}) were stamped more than 90 "
+              "days after quarter end, i.e. past the next rebalance date. "
+              "This is an ingest date, so it bounds the filing lag from "
+              "above rather than measuring it.")
+        print(f"- the backtest assumes {args.lag_days} days for every "
+              "filing in the universe.")
+        print()
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     tmp_path = f"{out_path}.tmp"
