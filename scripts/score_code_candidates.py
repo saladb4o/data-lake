@@ -264,6 +264,16 @@ def main() -> int:
 
     census(code_names, code_counts)
 
+    # Which key the labels came out of. Three key names were guessed for
+    # this and all three were absent; printing the winner means the next
+    # build can read the field by name instead of sweeping for it.
+    label_keys = probe.get("label_keys") or {}
+    if label_keys:
+        print("- the vendor's label arrived under: "
+              + ", ".join(f"`{k}` ({v:,} codes)"
+                          for k, v in list(label_keys.items())[:5]))
+        print()
+
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump({"anchors": results, "code_names": code_names,

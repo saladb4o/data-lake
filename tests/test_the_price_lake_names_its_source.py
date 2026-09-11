@@ -6,10 +6,12 @@ with a vnstock fallback and never contacting TradingView at all. A label
 nobody can check was read as evidence that TradingView already carried
 the lake.
 
-It is now DNSE, then SSI, then TCBS, then yfinance, then vnstock, and
-the lake records which one answered for each symbol. These tests pin the parsers'
-refusals and the ordering; whether the endpoints answer at all is a
-question only a runner can settle, and the tally exists to settle it.
+It is now DNSE, then yfinance, then vnstock, and the lake records which
+one answered for each symbol. SSI and TCBS were tried on a full pass,
+answered for nobody, and were deleted rather than left flagged off.
+These tests pin the parser's refusals and the ordering; whether the
+endpoint answers at all is a question only a runner can settle, and the
+tally exists to settle it.
 """
 from __future__ import annotations
 
@@ -17,9 +19,7 @@ import inspect
 
 import pytest
 
-from services.broker_prices import (
-    TCBS_MAX_POINTS, fetch_dnse, fetch_ssi, fetch_tcbs, parse_tcbs_bars,
-    parse_udf)
+from services.broker_prices import fetch_dnse, parse_udf
 
 
 class _Resp:
@@ -53,111 +53,36 @@ class TestTheUdfParserRefusesWhatItCannotTrust:
         assert parse_udf("not a dict") is None
 
 
-class TestTheTcbsParser:
-    def test_rows_come_back_dated_by_trading_day(self):
-        rows = parse_tcbs_bars({"data": [
-            {"tradingDate": "2024-03-28T00:00:00.000Z", "open": 1.0,
-             "high": 2.0, "low": 0.5, "close": 1.5, "volume": 10},
-        ]})
-        assert rows == [{"time": "2024-03-28", "open": 1.0, "high": 2.0,
-                         "low": 0.5, "close": 1.5, "volume": 10.0}]
-
-    def test_a_row_missing_a_price_is_dropped_not_defaulted(self):
-        # A bar with no close is not a bar. Defaulting it to zero would
-        # put a 100% loss into a quarter that merely had a gap.
-        assert parse_tcbs_bars({"data": [
-            {"tradingDate": "2024-03-28T00:00:00Z", "open": 1.0,
-             "high": 2.0, "low": 0.5, "volume": 10}]}) is None
-
-    def test_an_empty_payload_is_none(self):
-        assert parse_tcbs_bars({"data": []}) is None
-        assert parse_tcbs_bars({}) is None
-
-
-class TestTheFetchersKeepTheirPromises:
-    def test_dnse_asks_once_at_the_daily_resolution(self, monkeypatch):
+class TestTheFetcherKeepsItsPromises:
+    def test_the_whole_window_is_asked_for_in_one_request(self, monkeypatch):
         asked = []
 
         def _get(url, params=None, **kwargs):
-            asked.append((url, params))
+            asked.append(params)
             return _Resp({"s": "ok", "t": [1451606400], "o": [1.0],
                           "h": [1.0], "l": [1.0], "c": [1.0], "v": [1]})
 
         monkeypatch.setattr("services.broker_prices.requests.get", _get)
         assert fetch_dnse("FPT")
         assert len(asked) == 1
-        # The 90-day ceiling DNSE documents belongs to the intraday
-        # resolutions. Asking for one of those here would inherit a limit
-        # that does not apply to daily bars and silently truncate the lake
-        # to one quarter.
-        assert asked[0][1]["resolution"] == "1D"
-        assert "entrade" in asked[0][0]
+        assert asked[0]["symbol"] == "FPT"
+        # Not an intraday resolution: the 90-day ceiling vietfin documents
+        # is a property of those, and asking for one would inherit a limit
+        # that does not apply to daily bars.
+        assert asked[0]["resolution"] == "1D"
 
-    def test_dnse_and_ssi_share_one_parser(self):
-        # Both answer in UDF shape, so a refusal rule fixed in one is
-        # fixed in both. A second parser would be a second place for the
-        # unequal-column bug to come back.
-        import services.broker_prices as bp
-        assert "parse_udf" in inspect.getsource(bp.fetch_dnse)
-        assert "parse_udf" in inspect.getsource(bp.fetch_ssi)
-
-    def test_ssi_asks_once_for_the_whole_window(self, monkeypatch):
-        asked = []
-
-        def _get(url, params=None, **kwargs):
-            asked.append((url, params))
-            return _Resp({"s": "ok", "t": [1451606400], "o": [1.0],
-                          "h": [1.0], "l": [1.0], "c": [1.0], "v": [1]})
-
-        monkeypatch.setattr("services.broker_prices.requests.get", _get)
-        assert fetch_ssi("FPT")
-        assert len(asked) == 1
-        assert asked[0][1]["symbol"] == "FPT"
-        assert asked[0][1]["resolution"] == "1D"
-
-    def test_tcbs_chunks_and_never_asks_for_more_than_it_can_get(
+    def test_a_symbol_with_nothing_is_none_not_an_empty_frame(
             self, monkeypatch):
-        spans = []
+        monkeypatch.setattr("services.broker_prices.requests.get",
+                            lambda *a, **k: _Resp({"s": "no_data"}))
+        # None, not [], so the caller can tell "this source has nothing"
+        # from "this source returned no candles" and fall through.
+        assert fetch_dnse("ZZZ") is None
 
-        def _get(url, params=None, **kwargs):
-            spans.append(params["countBack"])
-            return _Resp({"data": []})
-
-        monkeypatch.setattr("services.broker_prices.requests.get", _get)
-        fetch_tcbs("FPT", start="2016-01-01", end="2020-01-01")
-        # A countBack above the cap is silently truncated by TCBS, which
-        # would read as a symbol that stopped trading mid-history.
-        assert spans and max(spans) <= TCBS_MAX_POINTS
-
-    def test_a_late_listing_is_not_abandoned_at_its_first_empty_chunk(
-            self, monkeypatch):
-        # vietfin's own loop breaks on the first empty chunk. A company
-        # that listed in 2019 has nothing in 2016, so that rule drops it
-        # entirely rather than starting it late.
-        calls = {"n": 0}
-
-        def _get(url, params=None, **kwargs):
-            calls["n"] += 1
-            if calls["n"] <= 2:
-                return _Resp({"data": []})
-            return _Resp({"data": [
-                {"tradingDate": "2019-06-03T00:00:00Z", "open": 1.0,
-                 "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1}]})
-
-        monkeypatch.setattr("services.broker_prices.requests.get", _get)
-        rows = fetch_tcbs("XYZ", start="2016-01-01", end="2020-01-01")
-        assert rows and rows[0]["time"] == "2019-06-03"
-
-    def test_overlapping_chunks_do_not_duplicate_a_trading_day(
-            self, monkeypatch):
-        def _get(url, params=None, **kwargs):
-            return _Resp({"data": [
-                {"tradingDate": "2019-06-03T00:00:00Z", "open": 1.0,
-                 "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1}]})
-
-        monkeypatch.setattr("services.broker_prices.requests.get", _get)
-        rows = fetch_tcbs("XYZ", start="2016-01-01", end="2020-01-01")
-        assert [r["time"] for r in rows] == ["2019-06-03"]
+    def test_a_non_200_falls_through_instead_of_raising(self, monkeypatch):
+        monkeypatch.setattr("services.broker_prices.requests.get",
+                            lambda *a, **k: _Resp({}, status=503))
+        assert fetch_dnse("FPT") is None
 
     def test_verification_is_never_switched_off(self, monkeypatch):
         seen = {}
@@ -167,10 +92,10 @@ class TestTheFetchersKeepTheirPromises:
             return _Resp({"s": "no_data"})
 
         monkeypatch.setattr("services.broker_prices.requests.get", _get)
-        fetch_ssi("FPT")
+        fetch_dnse("FPT")
         # scripts/fetch_tradingview.js opens with
         # NODE_TLS_REJECT_UNAUTHORIZED = '0'. Not inheriting that was the
-        # whole reason for going to the brokers over HTTPS directly.
+        # whole reason for going to the broker over HTTPS directly.
         assert seen.get("verify") is not False
 
 
@@ -184,21 +109,31 @@ class TestTheLakeRecordsWhoAnswered:
         assert "TradingView & Yahoo Finance Live Data Feeds" not in body
         assert "by_source" in body
 
-    def test_the_brokers_are_tried_before_yfinance_and_vnstock(self):
+    def test_the_broker_is_tried_before_yfinance_and_vnstock(self):
         body = self._body()
         assert body.index("_fetch_from_broker") < body.index("yf.download")
+
+    def test_a_source_measured_at_zero_is_gone_not_flagged_off(self):
+        import services.broker_prices as bp
+        import scripts.sync_historical_prices as sync
+        # SSI and TCBS answered for nobody on a full pass. Code kept "in
+        # case it works again" is code nobody measures again, and its
+        # circuit breaker would spend eighty requests a pass re-deriving
+        # a result already in the log.
+        assert not hasattr(bp, "fetch_ssi")
+        assert not hasattr(bp, "fetch_tcbs")
+        assert sync.BROKER_SOURCES == ("dnse",)
+
+    def test_the_tally_is_written_where_a_reader_can_reach_it(self):
+        # The job log is not readable from where these results get read:
+        # the artifact host is refused and the log API serves only the
+        # tail. A table printed mid-stage is a table nobody sees.
+        assert "price_sources.md" in self._body()
 
     def test_a_dead_endpoint_is_dropped_rather_than_asked_1500_times(self):
         import scripts.sync_historical_prices as sync
         assert sync.PROBE_BEFORE_GIVING_UP > 0
         assert "PROBE_BEFORE_GIVING_UP" in self._body()
-
-    def test_the_cheap_sources_are_asked_before_the_expensive_one(self):
-        # TCBS costs ten requests per symbol against one for the others,
-        # and is reported to have closed its unauthenticated endpoints.
-        # Either reason alone puts it last.
-        import scripts.sync_historical_prices as sync
-        assert sync.BROKER_SOURCES == ("dnse", "ssi", "tcbs")
 
     def test_every_named_source_can_actually_be_dispatched(self):
         # A name in BROKER_SOURCES with no fetcher behind it would raise

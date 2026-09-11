@@ -206,12 +206,12 @@ def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, 
         "quarters": quarters_data
     }
 
-#: Broker endpoints, in the order they are asked. DNSE and SSI each answer
-#: a decade in one request; TCBS caps a response at 365 points, so ten
-#: years costs ten requests per symbol, and it is reported to have closed
-#: its unauthenticated endpoints since these URLs were written - so it
-#: goes last and only sees what the other two had nothing for.
-BROKER_SOURCES = ("dnse", "ssi", "tcbs")
+#: Broker endpoints, in the order they are asked. SSI and TCBS were tried
+#: here and removed: run 34570149277 measured both at zero symbols out of
+#: their first forty while DNSE answered on the same pass and the same
+#: universe. See services/broker_prices.py for why they are deleted
+#: rather than kept behind a flag.
+BROKER_SOURCES = ("dnse",)
 
 #: How many symbols a broker may fail on before the stage stops asking it.
 #: Large enough that a handful of delisted tickers cannot trip it, small
@@ -222,9 +222,7 @@ PROBE_BEFORE_GIVING_UP = 40
 def _fetch_from_broker(source: str, symbol: str) -> Optional[pd.DataFrame]:
     """Daily candles from one broker, shaped like every other fetcher here."""
     from services import broker_prices
-    fetch = {"dnse": broker_prices.fetch_dnse,
-             "ssi": broker_prices.fetch_ssi,
-             "tcbs": broker_prices.fetch_tcbs}[source]
+    fetch = {"dnse": broker_prices.fetch_dnse}[source]
     rows = fetch(symbol)
     if not rows:
         return None
@@ -245,6 +243,17 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     import yfinance as yf
+
+    # yfinance prints a block per ticker it cannot find, and the universe
+    # carries hundreds of delisted and UPCOM tickers Yahoo never listed.
+    # Run 34570149277 spent most of its price log on "$XXX.VN: possibly
+    # delisted; no timezone found", which buried the one table the stage
+    # exists to produce. The failures are expected and already counted -
+    # a symbol yfinance cannot answer for simply is not in its row of the
+    # tally - so they are silenced rather than reported one by one.
+    for noisy in ("yfinance", "yfinance.data", "yfinance.ticker",
+                  "peewee", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.CRITICAL)
 
     # exchanges is accepted and unused by the broker sources - both key on
     # the bare ticker - but the master list knows it and a future source
@@ -392,22 +401,38 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
     # is decided by the number next to it, not by preference: a source
     # that answered for nobody costs nothing to remove, and one that
     # answered for hundreds is carrying the backtest.
-    print()
-    print("| price source | symbols it answered for |")
-    print("|---|---:|")
+    # Written to a file as well as printed. The job log is not readable
+    # from where these results get read - the artifact host is refused and
+    # the log API only serves the tail - so a table buried thirty minutes
+    # deep in a stage is a table nobody sees. The pass appends this file
+    # to the step summary, which is the one channel that always arrives.
+    tally: List[str] = []
+    tally.append("### Where the prices came from")
+    tally.append("")
+    tally.append("| price source | symbols it answered for |")
+    tally.append("|---|---:|")
     for source, count in sorted(by_source.items(), key=lambda kv: -kv[1]):
-        print(f"| {source} | {count:,} |")
+        tally.append(f"| {source} | {count:,} |")
+    print()
+    for line in tally:
+        print(line)
     quiet = [s for s in BROKER_SOURCES if not by_source.get(s)]
     if quiet:
         print()
-        print(f"- **{', '.join(quiet)} answered for nobody.** These "
-              "endpoints were read out of vietfin's working code but have "
-              "never been reached from a machine that could test them, so "
-              "this is their first real trial. Read a zero as the endpoint "
-              "or the parameters being wrong, not as the universe having "
-              "no prices - yfinance and vnstock below say whether the "
-              "prices exist.")
+        print(f"- **{', '.join(quiet)} answered for nobody.** Read a zero "
+              "as the endpoint or its parameters being wrong, not as the "
+              "universe having no prices: the other rows say whether the "
+              "prices exist. A source that stays at zero for a whole pass "
+              "should be deleted, not left to spend its forty probe "
+              "requests again next time.")
     print()
+
+    summary_path = os.path.join(DATA_DIR, "price_sources.md")
+    try:
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(tally) + "\n")
+    except OSError:
+        logger.warning("could not write %s", summary_path, exc_info=True)
     return payload
 
 if __name__ == "__main__":

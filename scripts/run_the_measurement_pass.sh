@@ -73,8 +73,13 @@ stage universe "screener universe" \
 
 # Never run on a runner before, and it takes no limit, so its cost is the
 # one unknown in this pass. It is measured, not trusted.
+# The stage prints thousands of lines and one table. Only the table is
+# appended to the summary: teeing the whole stage would drown it, and
+# leaving it in the log alone is what made it unreadable last pass.
 stage prices "historical prices" \
-  python scripts/sync_historical_prices.py
+  bash -c "python scripts/sync_historical_prices.py; rc=\$?; \
+    [ -f '$DATA/price_sources.md' ] \
+      && cat '$DATA/price_sources.md' | tee -a '$SUMMARY'; exit \$rc"
 
 # --- the lake, and the probe that judges two of its fields ----------------
 LAKE_ARGS=(--universe --out "$DATA/historical_fundamentals.json"

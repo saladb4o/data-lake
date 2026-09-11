@@ -180,11 +180,22 @@ def _fetch_raw(symbol: str, size: int) -> List[Dict[str, Any]]:
     return payload.get("data", []) if isinstance(payload, dict) else []
 
 
+#: Keys that are never a human label: the row's own identifiers, its
+#: figures, and its dates. Everything else that holds non-numeric text is
+#: a candidate for what the vendor calls the line.
+_NOT_A_LABEL = frozenset({
+    "itemCode", "code", "symbol", "fiscalDate", "reportType", "period",
+    "numericValue", "value", "modifiedDate", "createdDate", "itemLevel",
+    "reportTermCode", "auditStatusCode", "itemOrder",
+})
+
+
 def build_symbol(symbol: str, size: int = 4000,
                  lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
                  diagnostics: Optional[Dict[str, Any]] = None,
                  code_names: Optional[Dict[int, str]] = None,
-                 code_counts: Optional[Dict[int, int]] = None) -> Dict[str, Any]:
+                 code_counts: Optional[Dict[int, int]] = None,
+                 key_census: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
     """Returns {quarter_code: record} for one symbol; empty when unavailable.
 
     When ``diagnostics`` is given, the raw values of DIAGNOSTIC_CODES are
@@ -217,12 +228,27 @@ def build_symbol(symbol: str, size: int = 4000,
         except (TypeError, ValueError):
             continue
         if code_names is not None and item not in code_names:
-            # The vendor files Vietnamese and English under different
-            # keys and does not always send both; take whichever came.
-            label = (row.get("itemName") or row.get("itemVnName")
-                     or row.get("itemEnName") or "")
-            if isinstance(label, str) and label.strip():
-                code_names[item] = label.strip()
+            # Three key names were guessed here - itemName, itemVnName,
+            # itemEnName - on the belief that VNDIRECT labels every row.
+            # Run 34570149277 built the whole lake and named zero codes,
+            # so the belief was wrong: this endpoint does not send any of
+            # them. The census beside it worked on the same rows, which
+            # is what proves the loop ran and the guess missed.
+            #
+            # So stop guessing. Take the first string field that is not
+            # one of the numeric/bookkeeping keys, and record which key it
+            # came from, so one build says what the vendor actually calls
+            # its label instead of another round of three more guesses.
+            for key, value in row.items():
+                if key in _NOT_A_LABEL or not isinstance(value, str):
+                    continue
+                text = value.strip()
+                if not text or text.replace(".", "").replace("-", "").isdigit():
+                    continue
+                code_names[item] = text
+                if key_census is not None:
+                    key_census[key] = key_census.get(key, 0) + 1
+                break
 
     # One tick per symbol that files the code at all, not per row: the
     # question this answers is "how much of the universe reports this
@@ -421,6 +447,7 @@ def main() -> int:
     #: itemCode -> the vendor's own label, accumulated across symbols.
     code_names: Optional[Dict[int, str]] = {} if args.diagnostics_out else None
     code_counts: Optional[Dict[int, int]] = {} if args.diagnostics_out else None
+    key_census: Optional[Dict[str, int]] = {} if args.diagnostics_out else None
 
     ok = 0
     for index, symbol in enumerate(symbols, start=1):
@@ -429,7 +456,8 @@ def main() -> int:
             quarters = build_symbol(symbol, lag_days=args.lag_days,
                                     diagnostics=diagnostics,
                                     code_names=code_names,
-                                    code_counts=code_counts)
+                                    code_counts=code_counts,
+                                    key_census=key_census)
         except Exception as exc:  # one bad symbol must not end the pass
             logger.warning("[%d/%d] %s failed: %s", index, len(symbols), symbol, exc)
             continue
@@ -460,6 +488,8 @@ def main() -> int:
                                       sorted((code_names or {}).items())},
                        "code_counts": {str(k): v for k, v in
                                        sorted((code_counts or {}).items())},
+                       "label_keys": dict(sorted((key_census or {}).items(),
+                                                 key=lambda kv: -kv[1])),
                        "symbols": diagnostics}, handle, ensure_ascii=False)
         logger.info("wrote %s: %d symbols probed, %d codes named",
                     args.diagnostics_out, len(diagnostics),
