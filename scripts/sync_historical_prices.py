@@ -1,22 +1,25 @@
 """Daily prices for the whole universe, quarterised into the price lake.
 
-Two sources, in the order they are tried: TradingView's chart sessions,
-then DNSE's chart endpoint. Each symbol is counted against the source
-that actually answered for it, and the tally is printed - because this
-header used to say "TRADINGVIEW & VCI DATA FEEDS" and the saved payload
-used to say "TradingView & Yahoo Finance Live Data Feeds" while the code
-reached for neither TradingView nor VCI. A label nobody can check is
-worse than no label: it was read for months as evidence that TradingView
-was already carrying the lake.
+One source: DNSE's chart endpoint. Each symbol is counted against the
+source that actually answered for it, and the tally is printed - because
+this header used to say "TRADINGVIEW & VCI DATA FEEDS" and the saved
+payload used to say "TradingView & Yahoo Finance Live Data Feeds" while
+the code reached for neither TradingView nor VCI. A label nobody can
+check is worse than no label: it was read for months as evidence that
+TradingView was already carrying the lake.
 
-TradingView is now genuinely first, which is a different claim and has
-to be checked the same way: the tally below says how many symbols it
-answered for, and DNSE stays behind it precisely so that a TradingView
-that answers for nobody costs a fallback rather than an empty lake.
-The reason to prefer it is split adjustment - the lake shows 1,104
-quarter returns sitting on exact split ratios, which an adjusted series
-should not - and that claim is itself unverified until a run compares
-the two on a symbol known to have split.
+TradingView was then made the source for real, on run 34627185323, and
+measured: 187 of 1,400 symbols in 1,800 seconds before its batch hit the
+timeout and was killed, with 1,192 symbols timing out. DNSE took the
+remaining 1,213 and answered for 1,177 of them in 140 seconds. Thirteen
+percent of the universe for thirteen times the wall clock, so it is
+removed on the same rule that removed SSI and TCBS.
+
+That run was not wasted. TradingView quotes in dong and DNSE in
+thousands, so for the first time the lake held two scales at once - 199
+dong against 1,228 thousands - and normalise_to_dong split them
+correctly, per symbol, from the data. A fix that multiplied a named
+vendor by a constant would have doubled those 199.
 
 Output: data/historical_prices.json, keyed by symbol then quarter.
 """
@@ -170,6 +173,12 @@ def normalise_to_dong(symbol: str, df: pd.DataFrame) -> Optional[str]:
     nothing re-checks - the exact shape of the "TradingView" label this
     file used to carry - and it would silently double the prices the day
     a source starts sending dong.
+
+    Run 34627185323 tested exactly that. TradingView answered for 199
+    symbols in dong while DNSE answered for 1,228 in thousands, in one
+    pass, into one file - and this function split them correctly per
+    symbol without being told which vendor sent what. A constant keyed
+    to a vendor name would have multiplied those 199 by a thousand.
     """
     if df is None or df.empty or "close" not in df.columns:
         return None
@@ -270,7 +279,7 @@ def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, 
 #: their first forty while DNSE answered on the same pass and the same
 #: universe. See services/broker_prices.py for why they are deleted
 #: rather than kept behind a flag.
-BROKER_SOURCES = ("tradingview", "dnse")
+BROKER_SOURCES = ("dnse",)
 
 #: How many symbols a broker may fail on before the stage stops asking it.
 #: Large enough that a handful of delisted tickers cannot trip it, small
@@ -280,9 +289,8 @@ PROBE_BEFORE_GIVING_UP = 40
 
 def _fetch_from_broker(source: str, symbol: str) -> Optional[pd.DataFrame]:
     """Daily candles from one broker, shaped like every other fetcher here."""
-    from services import broker_prices, tradingview_prices
-    fetch = {"dnse": broker_prices.fetch_dnse,
-             "tradingview": tradingview_prices.fetch_tradingview}[source]
+    from services import broker_prices
+    fetch = {"dnse": broker_prices.fetch_dnse}[source]
     rows = fetch(symbol)
     if not rows:
         return None
@@ -362,21 +370,6 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
     # symbols rather than being asked 1,500 times: neither endpoint has
     # ever been reached from a machine that could test it, and a dead one
     # would otherwise cost the stage half an hour of timeouts.
-    # TradingView has no per-symbol endpoint - candles come off a
-    # WebSocket chart session - so its whole batch runs once, here,
-    # before the per-symbol loop reads it. Everything after this point
-    # treats it exactly like an HTTP source, which is the point: one
-    # tally, one scale check, one set of rules for every vendor.
-    if "tradingview" in BROKER_SOURCES and symbols_to_fetch:
-        from services import tradingview_prices
-        print(f"🌐 tradingview: opening chart sessions for "
-              f"{len(symbols_to_fetch)} symbols...")
-        tv_started = time.time()
-        tv_answered = tradingview_prices.prefetch(symbols_to_fetch, exchanges)
-        print(f"🌐 tradingview batch returned {tv_answered} of "
-              f"{len(symbols_to_fetch)} in "
-              f"{round(time.time() - tv_started, 1)}s")
-
     for source in BROKER_SOURCES:
         if not symbols_to_fetch:
             break
@@ -590,7 +583,8 @@ if __name__ == "__main__":
     except OSError:
         logger.warning("could not write price_universe.md", exc_info=True)
 
-    # The exchange is known here and TradingView needs it. Passing it turns
-    # a three-request guess per symbol into one request.
+    # The exchange is known here and no current source needs it. Kept
+    # because the master list knows it and a source that wants a venue
+    # would otherwise re-derive it - TradingView did, on run 34627185323.
     sync_all_symbols(syms, max_workers=10,
                      exchanges={sym: ex for sym, ex in valid_stocks})

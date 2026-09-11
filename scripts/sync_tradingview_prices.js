@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// TLS verification is left on. This line used to read
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0', which switches off
+// certificate checking for every connection the process makes, for the
+// life of the run.
 const TradingView = require('@mathieuc/tradingview');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');

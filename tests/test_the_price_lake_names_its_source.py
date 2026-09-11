@@ -313,50 +313,49 @@ class TestTheCarriedOverLakeCannotKeepTheOldScale:
         assert "stale_scale" in body
 
 
-class TestTradingViewIsAskedFirstAndCheckedLikeEveryoneElse:
-    """The header claimed TradingView for months while nothing called it.
+class TestTradingViewWasMeasuredAndRemoved:
+    """It was the source for exactly one run, and the run decided.
 
-    It is the source now, which is a stronger claim than the old label
-    and needs the same treatment: it goes through the one tally, the one
-    scale check, and it keeps a fallback behind it so a vendor that
-    answers for nobody costs a fallback rather than an empty lake.
+    Run 34627185323: 187 of 1,400 symbols in 1,800 seconds before the
+    batch was killed on its timeout, 1,192 of them timing out, while
+    DNSE answered for 1,177 of the remaining 1,213 in 140 seconds.
+    Thirteen percent of the universe for thirteen times the wall clock.
+    Removed on the rule that removed SSI and TCBS - a source is kept by
+    the number next to it, not by preference.
+
+    The run paid for itself anyway, and the payment is recorded in
+    normalise_to_dong rather than here: it put 199 dong-quoted symbols
+    and 1,228 thousands-quoted symbols into one file on one pass, and
+    the median rule separated them per symbol with no vendor names
+    involved. That is the only direct evidence the scale fix is a rule
+    about data rather than a constant about DNSE.
     """
 
-    def test_tradingview_is_asked_before_the_brokers(self):
+    def test_the_lake_is_back_on_the_source_that_was_measured_carrying_it(self):
         import scripts.sync_historical_prices as sync
-        assert sync.BROKER_SOURCES[0] == "tradingview", sync.BROKER_SOURCES
-        # A single source has nothing to fall back to, and this path has
-        # already lost a whole lake to one vendor being wrong in a way
-        # nothing re-checked.
-        assert len(sync.BROKER_SOURCES) >= 2, sync.BROKER_SOURCES
+        assert sync.BROKER_SOURCES == ("dnse",), sync.BROKER_SOURCES
 
-    def test_a_missing_node_client_is_not_reported_as_a_missing_vendor(self):
-        import services.tradingview_prices as tv
-        # available() is what separates "the runner has no node_modules"
-        # from "TradingView has no Vietnamese tickers". Without it every
-        # symbol fails identically and the wrong one gets believed.
-        assert tv.available() in (True, False)
-        assert tv.prefetch(["FPT"], {"FPT": "HOSE"}) == 0 or tv.available()
+    def test_the_measurement_is_written_down_where_the_next_attempt_reads_it(self):
+        # Without the numbers, "we tried TradingView" is a memory, and
+        # this path has already re-adopted a TradingView claim once on
+        # nothing but a label.
+        doc = __import__("scripts.sync_historical_prices",
+                         fromlist=["x"]).__doc__ or ""
+        assert "34627185323" in doc
+        assert "187" in doc and "1,400" in doc
 
-    def test_a_symbol_is_never_served_from_a_previous_batch(self):
-        import services.tradingview_prices as tv
-        tv._CACHE["ZZZ"] = [{"time": "2020-01-01", "close": 1.0}]
-        tv.prefetch([])
-        assert tv.fetch_tradingview("ZZZ") is None
+    def test_the_two_scale_run_is_recorded_next_to_the_rule_it_proved(self):
+        import scripts.sync_historical_prices as sync
+        doc = sync.normalise_to_dong.__doc__ or ""
+        assert "199" in doc and "1,228" in doc, doc
 
-    def test_the_feed_does_not_turn_off_certificate_checking(self):
-        for path in ("scripts/fetch_tradingview.js",
-                     "scripts/tradingview_candles.js"):
+    def test_no_javascript_here_turns_off_certificate_checking(self):
+        import glob
+        for path in sorted(glob.glob("scripts/*.js")):
             with open(path, encoding="utf-8") as handle:
-                body = handle.read()
-            # Only ever as prose describing what was removed - never as
-            # an assignment. It disables TLS for the whole process.
-            for line in body.splitlines():
-                if "NODE_TLS_REJECT_UNAUTHORIZED" in line:
-                    assert line.lstrip().startswith("//"), (path, line)
-
-    def test_the_workflow_installs_the_client_it_depends_on(self):
-        with open(".github/workflows/screener_sync.yml", encoding="utf-8") as h:
-            workflow = h.read()
-        assert "npm install" in workflow
-        assert "actions/setup-node" in workflow
+                for line in handle:
+                    if "NODE_TLS_REJECT_UNAUTHORIZED" in line:
+                        # Only ever as prose describing what was removed.
+                        # As an assignment it disables TLS for every
+                        # connection the process makes, for the whole run.
+                        assert line.lstrip().startswith("//"), (path, line)
