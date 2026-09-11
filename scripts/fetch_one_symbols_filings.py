@@ -91,7 +91,7 @@ def looks_like_a_statement(title: str) -> bool:
     return any(_fold(word) in folded for word in BCTC_POSITIVE_KEYWORDS)
 
 
-def list_filings(symbol: str, pages: int = 2) -> List[Dict[str, Any]]:
+def list_filings(symbol: str, pages: int = 20) -> List[Dict[str, Any]]:
     """Every disclosure CafeF lists for this symbol, newest first."""
     from services.stock_service import _fetch_cafef_single_page_raw
 
@@ -145,7 +145,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("symbol")
     ap.add_argument("--limit", type=int, default=3,
                     help="how many of the newest statement filings to parse")
-    ap.add_argument("--pages", type=int, default=2,
+    ap.add_argument("--pages", type=int, default=20,
                     help="pages of CafeF disclosures to scan")
     ap.add_argument("--keep", action="store_true",
                     help="keep the downloaded PDFs instead of deleting them")
@@ -175,8 +175,29 @@ def main(argv: Optional[List[str]] = None) -> int:
     print()
 
     if not statements:
-        print("- **No disclosure matched.** The titles are listed above; if a "
-              "statement is among them the keyword lists are what is wrong.")
+        # Two different failures look identical here, so they are separated
+        # before either is blamed. Either the feed carries statements and the
+        # keyword lists rejected them, or the feed carries none at all - it
+        # is Type=2, "related news", and on run 34643960323 two pages of it
+        # for FPT were thirty news headlines and not one filing.
+        print("- **No disclosure matched.** Which of the two it is:")
+        print()
+        print("| probe | titles containing it |")
+        print("|---|---:|")
+        for probe in ("tai chinh", "bctc", "kiem toan", "soat xet",
+                      "quy ", "nam 202", "giai trinh", "bao cao"):
+            hits = sum(1 for r in rows if probe in _fold(r.get("title", "")))
+            print(f"| {probe} | {hits} |")
+        print()
+        rejected = [r for r in rows
+                    if any(_fold(w) in _fold(r.get("title", ""))
+                           for w in BCTC_POSITIVE_KEYWORDS)]
+        print(f"- **{len(rejected)}** titles matched a positive keyword and were "
+              "then rejected by the negative list")
+        for row in rejected[:10]:
+            print(f"  - {str(row.get('title',''))[:90]}")
+        print()
+        print("- a sample of what the feed did return:")
         for row in rows[:10]:
             print(f"  - {str(row.get('title',''))[:90]}")
         return 1
