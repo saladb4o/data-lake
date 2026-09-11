@@ -1,4 +1,6 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+// TLS verification is left on. This line used to read
+// process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0', which switches off
+// certificate checking for every connection the process makes.
 const TradingView = require('@mathieuc/tradingview');
 
 /**

@@ -386,6 +386,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # TradingView serves candles over a WebSocket, and the client that
+      # speaks that protocol is a Node package. Without this step the
+      # price source is silently absent and every symbol reads as a
+      # refusal - a fact about the runner reported as a fact about the
+      # vendor.
+      - name: Node for the TradingView price feed
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install the TradingView client
+        run: npm install --no-audit --no-fund
+
       - name: Universe and screener snapshot
         timeout-minutes: 40
         env:
