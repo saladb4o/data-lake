@@ -121,7 +121,19 @@ def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
     return None
 
 def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, Any]:
-    """Computes exact quarterly close prices and percentage returns from daily real candles with VND scale normalization."""
+    """Quarterly open/high/low/close/volume and returns from daily candles.
+
+    Whatever unit the source sent, in the same unit out. This docstring used to
+    promise that the values were rescaled into VND; the function has
+    never rescaled anything, and nothing downstream checks. That matters because
+    `fair_value_backtest_service` compares the price here *absolutely*
+    against a fair value built from VND fundamentals, so a source quoting
+    thousands would silently make every stock look 99.9% undervalued. The
+    promise is removed rather than kept, because a scale check belongs
+    where the sources are compared, not buried per symbol - and a label
+    nobody can check is what put yfinance behind a TradingView banner for
+    a year.
+    """
     df['time_dt'] = pd.to_datetime(df['time'])
     df = df.sort_values('time_dt').reset_index(drop=True)
 
@@ -382,6 +394,18 @@ if __name__ == "__main__":
     symbols_file = os.path.join(DATA_DIR, "all_symbols.json")
     valid_stocks = []
     seen = set()
+    # Why each symbol the master list carries was not asked for a price.
+    # The universe the valuation engine scores is 1,524 symbols; this
+    # filter has been handing the price sync 1,400 of them, and the 124
+    # that never get asked have been reported as "no price" ever since -
+    # indistinguishable, from every table downstream, from a symbol the
+    # sources refused. A rejection nobody can see is a rejection nobody
+    # can argue with, so each one is counted under the rule that made it.
+    rejected: Dict[str, List[str]] = {}
+
+    def reject(reason: str, sym: str) -> None:
+        rejected.setdefault(reason, []).append(sym)
+
     if os.path.exists(symbols_file):
         with open(symbols_file, "r", encoding="utf-8") as f:
             raw = json.load(f)
@@ -389,16 +413,46 @@ if __name__ == "__main__":
                 sym = r.get("symbol", "").upper().strip()
                 ex = r.get("exchange", "").upper().strip()
                 stype = (r.get("type") or "STOCK").upper()
-                if len(sym) == 3 and sym.isalpha() and ex in ["HOSE", "HNX", "UPCOM"] and stype in ["STOCK", "CP", "CO_PHIEU", ""]:
-                    if sym not in seen:
-                        seen.add(sym)
-                        valid_stocks.append((sym, ex))
+                if sym in seen:
+                    continue
+                if not (len(sym) == 3 and sym.isalpha()):
+                    reject("not a 3-letter alphabetic ticker", sym or "(blank)")
+                    continue
+                if ex not in ("HOSE", "HNX", "UPCOM"):
+                    reject(f"exchange {ex or '(blank)'}", sym)
+                    continue
+                if stype not in ("STOCK", "CP", "CO_PHIEU", ""):
+                    reject(f"type {stype}", sym)
+                    continue
+                seen.add(sym)
+                valid_stocks.append((sym, ex))
 
     order = {"HOSE": 1, "HNX": 2, "UPCOM": 3}
     valid_stocks.sort(key=lambda x: order.get(x[1], 99))
     syms = [x[0] for x in valid_stocks]
-    
-    print(f"📋 Loaded {len(syms)} clean 3-letter stock symbols across HOSE, HNX, UPCOM.")
+
+    total = len(syms) + sum(len(v) for v in rejected.values())
+    lines = ["## Which symbols the price sync is allowed to ask for", "",
+             f"- master list: **{total}**",
+             f"- asked for a price: **{len(syms)}**",
+             f"- filtered out before any fetch: **{total - len(syms)}**", ""]
+    if rejected:
+        lines += ["| filtered out by | symbols | which |", "|---|---:|---|"]
+        for reason, syms_out in sorted(rejected.items(),
+                                       key=lambda kv: -len(kv[1])):
+            shown = ", ".join(sorted(syms_out)[:40])
+            if len(syms_out) > 40:
+                shown += f", ... (+{len(syms_out) - 40})"
+            lines.append(f"| {reason} | {len(syms_out)} | {shown} |")
+        lines.append("")
+    print("\n".join(lines))
+    try:
+        with open(os.path.join(DATA_DIR, "price_universe.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        logger.warning("could not write price_universe.md", exc_info=True)
+
     # The exchange is known here and TradingView needs it. Passing it turns
     # a three-request guess per symbol into one request.
     sync_all_symbols(syms, max_workers=10,

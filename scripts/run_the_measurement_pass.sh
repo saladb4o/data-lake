@@ -78,8 +78,9 @@ stage universe "screener universe" \
 # leaving it in the log alone is what made it unreadable last pass.
 stage prices "historical prices" \
   bash -c "python scripts/sync_historical_prices.py; rc=\$?; \
-    [ -f '$DATA/price_sources.md' ] \
-      && cat '$DATA/price_sources.md' | tee -a '$SUMMARY'; exit \$rc"
+    for t in price_universe price_sources; do \
+      [ -f '$DATA'/\$t.md ] && cat '$DATA'/\$t.md | tee -a '$SUMMARY'; \
+    done; exit \$rc"
 
 # --- the lake, and the probe that judges two of its fields ----------------
 LAKE_ARGS=(--universe --out "$DATA/historical_fundamentals.json"

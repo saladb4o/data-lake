@@ -152,3 +152,36 @@ class TestTheLakeRecordsWhoAnswered:
             assert sync._fetch_from_broker.__module__
             import services.broker_prices as bp
             assert hasattr(bp, f"fetch_{source}")
+
+
+class TestNoUncheckableClaimSurvivesInThePricePath:
+    """The TradingView banner was believed because nobody could check it.
+
+    `compute_stock_quarterly_returns` advertised "VND scale normalization"
+    in its docstring and performed none - the same species of defect, in
+    the same file, and a more expensive one: the backtest compares the
+    lake price *absolutely* against a fair value built from VND
+    fundamentals, so a source quoting thousands would read as a 99.9%
+    discount on every symbol rather than as an error.
+    """
+
+    def test_the_returns_function_does_not_promise_a_normalisation(self):
+        import inspect
+
+        import scripts.sync_historical_prices as sync
+
+        doc = (sync.compute_stock_quarterly_returns.__doc__ or "")
+        body = inspect.getsource(sync.compute_stock_quarterly_returns)
+        claims = "scale normalization" in doc.lower()
+        # Whatever the docstring says, it has to be visible in the body.
+        performs = any(tok in body for tok in ("1000", "1_000", "scale_factor"))
+        assert not claims or performs
+
+    def test_every_filtered_out_symbol_is_reported_rather_than_dropped(self):
+        # 1,400 of the universe's 1,524 symbols reach the price sync. The
+        # other 124 were reported as "no price" by every table downstream,
+        # indistinguishable from a symbol the sources actually refused.
+        body = open(
+            "scripts/sync_historical_prices.py", encoding="utf-8").read()
+        assert "price_universe.md" in body
+        assert "filtered out before any fetch" in body
