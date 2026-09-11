@@ -93,21 +93,23 @@ if [ -f "$DATA/code_candidates_probe.json" ]; then
       --json '$DATA/code_candidates.json' | tee -a '$SUMMARY'"
 fi
 
-# Off by default. FiinGroup, the one route here that this codebase does
-# not already have, is behind a paid plan - so the probe cannot answer
-# the question it was written for, and spending requests on it every pass
-# would be spending them on a vendor we cannot use. The script is kept
-# rather than deleted: if a plan is ever bought, the comparison it makes
-# (which of the vendor's named rows carries each of our numbers) is the
-# check on the code map that VNDIRECT cannot provide.
+# Runs every pass, because half of it is free. Vietcap and KBS serve
+# quarterly statements through vnstock whose LINE ITEMS ARE NAMED IN
+# WORDS, and VNDIRECT names none of its - so asking which of their named
+# lines carries each of our numbers is the only independent check the
+# numeric code map has. That half costs nothing and needs no plan.
 #
-#   PROBE_SOURCES=1  to run it.
+# FiinGroup is the other half, and it is behind a paid plan, so it is
+# gated: PROBE_SOURCES=1 adds --include-fiin. Without it no request is
+# spent on a vendor we cannot use.
+PROBE_FLAGS=""
 if [ "${PROBE_SOURCES:-0}" = "1" ]; then
+  PROBE_FLAGS="--include-fiin"
+fi
 stage probe "probe sources we do not use" \
   bash -c "set -o pipefail; python scripts/probe_new_sources.py \
-    --lake '$DATA/historical_fundamentals.json' \
+    --lake '$DATA/historical_fundamentals.json' $PROBE_FLAGS \
     --json '$DATA/new_sources.json' | tee -a '$SUMMARY'"
-fi
 
 stage backtest "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \

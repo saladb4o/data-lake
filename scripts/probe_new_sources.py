@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Ask whether a vendor we do not use can be reached, and what it names.
+"""Ask a vendor that names its line items which of our numbers it carries.
 
-Two repositories were suggested as possible new sources. quantvn turned
-out to be a client for Vietcap, DNSE and TCBS - all already used - plus a
-reseller backend behind its own API key. vietfin carries one route this
-codebase has never touched: FiinGroup, served through SSI's iBoard at
-fiin-fundamental.ssi.com.vn, which returns balance sheet, income and cash
-flow statements quarterly, as an Excel file, with no API key.
+VNDIRECT, the only source the fundamentals lake reads, names nothing: a
+balance sheet arrives as a numeric VAS code scheme, and this audit has
+been decoding it by magnitude and by arithmetic identity. The first
+reading of it was wrong in all four parts. Any vendor that spells out
+"Depreciation and Amortisation" is therefore an independent check on the
+code map itself, which is what this probe is for.
 
-Why that matters is not coverage. It is that FiinGroup NAMES its line
-items in words, and VNDIRECT names none of its. This whole audit has been
-decoding a numeric scheme by magnitude and by arithmetic identity, and
-the first reading of it was wrong in all four parts. A source that spells
-out "TOTAL ASSETS" is an independent check on the code map itself.
+Two such vendors are free. ``vnstock.Finance`` accepts exactly VCI
+(Vietcap) and KBS, and both serve quarterly statements with named
+columns. Those run every pass.
 
-So this probe does not presume a mapping between the two vendors. For
+A third, FiinGroup through SSI, is behind a paid plan, so it is opt-in
+(``--include-fiin``); the code is kept because if a plan is ever bought
+it answers the same question against a fourth opinion.
+
+This probe presumes no mapping in either direction. For
 each field in our lake it asks whether ANY row of the vendor's statement
 carries that value for the same quarter, and reports the row's name. The
 map is discovered from the data rather than guessed, and a field that
@@ -169,10 +171,37 @@ def name_our_fields(frame, records: Dict[str, Dict[str, Any]],
         if name and name.lower() != "nan":
             vendor_rows.append((name, value))
 
+    return (_match_values(vendor_rows, records.get(quarter_code) or {}),
+            len(vendor_rows))
+
+
+# --- vendors that name their line items, and cost nothing ---------------
+#: ``vnstock.Finance`` accepts exactly these two. Vietcap and KBS both
+#: return statements whose LINE ITEMS ARE COLUMN NAMES IN WORDS, which is
+#: the same independent check on the numeric code map that FiinGroup
+#: would have been, without a subscription. The shape is transposed
+#: relative to FiinGroup's Excel: there a quarter is a column and a line
+#: item a row; here a quarter is a row and a line item a column. So the
+#: value matching below is shared and only the extraction differs.
+VNSTOCK_SOURCES: Tuple[str, ...] = ("VCI", "KBS")
+
+#: Columns that identify the period rather than report a figure.
+PERIOD_COLUMNS = ("ticker", "yearreport", "lengthreport", "year", "quarter",
+                  "period", "cp", "ky", "nam")
+
+
+def _match_values(vendor_rows: List[Tuple[str, float]],
+                  record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """For each of our numbers, which named vendor line carries it?
+
+    Shared by both vendor shapes. No mapping is assumed in either
+    direction: a field that matches nothing is the finding.
+    """
     out = []
-    record = records.get(quarter_code) or {}
     for field, ours in sorted(record.items()):
-        if not isinstance(ours, (int, float)) or ours == 0:
+        if not isinstance(ours, (int, float)) or isinstance(ours, bool):
+            continue
+        if ours == 0:
             continue
         matches = [name for name, value in vendor_rows
                    if abs(value - float(ours)) <= TOLERANCE * max(
@@ -180,7 +209,137 @@ def name_our_fields(frame, records: Dict[str, Dict[str, Any]],
         out.append({"field": field, "ours": float(ours),
                     "vendor_rows_with_this_value": matches[:3],
                     "matched": bool(matches)})
-    return out, len(vendor_rows)
+    return out
+
+
+def _quarter_row(frame, quarter_code: str):
+    """The row of a vnstock statement for ``2024-Q1``, or None.
+
+    vnstock has shipped several column spellings for the period; rather
+    than pick one, look for any pair of columns that carries the year and
+    the quarter as numbers.
+    """
+    try:
+        year_text, quarter_text = quarter_code.split("-Q")
+        year, quarter = int(year_text), int(quarter_text)
+    except (ValueError, AttributeError):
+        return None
+    lowered = {str(c).strip().lower(): c for c in frame.columns}
+    year_column = lowered.get("yearreport") or lowered.get("year") or lowered.get("nam")
+    quarter_column = (lowered.get("lengthreport") or lowered.get("quarter")
+                      or lowered.get("ky") or lowered.get("cp"))
+    if year_column is None or quarter_column is None:
+        return None
+    for _, row in frame.iterrows():
+        try:
+            if int(row[year_column]) == year and int(row[quarter_column]) == quarter:
+                return row
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def name_our_fields_by_column(frame, records: Dict[str, Dict[str, Any]],
+                              quarter_code: str
+                              ) -> Tuple[List[Dict[str, Any]], int]:
+    """Same question as ``name_our_fields``, for a quarter-per-row frame."""
+    row = _quarter_row(frame, quarter_code)
+    if row is None:
+        return [], 0
+    vendor_rows: List[Tuple[str, float]] = []
+    for column in frame.columns:
+        if str(column).strip().lower() in PERIOD_COLUMNS:
+            continue
+        try:
+            value = float(row[column])
+        except (TypeError, ValueError):
+            continue
+        vendor_rows.append((str(column).strip(), value))
+    return _match_values(vendor_rows, records.get(quarter_code) or {}), len(vendor_rows)
+
+
+def vnstock_statements(symbol: str, source: str) -> Dict[str, Any]:
+    """{statement name: DataFrame} for what this vendor will serve.
+
+    A statement the vendor refuses is recorded as the exception it
+    raised, because "KBS has no cash flow" is a result worth keeping.
+    """
+    from vnstock import Finance
+    finance = Finance(source=source, symbol=symbol.upper(), period="quarter")
+    out: Dict[str, Any] = {}
+    for name in ("cash_flow", "balance_sheet", "income_statement"):
+        try:
+            out[name] = getattr(finance, name)()
+        except Exception as exc:
+            out[name] = f"{type(exc).__name__}: {exc}"
+    return out
+
+def report_free_vendors(args, findings: Dict[str, Any]) -> None:
+    """Ask Vietcap and KBS which of their named lines carry our numbers.
+
+    This is the check the code map has never had. It costs nothing and
+    needs no plan, so unlike the FiinGroup section below it runs every
+    pass. A vendor that cannot be reached, or a statement it will not
+    serve, is recorded as that - the probe reports what happened rather
+    than only what worked.
+    """
+    print("## Vendors that name their line items")
+    print()
+    findings["named_vendors"] = {}
+    records_cache: Dict[str, Dict[str, Any]] = {}
+
+    for symbol in args.symbols:
+        symbol = symbol.upper()
+        if args.lake and os.path.exists(args.lake):
+            records_cache[symbol] = _lake_records(args.lake, symbol)
+        records = records_cache.get(symbol) or {}
+        quarter = args.quarter or (sorted(records)[-1] if records else None)
+
+        for source in VNSTOCK_SOURCES:
+            key = f"{symbol}/{source}"
+            print(f"### {key}")
+            try:
+                statements = vnstock_statements(symbol, source)
+            except Exception as exc:
+                print(f"- unreachable: {type(exc).__name__}: {exc}")
+                findings["named_vendors"][key] = {
+                    "error": f"{type(exc).__name__}: {exc}"}
+                continue
+
+            entry: Dict[str, Any] = {}
+            for name, frame in statements.items():
+                if isinstance(frame, str):
+                    print(f"- `{name}`: {frame}")
+                    entry[name] = {"error": frame}
+                    continue
+                columns = [str(c) for c in frame.columns]
+                print(f"- `{name}` names {len(columns)} columns, "
+                      f"for example: "
+                      + ", ".join(f"`{c}`" for c in columns[3:9]))
+                item: Dict[str, Any] = {"columns": columns[:80]}
+                if quarter:
+                    rows, count = name_our_fields_by_column(
+                        frame, records, quarter)
+                    item["quarter"] = quarter
+                    item["fields"] = rows
+                    if rows:
+                        print()
+                        print(f"| our field ({quarter}) | our value | "
+                              f"vendor columns carrying it |")
+                        print("|---|---:|---|")
+                        for row in rows:
+                            found = (", ".join(
+                                f"`{n}`" for n in
+                                row["vendor_rows_with_this_value"])
+                                or "**no column carries this number**")
+                            print(f"| {row['field']} | {row['ours']:,.0f} | "
+                                  f"{found} |")
+                        print()
+                    elif count == 0:
+                        print(f"- no row for {quarter}")
+                entry[name] = item
+            findings["named_vendors"][key] = entry
+        print()
 
 
 def main() -> int:
@@ -190,9 +349,19 @@ def main() -> int:
                         help="Quarter to compare, e.g. 2025-Q2.")
     parser.add_argument("--lake", default=None, help="historical_fundamentals.json")
     parser.add_argument("--json", default=None)
+    parser.add_argument(
+        "--include-fiin", action="store_true",
+        help="Also knock on FiinGroup and the other paid/unused hosts.")
     args = parser.parse_args()
 
     findings: Dict[str, Any] = {}
+    report_free_vendors(args, findings)
+
+    if not args.include_fiin:
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as handle:
+                json.dump(findings, handle, ensure_ascii=False, indent=2)
+        return 0
 
     print("## Sources we do not use yet")
     print()

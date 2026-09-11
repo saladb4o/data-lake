@@ -19,6 +19,7 @@ PASS = os.path.join(ROOT, "scripts", "run_the_measurement_pass.sh")
 
 STAGES = ("sync_unified_market_data", "sync_historical_prices",
           "build_historical_fundamentals", "score_code_candidates",
+          "probe_new_sources",
           "measure_the_backtest", "audit_valuation_coverage")
 
 
@@ -41,13 +42,21 @@ def _fail(sandbox, name, code=3):
         encoding="utf-8")
 
 
-def _run(sandbox):
+def _echo_argv(sandbox, name="probe_new_sources"):
+    """Make a stage print the arguments the pass handed it."""
+    (sandbox / "scripts" / f"{name}.py").write_text(
+        "#!/usr/bin/env python3\nimport sys\nprint(' '.join(sys.argv[1:]))\n",
+        encoding="utf-8")
+
+
+def _run(sandbox, **env):
     return subprocess.run(
         ["bash", "scripts/run_the_measurement_pass.sh"],
         cwd=sandbox, capture_output=True, text=True,
         env={**os.environ,
              "DATA_LOCAL_DIR": str(sandbox / "data"),
-             "GITHUB_STEP_SUMMARY": str(sandbox / "summary.md")})
+             "GITHUB_STEP_SUMMARY": str(sandbox / "summary.md"),
+             **env})
 
 
 class TestAStageThatDiesIsNamed:
@@ -115,26 +124,27 @@ class TestTheStagesRunInDependencyOrder:
 
 
 class TestTheSourceProbeIsOptIn:
-    """FiinGroup needs a paid plan, so the probe cannot answer what it was
-    written for. It stays in the tree - the comparison it makes is the
-    check on the code map that VNDIRECT cannot provide - but a pass must
-    not spend requests on a vendor we cannot use."""
+    """Half of the probe is free and half needs a plan.
 
-    def test_it_does_not_run_by_default(self, sandbox):
+    Vietcap and KBS name their line items and cost nothing, so asking
+    them which of their named lines carries each of our numbers - the
+    only independent check the numeric code map has - runs every pass.
+    FiinGroup is behind a subscription, so the pass must not spend a
+    request on it unless it was asked to.
+    """
+
+    def test_the_free_half_runs_by_default(self, sandbox):
         (sandbox / "scripts" / "probe_new_sources.py").write_text(
             "#!/usr/bin/env python3\nprint('PROBED')\n", encoding="utf-8")
-        assert "PROBED" not in _run(sandbox).stdout
+        assert "PROBED" in _run(sandbox).stdout
 
-    def test_it_runs_when_asked_for(self, sandbox):
-        (sandbox / "scripts" / "probe_new_sources.py").write_text(
-            "#!/usr/bin/env python3\nprint('PROBED')\n", encoding="utf-8")
-        result = subprocess.run(
-            ["bash", "scripts/run_the_measurement_pass.sh"],
-            cwd=sandbox, capture_output=True, text=True,
-            env={**os.environ, "PROBE_SOURCES": "1",
-                 "DATA_LOCAL_DIR": str(sandbox / "data"),
-                 "GITHUB_STEP_SUMMARY": str(sandbox / "summary.md")})
-        assert "PROBED" in result.stdout
+    def test_the_paid_half_is_not_asked_for_by_default(self, sandbox):
+        _echo_argv(sandbox)
+        assert "--include-fiin" not in _run(sandbox).stdout
+
+    def test_the_paid_half_is_asked_for_when_requested(self, sandbox):
+        _echo_argv(sandbox)
+        assert "--include-fiin" in _run(sandbox, PROBE_SOURCES="1").stdout
 
     def test_the_pass_still_reports_it_when_it_is_asked_for_and_fails(self, sandbox):
         (sandbox / "scripts" / "probe_new_sources.py").write_text(
