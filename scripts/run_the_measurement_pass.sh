@@ -93,16 +93,6 @@ if [ -f "$DATA/code_candidates_probe.json" ]; then
       --json '$DATA/code_candidates.json' | tee -a '$SUMMARY'"
 fi
 
-# Vietcap and KBS serve quarterly statements through vnstock whose LINE
-# ITEMS ARE NAMED IN WORDS, and VNDIRECT names none of its - so asking
-# which of their named lines carries each of our numbers is the only
-# independent check the numeric code map has. Both are free, so this
-# runs every pass rather than behind a flag.
-stage probe "ask the vendors that name their lines" \
-  bash -c "set -o pipefail; python scripts/probe_new_sources.py \
-    --lake '$DATA/historical_fundamentals.json' \
-    --json '$DATA/named_vendors.json' | tee -a '$SUMMARY'"
-
 stage backtest "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
     --lags $LAGS --json '$DATA/backtest_sweep.json' | tee -a '$SUMMARY'"
@@ -130,8 +120,7 @@ if [ ${#WANTED[@]} -eq 0 ] || wanted audit; then
   echo "| file | bytes |"
   echo "|---|---:|"
   for f in historical_fundamentals screener_snapshot historical_prices \
-           coverage backtest_sweep code_candidates code_candidates_probe \
-           named_vendors; do
+           coverage backtest_sweep code_candidates code_candidates_probe; do
     if [ -f "$DATA/$f.json" ]; then
       echo "| $f.json | $(wc -c < "$DATA/$f.json") |"
     else

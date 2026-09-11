@@ -19,7 +19,6 @@ PASS = os.path.join(ROOT, "scripts", "run_the_measurement_pass.sh")
 
 STAGES = ("sync_unified_market_data", "sync_historical_prices",
           "build_historical_fundamentals", "score_code_candidates",
-          "probe_new_sources",
           "measure_the_backtest", "audit_valuation_coverage")
 
 
@@ -39,13 +38,6 @@ def sandbox(tmp_path):
 def _fail(sandbox, name, code=3):
     (sandbox / "scripts" / f"{name}.py").write_text(
         f"#!/usr/bin/env python3\nimport sys\nsys.exit({code})\n",
-        encoding="utf-8")
-
-
-def _echo_argv(sandbox, name="probe_new_sources"):
-    """Make a stage print the arguments the pass handed it."""
-    (sandbox / "scripts" / f"{name}.py").write_text(
-        "#!/usr/bin/env python3\nimport sys\nprint(' '.join(sys.argv[1:]))\n",
         encoding="utf-8")
 
 
@@ -121,28 +113,6 @@ class TestTheStagesRunInDependencyOrder:
         out = _run(sandbox).stdout
         assert (out.index("coverage audit")
                 > out.index("backtest sweep"))
-
-
-class TestTheProbeRunsEveryPass:
-    """Vietcap and KBS name their line items and cost nothing, so asking
-    them which of their named lines carries each of our numbers - the only
-    independent check the numeric code map has - is not something to
-    remember to switch on."""
-
-    def test_it_runs_by_default(self, sandbox):
-        (sandbox / "scripts" / "probe_new_sources.py").write_text(
-            "#!/usr/bin/env python3\nprint('PROBED')\n", encoding="utf-8")
-        assert "PROBED" in _run(sandbox).stdout
-
-    def test_it_is_given_the_lake_to_compare_against(self, sandbox):
-        _echo_argv(sandbox)
-        assert "--lake" in _run(sandbox).stdout
-
-    def test_a_vendor_that_refuses_does_not_fail_the_pass(self, sandbox):
-        _fail(sandbox, "probe_new_sources", code=4)
-        result = _run(sandbox)
-        assert "did not complete" in result.stdout
-        assert result.returncode == 0, "a probe is a measurement, not an input"
 
 
 class TestAStageCanBeRunOnItsOwn:

@@ -129,19 +129,45 @@ def score(probe: Dict[str, Any]) -> Dict[str, Any]:
     return results
 
 
-def report(results: Dict[str, Any]) -> None:
+def _label(column: str, code_names: Dict[str, str]) -> str:
+    """The vendor's own name for the code a probe column stands on.
+
+    Columns are named ``field_code`` by the builder's diagnostic probe,
+    so the code is the part after the last underscore. A column that is
+    not code-shaped, or a code the vendor never labelled, simply has no
+    name to show - that is a blank cell, not a guess.
+    """
+    code = column.rsplit("_", 1)[-1]
+    return code_names.get(code, "") if code.isdigit() else ""
+
+
+def report(results: Dict[str, Any],
+           code_names: Optional[Dict[str, str]] = None) -> None:
+    """Print the tally, with the vendor's label beside each candidate.
+
+    VNDIRECT sends itemName on every row, so the question this script
+    was written to settle by arithmetic - which code is capex - has a
+    reading next to it now. When the arithmetic and the label disagree,
+    that disagreement is the finding; the label is not authority to
+    overrule the identity, and the identity is not reason to ignore a
+    label that says the code means something else entirely.
+    """
+    code_names = code_names or {}
     for anchor, block in results.items():
         print(f"### candidates against d({anchor})")
         print()
         print(f"- consecutive-quarter deltas available: "
               f"**{block['deltas_available']:,}**")
         print()
-        print("| code | present | non-zero | matches the delta | rate |")
-        print("|---|---:|---:|---:|---:|")
+        print("| code | the vendor calls it | present | non-zero | "
+              "matches the delta | rate |")
+        print("|---|---|---:|---:|---:|---:|")
         for name, tally in block["candidates"].items():
             rate = (100.0 * tally["held"] / tally["tested"]
                     if tally["tested"] else None)
-            print(f"| {name} | {tally['present']:,} | {tally['nonzero']:,} | "
+            label = _label(name, code_names)
+            print(f"| {name} | {label or '-'} | {tally['present']:,} | "
+                  f"{tally['nonzero']:,} | "
                   f"{tally['held']:,}/{tally['tested']:,} | "
                   + (f"{rate:.1f}% |" if rate is not None else "- |"))
         print()
@@ -168,7 +194,9 @@ def report(results: Dict[str, Any]) -> None:
                   f"manages {100.0 * rates[-1]:.1f}%, under the "
                   f"{100.0 * FLOOR:.0f}% floor. Either these codes are all "
                   "wrong, or the anchor does not mean what this test "
-                  "assumes. Check the anchor before changing the codes.")
+                  "assumes. Check the anchor before changing the codes - "
+                  "and read what the vendor calls each one above, which "
+                  "is a direct answer where the arithmetic is not.")
             print()
             continue
 
@@ -198,11 +226,18 @@ def main() -> int:
     print("## Code candidates, judged by the balance sheet")
     print()
     results = score(probe)
-    report(results)
+    code_names = probe.get("code_names") or {}
+    report(results, code_names)
+    if not code_names:
+        print("- the probe carries no vendor labels. Rebuild the lake: the "
+              "builder records itemName now, and without it every row above "
+              "is arithmetic with nothing to check it against.")
+        print()
 
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
-            json.dump(results, handle, ensure_ascii=False, indent=2)
+            json.dump({"anchors": results, "code_names": code_names},
+                      handle, ensure_ascii=False, indent=2)
     return 0
 
 

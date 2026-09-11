@@ -182,13 +182,22 @@ def _fetch_raw(symbol: str, size: int) -> List[Dict[str, Any]]:
 
 def build_symbol(symbol: str, size: int = 4000,
                  lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
-                 diagnostics: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 diagnostics: Optional[Dict[str, Any]] = None,
+                 code_names: Optional[Dict[int, str]] = None) -> Dict[str, Any]:
     """Returns {quarter_code: record} for one symbol; empty when unavailable.
 
     When ``diagnostics`` is given, the raw values of DIAGNOSTIC_CODES are
     recorded into it per quarter as well. They are deliberately kept out
     of the lake: they exist to judge two of its fields, and a yardstick
     that lives in the thing it measures stops being one.
+
+    When ``code_names`` is given, the vendor's own label for each item
+    code is collected into it. VNDIRECT sends itemName on every row it
+    returns - unified_data_service.fetch_vndirect_financials has been
+    reading it all along - so the numeric scheme this audit has been
+    decoding by magnitude and by arithmetic identity was never actually
+    anonymous. Recording the labels costs one extra dict assignment per
+    code and turns "is 32100 capex?" from an inference into a reading.
     """
     rows = _fetch_raw(symbol.upper().strip(), size)
     if not rows:
@@ -202,9 +211,17 @@ def build_symbol(symbol: str, size: int = 4000,
         if not fiscal or value is None:
             continue
         try:
-            by_code[int(row.get("itemCode", 0))][fiscal] = float(value)
+            item = int(row.get("itemCode", 0))
+            by_code[item][fiscal] = float(value)
         except (TypeError, ValueError):
             continue
+        if code_names is not None and item not in code_names:
+            # The vendor files Vietnamese and English under different
+            # keys and does not always send both; take whichever came.
+            label = (row.get("itemName") or row.get("itemVnName")
+                     or row.get("itemEnName") or "")
+            if isinstance(label, str) and label.strip():
+                code_names[item] = label.strip()
 
     shares_by_date = by_code.get(52001) or by_code.get(52002) or {}
 
@@ -390,13 +407,16 @@ def main() -> int:
 
     diagnostics: Optional[Dict[str, Any]] = (
         {} if args.diagnostics_out else None)
+    #: itemCode -> the vendor's own label, accumulated across symbols.
+    code_names: Optional[Dict[int, str]] = {} if args.diagnostics_out else None
 
     ok = 0
     for index, symbol in enumerate(symbols, start=1):
         symbol = symbol.upper().strip()
         try:
             quarters = build_symbol(symbol, lag_days=args.lag_days,
-                                    diagnostics=diagnostics)
+                                    diagnostics=diagnostics,
+                                    code_names=code_names)
         except Exception as exc:  # one bad symbol must not end the pass
             logger.warning("[%d/%d] %s failed: %s", index, len(symbols), symbol, exc)
             continue
@@ -423,9 +443,12 @@ def main() -> int:
         with open(args.diagnostics_out, "w", encoding="utf-8") as handle:
             json.dump({"codes": {k: list(v) for k, v in
                                  DIAGNOSTIC_CODES.items()},
+                       "code_names": {str(k): v for k, v in
+                                      sorted((code_names or {}).items())},
                        "symbols": diagnostics}, handle, ensure_ascii=False)
-        logger.info("wrote %s: %d symbols probed",
-                    args.diagnostics_out, len(diagnostics))
+        logger.info("wrote %s: %d symbols probed, %d codes named",
+                    args.diagnostics_out, len(diagnostics),
+                    len(code_names or {}))
 
     logger.info("wrote %s: %d symbols (%d fetched this pass)",
                 out_path, len(lake["symbols"]), ok)
