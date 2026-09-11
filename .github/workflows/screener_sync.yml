@@ -448,6 +448,16 @@ jobs:
           LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
         run: bash scripts/run_the_measurement_pass.sh backtest
 
+      - name: Four questions, no fetches
+        timeout-minutes: 15
+        if: always()
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          LAKE_LIMIT: ${{ github.event.inputs.census_limit || '0' }}
+        run: bash scripts/run_the_measurement_pass.sh probe
+
       - name: Coverage audit
         timeout-minutes: 30
         if: always()
@@ -538,7 +548,7 @@ jobs:
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
-        run: bash scripts/run_the_measurement_pass.sh codes lakefill backtest audit
+        run: bash scripts/run_the_measurement_pass.sh codes lakefill backtest probe audit
 
       - name: Upload what the measurements produced
         if: always()

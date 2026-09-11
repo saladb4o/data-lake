@@ -110,6 +110,14 @@ stage backtest "backtest sweep" \
   bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
     --lags $LAGS --json '$DATA/backtest_sweep.json' | tee -a '$SUMMARY'"
 
+# Reads the snapshot and the price lake, fetches nothing, and answers
+# four questions that have each been guessed at least once: the price
+# scale, split adjustment, what really blocks fcf, and which symbols are
+# one driver short.
+stage probe "four questions, no fetches" \
+  bash -c "set -o pipefail; python scripts/probe_the_open_questions.py \
+    | tee -a '$SUMMARY'"
+
 # Last, deliberately. Whatever is printed last is the only thing
 # guaranteed to be readable from a log tail, and the coverage headline is
 # the number the exercise is measured by.

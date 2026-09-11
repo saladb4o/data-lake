@@ -20,7 +20,7 @@ PASS = os.path.join(ROOT, "scripts", "run_the_measurement_pass.sh")
 STAGES = ("sync_unified_market_data", "sync_historical_prices",
           "build_historical_fundamentals", "score_code_candidates",
           "measure_the_lake_fill", "measure_the_backtest",
-          "audit_valuation_coverage")
+          "probe_the_open_questions", "audit_valuation_coverage")
 
 
 @pytest.fixture
@@ -82,6 +82,7 @@ class TestLosingAnInputIsWorseThanLosingAMeasurement:
 
     @pytest.mark.parametrize("stage", ["score_code_candidates",
                                        "measure_the_backtest",
+                                       "probe_the_open_questions",
                                        "audit_valuation_coverage"])
     def test_a_measurement_failing_still_delivers_the_lakes(self, sandbox, stage):
         """The lakes were built; the run must not throw that away."""
