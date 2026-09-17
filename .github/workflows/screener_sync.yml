@@ -72,6 +72,22 @@ on:
         description: 'Số trang CafeF mỗi feed (mặc định 20)'
         required: false
         default: '20'
+      reconcile_for:
+        # Several symbols, each statement checked against the identities
+        # TT200 guarantees, and the consolidated ones put against VNDIRECT
+        # with a control. Counting extracted items cannot tell a correct
+        # row from a misbound one - run 35220475916 returned 20 cash flow
+        # items of which codes 1, 2, 3 and 60 were wrong, and the count
+        # looked the same either way. A sum that closes can tell them
+        # apart, and it is the only thing here that settles whether
+        # itemCode 32100 is really VAS 21.
+        description: 'Đối chiếu BCTC với VNDIRECT: danh sách mã, vd FPT,HPG,VCB (trống = tắt)'
+        required: false
+        default: ''
+      reconcile_limit:
+        description: 'Số tài liệu parse mỗi mã khi đối chiếu (mặc định 2)'
+        required: false
+        default: '2'
       analyse_run:
         # The expensive stages are fetches; every measurement that reads
         # them is seconds of arithmetic. Paying 43 minutes of universe +
@@ -95,7 +111,7 @@ permissions:
 jobs:
   sync:
     name: Sync universe and audit coverage
-    if: ${{ (github.event.inputs.build_lake == '0' || github.event.inputs.build_lake == '') && github.event.inputs.full_pass != 'true' && github.event.inputs.analyse_run == '' && github.event.inputs.filings_for == '' }}
+    if: ${{ (github.event.inputs.build_lake == '0' || github.event.inputs.build_lake == '') && github.event.inputs.full_pass != 'true' && github.event.inputs.analyse_run == '' && github.event.inputs.filings_for == '' && github.event.inputs.reconcile_for == '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -641,3 +657,41 @@ jobs:
           python scripts/probe_filing_sources.py \
             "${{ github.event.inputs.filings_for }}" \
             | tee -a "$GITHUB_STEP_SUMMARY" || true
+
+  reconcile:
+    name: BCTC against its own arithmetic, and against VNDIRECT
+    if: github.event.inputs.reconcile_for != ''
+    runs-on: ubuntu-latest
+    # OCR on a scanned filing runs about fifty seconds a document, so the
+    # budget here is symbols x reconcile_limit, plus the install. Twelve
+    # documents fit comfortably; the step timeout stops a pathological
+    # document from eating the job rather than bounding the normal case.
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Reconcile
+        timeout-minutes: 38
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
+          RECONCILE_LIMIT: ${{ github.event.inputs.reconcile_limit }}
+        run: |
+          python scripts/reconcile_bctc_against_vendor.py \
+            "${{ github.event.inputs.reconcile_for }}" \
+            --limit "${RECONCILE_LIMIT:-2}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
