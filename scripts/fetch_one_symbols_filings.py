@@ -43,6 +43,35 @@ and answered for 0 of 200 symbols. A BCTC prints the code and the label
 in adjacent columns. If these documents parse, the witness that has been
 missing all along is in them.
 
+What the runs have settled
+--------------------------
+
+CafeF answers from a runner - it is only the dev container that is refused
+- so the question can be asked. The answer is that this endpoint does not
+carry financial statements. Twenty pages for FPT returned 600 items over
+four years; nine mentioned BCTC and every one of the nine was a document
+*about* a statement: an audit engagement, a board resolution naming the
+auditor, a memo explaining a profit variance (run 34644785546).
+
+The Type parameter, which looked like the way to reach a different feed,
+is decorative. Seven ids returned byte-identical results - 150 items, the
+same three mentions, the same two titles (run 35218315632). There is one
+feed here and it is news.
+
+That reaches further than this script. REPORT_TYPE_RULES in stock_service
+classifies a disclosure as "bctc" if its title contains "kiem toan" or
+"giai trinh chenh lech", so those nine FPT announcements appear in the
+app's Bao Cao Tai Chinh tab, badged as statements, each with a real PDF
+behind it from the detail page. The tab is populated, the PDFs open, and
+nothing in the interface says the statements are missing. The batch
+processor filters the same way, downloads the same documents, and hands
+them to a parser that then finds no balance sheet in an audit contract.
+
+So the 0-of-9 NATIVE result may not be a parser bug at all: the parser may
+have been reading documents that contain no financial statements. That is
+not yet proven - proving it needs one real BCTC, and no run has obtained
+one.
+
 Usage
 -----
     python scripts/fetch_one_symbols_filings.py FPT
@@ -94,8 +123,19 @@ def looks_like_a_statement(title: str) -> bool:
 #: Title shapes that are a statement itself rather than a document about
 #: one. Run 34644785546 is the reason this is separate from the keyword
 #: list: nine FPT titles said "BCTC" and all nine were audit engagements,
-#: board resolutions and variance memos. A feed that carries statements
-#: should produce titles of this shape, so they are what the probe counts.
+#: board resolutions and variance memos.
+#:
+#: Run 35218315632 then caught this list making the same mistake it was
+#: written to catch. "bctc nam" matched "ky hop dong voi don vi kiem toan
+#: BCTC nam 2026", so it reported two statements where there were none -
+#: two for two wrong. A title that announces an engagement, a resolution
+#: or an explanation is about a statement whoever wrote it, so those words
+#: now disqualify a title outright.
+REAL_STATEMENT_DISQUALIFIERS = (
+    "hop dong", "ky ket", "ky hop dong", "lua chon", "nghi quyet",
+    "giai trinh", "thong bao ve viec", "quyet dinh",
+)
+
 REAL_STATEMENT_HINTS = (
     "bao cao tai chinh quy", "bctc quy", "bao cao tai chinh nam",
     "bctc nam", "bao cao tai chinh hop nhat", "bctc hop nhat",
@@ -106,6 +146,8 @@ REAL_STATEMENT_HINTS = (
 
 def looks_like_the_statement_itself(title: str) -> bool:
     folded = _fold(title)
+    if any(_fold(w) in folded for w in REAL_STATEMENT_DISQUALIFIERS):
+        return False
     return any(_fold(h) in folded for h in REAL_STATEMENT_HINTS)
 
 
