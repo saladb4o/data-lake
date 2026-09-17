@@ -83,6 +83,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import re
 import sys
 import tempfile
 from typing import Any, Dict, List, Optional
@@ -201,6 +202,67 @@ def probe_feeds(symbol: str, pages: int, type_ids) -> int:
     return 0
 
 
+#: Where the statements actually are. Not a guess: run 35218974306 asked
+#: this endpoint for FPT and it answered with BCTC hop nhat for Q1, Q2 and
+#: Q3 2025, the parent-company BCTC, and the reviewed half-year report, as
+#: direct PDFs on cafefnew.mediacdn.vn. The disclosure feed the app reads
+#: carries none of them, which is why the app's Bao Cao Tai Chinh tab fills
+#: with audit engagements instead.
+BCTC_LISTING_URL = ("https://cafef.vn/du-lieu/Ajax/CongTy/BaoCaoTaiChinh.aspx"
+                    "?sym={sym}&type=BSheet&year={year}&quarter=0")
+
+
+def list_statement_pdfs(symbol: str, year: int = 2025) -> List[Dict[str, Any]]:
+    """The statement PDFs CafeF publishes for this symbol, newest first.
+
+    The link text is taken where there is one and the file name where there
+    is not, because the file names here are self-describing in a way the
+    news feed's titles never were - FPT_Baocaotaichinh_Q3_2025_Hopnhat.pdf
+    says what it is without a keyword list having to decide.
+    """
+    import ssl
+    import urllib.request
+
+    url = BCTC_LISTING_URL.format(sym=symbol.upper(), year=year)
+    req = urllib.request.Request(url, headers={
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/122.0.0.0 Safari/537.36"),
+        "Referer": "https://cafef.vn/",
+    })
+    try:
+        with urllib.request.urlopen(req, context=ssl.create_default_context(),
+                                    timeout=20.0) as resp:
+            body = resp.read().decode("utf-8", errors="ignore")
+    except Exception as exc:
+        print(f"- listing fetch failed: {type(exc).__name__}: {str(exc)[:90]}")
+        return []
+
+    rows: List[Dict[str, Any]] = []
+    seen = set()
+    for match in re.finditer(r'<a[^>]*href=["\']([^"\']+\.pdf[^"\']*)["\'][^>]*>(.*?)</a>',
+                             body, re.DOTALL | re.I):
+        href = match.group(1).strip()
+        text = re.sub(r"<[^>]+>", "", match.group(2)).strip()
+        if href in seen:
+            continue
+        seen.add(href)
+        if href.startswith("//"):
+            href = "https:" + href
+        rows.append({"pdf_url": href,
+                     "title": text or href.rsplit("/", 1)[-1]})
+    # Some rows link the PDF from an icon with no anchor text at all, and a
+    # bare href regex catches those the anchor pattern misses.
+    for href in re.findall(r'href=["\']([^"\']+\.pdf[^"\']*)', body, re.I):
+        href = href.strip()
+        full = "https:" + href if href.startswith("//") else href
+        if full in seen or href in seen:
+            continue
+        seen.add(full)
+        rows.append({"pdf_url": full, "title": full.rsplit("/", 1)[-1]})
+    return rows
+
+
 def list_filings(symbol: str, pages: int = 20) -> List[Dict[str, Any]]:
     """Every disclosure CafeF lists for this symbol, newest first."""
     from services.stock_service import _fetch_cafef_single_page_raw
@@ -250,6 +312,68 @@ def report_one_pdf(path: str, symbol: str) -> Dict[str, Any]:
     return out
 
 
+def parse_statement_pdfs(symbol: str, rows: List[Dict[str, Any]],
+                         keep: bool = False) -> int:
+    """Download each statement and report what the parser got out of it."""
+    from services.bctc_batch_processor import BCTCBatchProcessor
+
+    workdir = tempfile.mkdtemp(prefix=f"bctc_{symbol}_")
+    processor = BCTCBatchProcessor()
+    processor.lake_dir = workdir
+
+    parsed = 0
+    for i, row in enumerate(rows, 1):
+        print(f"## {i}. {row['title'][:80]}")
+        print()
+        local = processor.download_report_pdf(symbol, row["pdf_url"],
+                                              f"{symbol}_stmt_{i}")
+        if not local:
+            print(f"- download failed for `{row['pdf_url'][:90]}`")
+            print()
+            continue
+
+        result = report_one_pdf(local, symbol)
+        if result.get("error"):
+            print(f"- {result['error']}")
+            print()
+            continue
+
+        parsed += 1
+        print(f"- route: **{result['doc_type']}** | pages {result['pages']} | "
+              f"unit {result['currency_unit']} (x{result['currency_scale']:g}) | "
+              f"{result['size']:,} bytes")
+        print()
+        print("| statement | items extracted |")
+        print("|---|---:|")
+        for name in ("balance_sheet", "income_statement", "cash_flow"):
+            block = result.get(name) or {}
+            if "error" in block:
+                print(f"| {name} | error: {block['error'][:50]} |")
+            else:
+                print(f"| {name} | {block.get('items', 0)} |")
+        print()
+
+        codes = result.get("cash_flow_codes") or {}
+        if codes:
+            # The witness. VNDIRECT sends eight keys per row and none is a
+            # label, so capex is read from code 32100 on convention alone.
+            print("Cash flow codes and values:")
+            print()
+            print("| code | value |")
+            print("|---|---:|")
+            for code, value in list(codes.items())[:30]:
+                print(f"| {code} | {value} |")
+            print()
+
+    print(f"- parsed **{parsed}** of {len(rows)}")
+    if keep:
+        print(f"- PDFs kept in `{workdir}`")
+    else:
+        import shutil
+        shutil.rmtree(workdir, ignore_errors=True)
+    return 0 if parsed else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("symbol")
@@ -260,6 +384,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--probe-types", default="",
                     help="comma-separated CafeF feed ids to survey instead of "
                          "parsing, e.g. 0,1,2,3,4,5")
+    ap.add_argument("--year", type=int, default=2025,
+                    help="fiscal year to ask the statement listing for")
     ap.add_argument("--keep", action="store_true",
                     help="keep the downloaded PDFs instead of deleting them")
     args = ap.parse_args(argv)
@@ -274,6 +400,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         print()
         return probe_feeds(symbol, args.pages, ids)
 
+    statement_pdfs = list_statement_pdfs(symbol, year=args.year)
+    print(f"- CafeF's statement listing offers **{len(statement_pdfs)}** PDFs "
+          f"for {args.year}")
+    print()
+    if statement_pdfs:
+        for i, row in enumerate(statement_pdfs[:10], 1):
+            print(f"  {i}. {row['title'][:80]}")
+        print()
+        return parse_statement_pdfs(symbol, statement_pdfs[:args.limit],
+                                    keep=args.keep)
+
+    print("- the statement listing gave nothing; falling back to the news "
+          "feed, which has never carried a statement")
+    print()
     rows = list_filings(symbol, pages=args.pages)
     print(f"- CafeF listed **{len(rows)}** disclosures across {args.pages} page(s)")
     if not rows:
