@@ -249,6 +249,7 @@ def list_statement_pdfs(symbol: str, year: int = 2025) -> List[Dict[str, Any]]:
         seen.add(href)
         if href.startswith("//"):
             href = "https:" + href
+        href = re.sub(r"(?<!:)//+", "/", href)
         rows.append({"pdf_url": href,
                      "title": text or href.rsplit("/", 1)[-1]})
     # Some rows link the PDF from an icon with no anchor text at all, and a
@@ -256,6 +257,7 @@ def list_statement_pdfs(symbol: str, year: int = 2025) -> List[Dict[str, Any]]:
     for href in re.findall(r'href=["\']([^"\']+\.pdf[^"\']*)', body, re.I):
         href = href.strip()
         full = "https:" + href if href.startswith("//") else href
+        full = re.sub(r"(?<!:)//+", "/", full)
         if full in seen or href in seen:
             continue
         seen.add(full)
@@ -290,6 +292,20 @@ def report_one_pdf(path: str, symbol: str) -> Dict[str, Any]:
     except Exception as exc:
         out["error"] = f"could not open: {exc}"
         return out
+
+    # Everything downstream of locate_statement_pages() is gated on it: both
+    # the pdfplumber route and the OCR route start with "if pages and ...",
+    # so an empty locator returns zero items from a document that is full of
+    # them, and the failure looks identical to a parser that cannot read.
+    # Run 35219244570 produced exactly that shape - a real BCTC, 29 pages,
+    # 0 items in all three statements - so the locator and the OCR engine
+    # are reported separately from the result they would explain.
+    import services.bctc_pdf_parser as parser_mod
+    out["ocr_engine"] = bool(getattr(parser_mod, "_rapid_ocr_engine", None))
+    try:
+        out["located"] = {k: v for k, v in parser.locate_statement_pages().items()}
+    except Exception as exc:
+        out["located"] = {"error": str(exc)[:120]}
 
     out["doc_type"] = parser.doc_type
     out["pages"] = parser.total_pages
@@ -342,6 +358,8 @@ def parse_statement_pdfs(symbol: str, rows: List[Dict[str, Any]],
         print(f"- route: **{result['doc_type']}** | pages {result['pages']} | "
               f"unit {result['currency_unit']} (x{result['currency_scale']:g}) | "
               f"{result['size']:,} bytes")
+        print(f"- OCR engine loaded: **{result.get('ocr_engine')}**")
+        print(f"- pages located: `{result.get('located')}`")
         print()
         print("| statement | items extracted |")
         print("|---|---:|")
