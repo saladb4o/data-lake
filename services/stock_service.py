@@ -3354,13 +3354,22 @@ def fetch_single_detail_pdf(detail_url: str) -> str:
         logger.debug("fetch_single_detail_pdf: swallowed Exception", exc_info=True)
     return ""
 
-def _fetch_cafef_single_page_raw(symbol: str, page: int) -> List[Dict[str, Any]]:
-    """Helper to fetch a single page of announcements from CafeF without extracting PDFs."""
+def _fetch_cafef_single_page_raw(symbol: str, page: int, type_id: int = 2) -> List[Dict[str, Any]]:
+    """Helper to fetch a single page of announcements from CafeF without extracting PDFs.
+
+    type_id selects which of CafeF's feeds is asked. It has always been 2 here,
+    and run 34644785546 showed what 2 actually is: twenty pages of it for FPT
+    returned 600 items, of which nine mentioned BCTC and every one of those nine
+    was a document *about* a statement - an audit engagement, a board resolution
+    naming the auditor, a memo explaining a profit variance - and not one was a
+    statement. So the parameter is exposed rather than fixed, because which feed
+    carries the filings is a question this code could not previously ask.
+    """
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
         'Referer': 'https://cafef.vn/'
     }
-    url = f"https://cafef.vn/du-lieu/Ajax/Events_RelatedNews_New.aspx?symbol={symbol}&floorID=0&configID=0&PageIndex={page}&PageSize=30&Type=2"
+    url = f"https://cafef.vn/du-lieu/Ajax/Events_RelatedNews_New.aspx?symbol={symbol}&floorID=0&configID=0&PageIndex={page}&PageSize=30&Type={int(type_id)}"
     parsed = []
     try:
         req = urllib.request.Request(url, headers=headers)

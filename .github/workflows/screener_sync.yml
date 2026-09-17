@@ -59,6 +59,19 @@ on:
         description: 'Tải và parse BCTC mới nhất của MỘT mã: nhập mã (trống = tắt)'
         required: false
         default: ''
+      filings_probe_types:
+        # Which of CafeF's feeds carries the filings. Type=2 is the only one
+        # this repo has ever read, and run 34644785546 showed what it carries:
+        # 600 items for FPT, nine mentioning BCTC, and every one of the nine a
+        # document about a statement - an audit engagement, a board resolution,
+        # a variance memo - rather than a statement.
+        description: 'Khảo sát feed CafeF thay vì parse: vd 0,1,2,3,4,5 (trống = tắt)'
+        required: false
+        default: ''
+      filings_pages:
+        description: 'Số trang CafeF mỗi feed (mặc định 20)'
+        required: false
+        default: '20'
       analyse_run:
         # The expensive stages are fetches; every measurement that reads
         # them is seconds of arithmetic. Paying 43 minutes of universe +
@@ -609,7 +622,11 @@ jobs:
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+          FILINGS_PROBE: ${{ github.event.inputs.filings_probe_types }}
+          FILINGS_PAGES: ${{ github.event.inputs.filings_pages }}
         run: |
           python scripts/fetch_one_symbols_filings.py \
             "${{ github.event.inputs.filings_for }}" \
+            --pages "${FILINGS_PAGES:-20}" \
+            ${FILINGS_PROBE:+--probe-types "$FILINGS_PROBE"} \
             --limit 3 | tee -a "$GITHUB_STEP_SUMMARY"

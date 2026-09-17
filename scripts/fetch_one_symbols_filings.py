@@ -91,6 +91,74 @@ def looks_like_a_statement(title: str) -> bool:
     return any(_fold(word) in folded for word in BCTC_POSITIVE_KEYWORDS)
 
 
+#: Title shapes that are a statement itself rather than a document about
+#: one. Run 34644785546 is the reason this is separate from the keyword
+#: list: nine FPT titles said "BCTC" and all nine were audit engagements,
+#: board resolutions and variance memos. A feed that carries statements
+#: should produce titles of this shape, so they are what the probe counts.
+REAL_STATEMENT_HINTS = (
+    "bao cao tai chinh quy", "bctc quy", "bao cao tai chinh nam",
+    "bctc nam", "bao cao tai chinh hop nhat", "bctc hop nhat",
+    "bao cao tai chinh rieng", "bao cao tai chinh da duoc kiem toan",
+    "bao cao tai chinh ban nien", "bao cao soat xet",
+)
+
+
+def looks_like_the_statement_itself(title: str) -> bool:
+    folded = _fold(title)
+    return any(_fold(h) in folded for h in REAL_STATEMENT_HINTS)
+
+
+def probe_feeds(symbol: str, pages: int, type_ids) -> int:
+    """Ask each of CafeF's feeds what it carries, and count filings in it.
+
+    Type=2 is the only feed this repo has ever read, and it does not carry
+    statements. Whether any other does is not knowable from here - CafeF is
+    refused by the dev container - and guessing has been expensive. So each
+    id is asked the same question and the answers are printed side by side.
+    """
+    from services.stock_service import _fetch_cafef_single_page_raw
+
+    print("| Type | items | say 'BCTC' | ARE a statement |")
+    print("|---:|---:|---:|---:|")
+    found: Dict[int, List[Dict[str, Any]]] = {}
+    for type_id in type_ids:
+        rows: List[Dict[str, Any]] = []
+        for page in range(1, pages + 1):
+            try:
+                batch = _fetch_cafef_single_page_raw(symbol, page, type_id=type_id)
+            except Exception as exc:
+                print(f"| {type_id} | fetch failed: {str(exc)[:40]} | | |")
+                rows = []
+                break
+            if not batch:
+                break
+            rows.extend(batch)
+        mentions = [r for r in rows if "bctc" in _fold(r.get("title", ""))
+                    or "bao cao tai chinh" in _fold(r.get("title", ""))]
+        real = [r for r in rows if looks_like_the_statement_itself(r.get("title", ""))]
+        found[type_id] = real
+        print(f"| {type_id} | {len(rows)} | {len(mentions)} | **{len(real)}** |")
+    print()
+
+    for type_id, real in found.items():
+        if not real:
+            continue
+        print(f"Type {type_id} - titles that look like the statement itself:")
+        print()
+        for row in real[:8]:
+            print(f"  - {str(row.get('title',''))[:90]}  ({row.get('date','')})")
+        print()
+
+    if not any(found.values()):
+        print("- **No feed carries statements.** Every id returned either "
+              "nothing or the same news. CafeF's disclosure list is then not "
+              "reachable through this endpoint at all, and the PDF route has "
+              "to find the documents somewhere else or be abandoned.")
+        return 1
+    return 0
+
+
 def list_filings(symbol: str, pages: int = 20) -> List[Dict[str, Any]]:
     """Every disclosure CafeF lists for this symbol, newest first."""
     from services.stock_service import _fetch_cafef_single_page_raw
@@ -147,6 +215,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="how many of the newest statement filings to parse")
     ap.add_argument("--pages", type=int, default=20,
                     help="pages of CafeF disclosures to scan")
+    ap.add_argument("--probe-types", default="",
+                    help="comma-separated CafeF feed ids to survey instead of "
+                         "parsing, e.g. 0,1,2,3,4,5")
     ap.add_argument("--keep", action="store_true",
                     help="keep the downloaded PDFs instead of deleting them")
     args = ap.parse_args(argv)
@@ -154,6 +225,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     symbol = args.symbol.upper().strip()
     print(f"# Filings for {symbol}, fetched on demand")
     print()
+
+    if args.probe_types:
+        ids = [int(x) for x in args.probe_types.replace(" ", "").split(",") if x != ""]
+        print(f"Surveying CafeF feeds {ids}, {args.pages} page(s) each.")
+        print()
+        return probe_feeds(symbol, args.pages, ids)
 
     rows = list_filings(symbol, pages=args.pages)
     print(f"- CafeF listed **{len(rows)}** disclosures across {args.pages} page(s)")
