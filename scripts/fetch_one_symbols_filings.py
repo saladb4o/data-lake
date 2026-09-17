@@ -307,6 +307,29 @@ def report_one_pdf(path: str, symbol: str) -> Dict[str, Any]:
     except Exception as exc:
         out["located"] = {"error": str(exc)[:120]}
 
+    # What each page actually holds, per route. Run 35219524474 narrowed the
+    # failure to the locator - OCR engine True, every statement list empty -
+    # but an empty locator has two causes that look the same from outside:
+    # OCR returning no text at all, or returning text whose words are not the
+    # ones the keyword lists expect. Printing a few lines per page separates
+    # them, and the lines are the evidence either way.
+    try:
+        import fitz  # noqa: F401
+        with fitz.open(path) as doc:
+            probe = []
+            for p_idx in range(min(8, len(doc))):
+                native = (doc[p_idx].get_text() or "").strip()
+                ocr = parser._get_ocr_lines_for_page(doc, p_idx)
+                probe.append({
+                    "page": p_idx,
+                    "native_chars": len(native),
+                    "ocr_lines": len(ocr),
+                    "first": " | ".join(ocr[:5])[:160],
+                })
+            out["page_probe"] = probe
+    except Exception as exc:
+        out["page_probe"] = [{"error": str(exc)[:120]}]
+
     out["doc_type"] = parser.doc_type
     out["pages"] = parser.total_pages
     out["currency_unit"] = parser.currency_unit
@@ -344,7 +367,19 @@ def parse_statement_pdfs(symbol: str, rows: List[Dict[str, Any]],
         local = processor.download_report_pdf(symbol, row["pdf_url"],
                                               f"{symbol}_stmt_{i}")
         if not local:
-            print(f"- download failed for `{row['pdf_url'][:90]}`")
+            # Say why. download_report_pdf logs the reason and returns None,
+            # so without this the caller can only report that something went
+            # wrong - the same shape of blind failure as everything else here.
+            reason = ""
+            try:
+                import urllib.request
+                req = urllib.request.Request(row["pdf_url"], headers={
+                    "User-Agent": "Mozilla/5.0", "Referer": "https://cafef.vn/"})
+                with urllib.request.urlopen(req, timeout=25.0) as resp:
+                    reason = f"HTTP {resp.status}, {len(resp.read()):,} bytes"
+            except Exception as exc:
+                reason = f"{type(exc).__name__}: {str(exc)[:70]}"
+            print(f"- download failed for `{row['pdf_url'][:90]}` - {reason}")
             print()
             continue
 
@@ -361,6 +396,17 @@ def parse_statement_pdfs(symbol: str, rows: List[Dict[str, Any]],
         print(f"- OCR engine loaded: **{result.get('ocr_engine')}**")
         print(f"- pages located: `{result.get('located')}`")
         print()
+        probe = result.get("page_probe") or []
+        if probe:
+            print("| page | native chars | OCR lines | first lines OCR read |")
+            print("|---:|---:|---:|---|")
+            for row in probe:
+                if "error" in row:
+                    print(f"| - | - | - | {row['error']} |")
+                    continue
+                print(f"| {row['page']} | {row['native_chars']} | "
+                      f"{row['ocr_lines']} | {row['first']} |")
+            print()
         print("| statement | items extracted |")
         print("|---|---:|")
         for name in ("balance_sheet", "income_statement", "cash_flow"):
