@@ -105,7 +105,18 @@ def probe(url: str, timeout: float = 15.0) -> Dict[str, Any]:
         return out
 
     out["bytes"] = len(body)
-    out["pdf_links"] = len(re.findall(r'href=["\'][^"\']+\.pdf', body, re.I))
+    pdf_hrefs = re.findall(r'href=["\']([^"\']+\.pdf[^"\']*)', body, re.I)
+    out["pdf_links"] = len(pdf_hrefs)
+    # The URLs themselves, not just a count. A count says a door exists; the
+    # URLs say whether what is behind it is a financial statement, and that
+    # is the whole question. Deduplicated because listings repeat a link in
+    # the row title and the download icon.
+    seen, uniq = set(), []
+    for href in pdf_hrefs:
+        if href not in seen:
+            seen.add(href)
+            uniq.append(href)
+    out["pdf_urls"] = uniq[:12]
     anchors = re.findall(r"<a[^>]*>(.*?)</a>", body, re.DOTALL | re.I)
     texts = [re.sub(r"<[^>]+>", "", a).strip() for a in anchors]
     texts = [t for t in texts if t]
@@ -144,12 +155,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     for res in results:
         titles = res.get("statement_titles") or []
-        if not titles:
+        urls = res.get("pdf_urls") or []
+        if not titles and not urls:
             continue
         print(f"## {res['name']}")
         print()
         for title in titles:
             print(f"  - {title[:100]}")
+        for url in urls:
+            print(f"  - PDF: {url[:140]}")
         print()
 
     if not any(r.get("statement_titles") for r in results):
