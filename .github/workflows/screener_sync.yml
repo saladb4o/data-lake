@@ -630,3 +630,14 @@ jobs:
             --pages "${FILINGS_PAGES:-20}" \
             ${FILINGS_PROBE:+--probe-types "$FILINGS_PROBE"} \
             --limit 3 | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Survey where filings are listed
+        if: always()
+        timeout-minutes: 10
+        env:
+          DATA_LOCAL_DIR: ${{ github.workspace }}/data
+          GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
+        run: |
+          python scripts/probe_filing_sources.py \
+            "${{ github.event.inputs.filings_for }}" \
+            | tee -a "$GITHUB_STEP_SUMMARY" || true
