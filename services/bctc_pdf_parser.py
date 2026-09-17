@@ -52,6 +52,25 @@ def strip_accents(s: str) -> str:
     stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
     return stripped.replace("đ", "d").replace("Đ", "D")
 
+def squash(s: str) -> str:
+    """Accent-free, space-free, uppercase - for matching OCR output.
+
+    RapidOCR drops spaces unpredictably on these documents. Run 35219855885
+    read page 2 of FPT's Q4 2025 filing as "BAO CAO TAI CHINH CONG TYME" and
+    page 3 as "BAOCAOTAICHINHRIENG": the same words, spaced three different
+    ways on three lines. Every keyword list here is written with spaces, so
+    substring matching found nothing on a document OCR had read correctly -
+    189 lines on one page - and the locator returned empty lists, which made
+    every extractor downstream return zero items.
+
+    Removing the spaces from both sides makes the match independent of where
+    OCR decided to put them. It is deliberately blunt: punctuation and digits
+    stay, because "B 01" and "B01" must both reach "B01".
+    """
+    return re.sub(r"[^A-Z0-9]", "", strip_accents(str(s or "")).upper())
+
+
+
 
 # Standard Vietnamese Accounting Code Mappings (Thông tư 200/2014/TT-BTC)
 TT200_BALANCE_SHEET_CODES = {
@@ -692,18 +711,31 @@ class BCTCPdfParser:
                 scan_limit = min(14, len(doc))
                 for p_idx in range(scan_limit):
                     ocr_lines = self._get_ocr_lines_for_page(doc, p_idx)
-                    page_text = " ".join(ocr_lines).upper()
+                    # Matched with the spaces removed from both sides. OCR
+                    # puts them wherever it likes on these scans - the same
+                    # heading arrives as "BAO CAO TAI CHINH" on one line and
+                    # "BAOCAOTAICHINHRIENG" on the next - so a space-bearing
+                    # keyword list silently matches nothing. See squash().
+                    page_text = squash(" ".join(ocr_lines))
 
-                    if any(k in page_text for k in ["REVIEW REPORT", "AUDITOR", "KIEM TOAN"]):
+                    if any(squash(k) in page_text for k in ["REVIEW REPORT", "AUDITOR", "KIEM TOAN"]):
                         if p_idx not in locations["auditor_report"]:
                             locations["auditor_report"].append(p_idx)
-                    if any(k in page_text for k in ["FINANCIAL POSITION", "BALANCE SHEET", "BANG CAN DOI", "CAN DOI KE TOAN"]):
+                    if any(squash(k) in page_text for k in [
+                        "FINANCIAL POSITION", "BALANCE SHEET", "BANG CAN DOI", "CAN DOI KE TOAN",
+                        "MAU SO B 01", "B 01 - DN", "B 01 - CTC"
+                    ]):
                         if p_idx not in locations["balance_sheet"]:
                             locations["balance_sheet"].append(p_idx)
-                    if any(k in page_text for k in ["INCOME STATEMENT", "KET QUA KINH DOANH", "FINANCIAL PERFORMANCE"]):
+                    if any(squash(k) in page_text for k in [
+                        "INCOME STATEMENT", "KET QUA KINH DOANH", "FINANCIAL PERFORMANCE",
+                        "KET QUA HOAT DONG KINH DOANH", "MAU SO B 02"
+                    ]):
                         if p_idx not in locations["income_statement"]:
                             locations["income_statement"].append(p_idx)
-                    if any(k in page_text for k in ["LUU CHUYEN TIEN TE", "CASH FLOW", "LUU CHUYEN TIEN"]):
+                    if any(squash(k) in page_text for k in [
+                        "LUU CHUYEN TIEN TE", "CASH FLOW", "LUU CHUYEN TIEN", "MAU SO B 03"
+                    ]):
                         if p_idx not in locations["cash_flow"]:
                             locations["cash_flow"].append(p_idx)
 
