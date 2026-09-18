@@ -26,6 +26,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from typing import Dict
+
 import vas_layout as V
 from xlsx_patch import WorkbookPatch
 
@@ -797,6 +799,87 @@ def build_market_sheets(w: WorkbookPatch) -> None:
     w.clear_rows("Share Price", 11, 1382, cols=["B", "C"])
 
 
+# Labels the workbook states its units in. The figures are unchanged; what
+# changes is what they are said to be denominated in. Statement amounts are
+# in millions of dong, while a share price, an EPS and a dividend per share
+# are in dong, and share counts in millions of shares - which is how a
+# Vietnamese filing prints them.
+UNIT_LABELS: Dict[str, str] = {
+    "All Amounts Denominated in US$MM Unless Otherwise Stated":
+        "Đơn vị: triệu đồng, trừ khi ghi chú khác",
+    "All Amounts Denominated in US$ Unless Otherwise Stated":
+        "Đơn vị: đồng, trừ khi ghi chú khác",
+    "US$ Billions": "tỷ đồng",
+    "US$/sh.": "đồng/cp",
+    "US$MM": "triệu đồng",
+    "[$MM]": "[triệu đồng]",
+    "[$/sh.]": "[đồng/cp]",
+    "($/share)": "(đồng/cp)",
+    "($/sh.)": "(đồng/cp)",
+    "($) Per Share": "(đồng) mỗi cổ phiếu",
+    "(MM)": "(triệu cp)",
+    "Equity Value ($) per Share": "Giá trị vốn chủ sở hữu mỗi cổ phiếu (đồng)",
+    "Valuation Summary - Equity Value per Share ($)":
+        "Tóm tắt định giá - giá trị mỗi cổ phiếu (đồng)",
+}
+
+# CFI's disclaimer names Amazon's securities by ticker. Kept as it stands it
+# would tell a reader of a template about some other company that this is
+# not an offer to sell Amazon stock. The substance is kept and the subject
+# corrected; CFI's separate copyright notice is left exactly as it is.
+DISCLAIMER = (
+    "Tuyên bố miễn trừ trách nhiệm\n"
+    "Tài liệu này chỉ nhằm mục đích học tập và đào tạo. Thông tin trong "
+    "tài liệu không cấu thành lời khuyên đầu tư, không phải lời chào bán "
+    "hay lời mời mua bất kỳ chứng khoán nào.\n"
+    "Nội dung trong tài liệu chưa được bất kỳ doanh nghiệp, tổ chức xếp "
+    "hạng, chuyên viên phân tích hay cơ quan quản lý chứng khoán nào phê "
+    "duyệt hoặc phản đối, và không cơ quan nào đã xem xét tính chính xác "
+    "hay đầy đủ của nội dung này.\n"
+    "Thông tin trong tài liệu không cấu thành tư vấn đầu tư, thuế, pháp "
+    "lý hay tư vấn chuyên môn khác. Mọi khoản đầu tư đều có rủi ro và có "
+    "thể mất toàn bộ vốn. Trước khi đầu tư, nhà đầu tư nên tham vấn đơn "
+    "vị tư vấn đầu tư, kế toán, pháp lý và thuế của riêng mình để tự đánh "
+    "giá rủi ro và mức độ phù hợp.\n"
+    "Không nên dựa vào thông tin và quan điểm trong tài liệu này cho bất "
+    "kỳ mục đích nào, và không nội dung nào ở đây được dùng làm căn cứ "
+    "cho một quyết định đầu tư.\n"
+)
+
+# Titles that still name the company the model was written about.
+SUBJECT_TITLES = {
+    ("Cover Page", "C4"): "Mô hình định giá doanh nghiệp (VAS - TT200)",
+    ("WACC", "M6"): "Tính WACC",
+    ("SOTP", "B48"): "Tổng giá trị doanh nghiệp ngầm định",
+    ("SOTP", "P72"): "Giá trị doanh nghiệp",
+    ("PrecedentsVal", "A2"): "Định giá theo giao dịch tiền lệ",
+    ("PrecedentsVal", "B9"): "Doanh nghiệp",
+    ("PrecedentsVal", "B12"): "Giá trị vốn chủ sở hữu ngầm định",
+    ("PrecedentsVal", "B14"):
+        "Số cổ phiếu pha loãng (triệu cp)",
+    ("PrecedentsVal", "B15"):
+        "Giá trị vốn chủ sở hữu mỗi cổ phiếu (đồng/cp)",
+    ("Share Price", "C10"): "Giá cổ phiếu",
+    ("Outputs", "Q55"): "Mảng",
+}
+
+
+def build_units_and_titles(w: WorkbookPatch) -> None:
+    """State the amounts in dong, and stop naming another company."""
+    w.replace_shared_strings(UNIT_LABELS)
+    w.strip_currency_symbols()
+    for (sheet, ref), text in SUBJECT_TITLES.items():
+        w.set_value(sheet, ref, text)
+    # The dashboard heading should follow whatever the Control Panel says.
+    w.set_formula("Dashboard", "F3", "_CompanyName")
+    w.set_value(RD, "A3", "Đơn vị: triệu đồng (trừ giá cổ phiếu, EPS và "
+                          "cổ tức: đồng; số cổ phiếu: triệu cp)")
+    w.set_value(CP, "A3", "Đơn vị: triệu đồng, trừ khi ghi chú khác")
+    w.set_value(FS, "A3", "Đơn vị: triệu đồng, trừ khi ghi chú khác")
+    w.set_value(CP, "B16", "Quy đổi triệu đồng sang tỷ đồng")
+    w.set_value("Cover Page", "C42", DISCLAIMER)
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -809,6 +892,7 @@ def main(src: str, dest: str) -> None:
     build_scenarios(w)
     build_sotp(w)
     build_market_sheets(w)
+    build_units_and_titles(w)
     w.save(dest)
     print(f"wrote {dest}")
 

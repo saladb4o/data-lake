@@ -297,6 +297,46 @@ class WorkbookPatch:
                          for m in re.finditer(r'<row [^>]*r="(\d+)"', xml)]
         return xml
 
+    def replace_shared_strings(self, mapping: Dict[str, str]) -> int:
+        """Rewrite label text wherever the workbook stores it once and reuses it.
+
+        Most of the labels came with the file and live in the shared string
+        table, so changing them cell by cell would write dozens of inline
+        copies of text that is already shared. Longer keys are applied
+        first, so a specific phrase is not half-rewritten by a shorter one
+        inside it.
+        """
+        part = "xl/sharedStrings.xml"
+        if part not in self._parts:
+            return 0
+        xml = self._parts[part].decode("utf8")
+        changed = 0
+        for old in sorted(mapping, key=len, reverse=True):
+            new_text = xml_escape(mapping[old])
+            key = xml_escape(old)
+            if key in xml:
+                changed += xml.count(key)
+                xml = xml.replace(key, new_text)
+        self._parts[part] = xml.encode("utf8")
+        return changed
+
+    def strip_currency_symbols(self) -> int:
+        """Take the dollar sign out of the number formats.
+
+        The figures themselves carry no currency; the format does. Removing
+        the quoted symbol leaves the rest of each pattern - the thousands
+        separators, the bracketed negatives, the accounting alignment -
+        exactly as it was, and the unit is stated in each sheet's header
+        instead. The date format's [$-409] locale token has no quotes and
+        is therefore untouched.
+        """
+        part = "xl/styles.xml"
+        xml = self._parts[part].decode("utf8")
+        before = xml.count("&quot;$&quot;")
+        xml = xml.replace("&quot;$&quot;", "")
+        self._parts[part] = xml.encode("utf8")
+        return before
+
     def _force_recalc(self) -> None:
         """Ask for a recalculation without discarding how to calculate.
 
