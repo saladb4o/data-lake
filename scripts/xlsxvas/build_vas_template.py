@@ -21,6 +21,7 @@ Run:  python3 scripts/xlsxvas/build_vas_template.py SOURCE.xlsx OUT.xlsx
 """
 from __future__ import annotations
 
+import re
 import sys
 import os
 
@@ -29,12 +30,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from typing import Dict
 
 import vas_layout as V
+from glossary import KEEP, TERMS
 from xlsx_patch import WorkbookPatch
 
 RD = "Raw Data"
 FS = "Financial Statements"
 CP = "Control Panel"
 SC = "Scenarios"
+WC = "WACC"
+DC = "DCF"
 
 HIST = V.HIST_COLS          # C..G
 LAST_HIST = V.LAST_HIST_COL
@@ -954,6 +958,166 @@ def build_tidy(w: WorkbookPatch) -> None:
         w.copy_row_style(FS, 19, row, "C")
 
 
+def build_wacc(w: WorkbookPatch) -> None:
+    """Take out the eighteen US comparables and let beta be an input.
+
+    The sheet derived beta as the median of Walmart, Alphabet, Oracle and
+    fifteen other US names, unlevered against their own capital
+    structures. Those betas were left over from the Amazon model. Clearing
+    the comparables (which had to go - they valued a Vietnamese company
+    against Walmart) left the median blank, and a blank beta silently
+    emptied the whole chain down to enterprise value.
+
+    Beta is therefore a number the user states, low and high, the same way
+    they state the risk-free rate next to it. Nothing here invents one.
+    """
+    for row in range(10, 30):
+        for col in "BCDEFGHIJK":
+            w.clear(WC, f"{col}{row}")
+    for ref in ("C6", "E8", "F8", "G8", "H8", "I8", "J8", "K8",
+                "B9", "C9", "D9", "E9", "F9", "G9", "H9", "I9", "J9", "K9",
+                "C31", "C32"):
+        w.clear(WC, ref)
+    w.hide_rows(WC, 6, 32)
+
+    w.set_value(CP, "B37", "Beta vốn chủ sở hữu (có đòn bẩy)")
+    w.copy_row_style(CP, 35, 37, "BFG")
+    w.set_value(CP, "F37", None)
+    w.set_value(CP, "G37", None)
+    # the risk-free rate and equity risk premium that shipped with the file
+    # are US figures; a number sitting in an input cell is a claim, so they
+    # are emptied rather than left to be mistaken for defaults
+    for ref in ("F31", "G31", "F32", "G32"):
+        w.set_value(CP, ref, None)
+
+    # An empty cell read through a reference arrives as 0, not as empty.
+    # Left alone, a missing risk-free rate and a missing beta would simply
+    # drop out of the sum and the cost of equity would come back as the
+    # company-specific premium alone - 1%, a number the model would then
+    # discount eleven years of cash flow at. Each input is therefore
+    # carried through as blank, and every cell built on one stays blank
+    # until it is supplied.
+    for out, src in (("Q24", "$F$31"), ("R24", "$G$31"),
+                     ("Q25", "$F$32"), ("R25", "$G$32"),
+                     ("Q29", "$F$37"), ("R29", "$G$37")):
+        w.set_formula(WC, out, f"IF('{CP}'!{src}=\"\",\"\",'{CP}'!{src})")
+    for col in ("Q", "R"):
+        w.set_formula(
+            WC, f"{col}30",
+            f'IF(OR({col}24="",{col}25="",{col}29=""),"",'
+            f'({col}25*{col}29)+{col}24+{col}26+{col}27+{col}28)')
+        w.set_formula(
+            WC, f"{col}32",
+            f'IF({col}30="","",({col}30*{col}11)+({col}10*{col}21))')
+    w.set_formula(WC, "R33",
+                  'IF(OR(Q32="",R32=""),"",ROUND(AVERAGE(Q32:R32),2))')
+
+
+def build_dcf_gate(w: WorkbookPatch) -> None:
+    """Stop the DCF reporting a value it did not compute.
+
+    With the discount rate blank, XNPV failed, IFERROR turned each present
+    value into empty text, and SUM read empty text as nothing: enterprise
+    value came out 0. Adding net debt to that 0 produced an equity value
+    equal to the net debt, divided into a per-share figure that looked
+    like a valuation and was not. Every cell downstream of an input that
+    has not been supplied now stays empty.
+    """
+    w.set_formula(DC, "F30", 'IF(OR(F28="",F29=""),"",F28+F29)')
+    w.set_formula(DC, "F32", 'IF(F30="","",F30+F31)')
+    w.set_formula(DC, "F34", 'IF(OR(F32="",F33=0,F33=""),"",F32/F33)')
+    # the perpetual-growth branch returned the text "0" when the rate and
+    # the growth rate met, which is not a number and poisons the average
+    w.set_formula(
+        DC, "O19",
+        'IF(OR(_WACC="",_WACC=_LTGrowth),"",O15*(1+_LTGrowth)/(_WACC-_LTGrowth))')
+    w.set_formula(DC, "O20",
+                  'IF(OR(O18="",O19=""),IF(O18="",O19,O18),AVERAGE(O18:O19))')
+
+
+def build_deidentify(w: WorkbookPatch) -> None:
+    """Remove the publisher's and Amazon's marks.
+
+    The cover page is the publisher's, not a part of the model; the five
+    images are the CFI wordmark and the Amazon wordmark, and a trademark
+    of a different company on a model of this one is worse than a stray
+    label. The copyright line that sat in A1 of all eighteen sheets is
+    cleared through the glossary, which maps it to nothing.
+    """
+    w.delete_sheet("Cover Page")
+    gone = w.remove_pictures()
+    # the company name, the sheet titles and the publisher's disclaimer
+    # outlived the cells that showed them
+    orphans = w.blank_orphan_strings()
+    # and a chart title, a cached series name, a text box, a table column,
+    # the document's author and the folder it was last saved in are not
+    # reachable from any cell at all
+    scrubbed = w.scrub_parts({
+        "Amazon.com, Inc. (NasdaqGS:AMZN) - Share Pricing": "Giá cổ phiếu",
+        "Amazon.com, Inc. - 52-week Share Pricing": "Giá cổ phiếu 52 tuần",
+        "Amazon.com, Inc.": "(tên doanh nghiệp)",
+        "Corporate Finance Institute® (CFI)": "",
+    })
+    scrubbed += w.scrub_parts(
+        {"Tien Le Quang": ""}, ["docProps/core.xml"])
+    wb = w._parts["xl/workbook.xml"].decode("utf8")
+    wb = re.sub(r'<x15ac:absPath\b[^>]*/>', "", wb)
+    w._parts["xl/workbook.xml"] = wb.encode("utf8")
+    replace_company_description(w)
+    stale = w.strip_stale_string_caches()
+    return gone, orphans, scrubbed, stale
+
+
+def replace_company_description(w: WorkbookPatch) -> None:
+    """Empty the text box that described Amazon's business.
+
+    It sits on the Dashboard as a drawing, four paragraphs of prose about
+    Seattle and AWS. The box is kept, with one line inviting the user to
+    write their own, because the space is part of the layout.
+    """
+    part = "xl/drawings/drawing2.xml"
+    if part not in w._parts:
+        return
+    xml = w._parts[part].decode("utf8")
+    runs = list(re.finditer(r'<a:t>(.*?)</a:t>', xml, re.S))
+    first = True
+    out = []
+    last = 0
+    for m in runs:
+        body = m.group(1)
+        if len(body) < 40:
+            continue
+        out.append(xml[last:m.start(1)])
+        out.append("(mô tả hoạt động kinh doanh của doanh nghiệp)"
+                   if first else "")
+        first = False
+        last = m.end(1)
+    out.append(xml[last:])
+    w._parts[part] = "".join(out).encode("utf8")
+
+
+def build_translate(w: WorkbookPatch) -> int:
+    """Apply the glossary, and clear the labels that belong to Amazon.
+
+    Two entries in the Precedents sheet describe Amazon's own acquisitions
+    down to the size of the stake. They are not labels to translate; they
+    are another company's deal history, and the rows they sit on were
+    already emptied of their figures.
+    """
+    for row in range(8, 22):
+        w.clear("Precedents", f"R{row}")
+    # a label assembled inside a formula does not live in the string table
+    w.set_formula(FS, "B289", 'B63&" đầu kỳ"')
+    # the recommendation was three English words typed into the formula;
+    # the Control Panel already names the three bands next to their
+    # thresholds, so the formula reads them from there instead
+    w.set_formula(
+        "Dashboard", "M4",
+        f"IF(M3>U8*(1+'{CP}'!$F$41),'{CP}'!$B$41,"
+        f"IF(M3<U8*(1+'{CP}'!$F$39),'{CP}'!$B$39,'{CP}'!$B$40))")
+    return w.replace_shared_strings(TERMS)
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -967,7 +1131,11 @@ def main(src: str, dest: str) -> None:
     build_sotp(w)
     build_market_sheets(w)
     build_units_and_titles(w)
+    build_wacc(w)
+    build_dcf_gate(w)
+    build_translate(w)
     build_tidy(w)
+    build_deidentify(w)
     w.save(dest)
     print(f"wrote {dest}")
 

@@ -413,25 +413,160 @@ class WorkbookPatch:
     def replace_shared_strings(self, mapping: Dict[str, str]) -> int:
         """Rewrite label text wherever the workbook stores it once and reuses it.
 
-        Most of the labels came with the file and live in the shared string
-        table, so changing them cell by cell would write dozens of inline
-        copies of text that is already shared. Longer keys are applied
-        first, so a specific phrase is not half-rewritten by a shorter one
-        inside it.
+        Most labels came with the file and live in the shared string table,
+        so changing them cell by cell would write dozens of inline copies
+        of text that is already shared.
+
+        A shared string is not always one run of text. A label with a
+        superscript footnote - "Current Trading Multiples" followed by a
+        raised 3 - is stored as two runs, and a plain search for the label
+        as the reader sees it finds nothing. So each entry is compared on
+        the text it renders to, with its runs joined, and a match replaces
+        the whole entry with a single run. The footnote's raised styling is
+        lost with it; the footnote itself is part of the translated text.
         """
         part = "xl/sharedStrings.xml"
         if part not in self._parts:
             return 0
         xml = self._parts[part].decode("utf8")
+        wanted = {xml_escape(k): v for k, v in mapping.items()}
         changed = 0
-        for old in sorted(mapping, key=len, reverse=True):
-            new_text = xml_escape(mapping[old])
-            key = xml_escape(old)
-            if key in xml:
-                changed += xml.count(key)
-                xml = xml.replace(key, new_text)
+
+        # applied longest first, so a specific phrase is not half-rewritten
+        # by a shorter one inside it
+        by_length = sorted(wanted, key=len, reverse=True)
+
+        def one_si(m: re.Match) -> str:
+            nonlocal changed
+            body = m.group(1)
+            rendered = "".join(re.findall(r'<t[^>]*>(.*?)</t>', body, re.S))
+            if rendered in wanted:
+                changed += 1
+                new_text = xml_escape(wanted[rendered])
+                space = ' xml:space="preserve"' \
+                    if new_text != new_text.strip() else ""
+                return f"<si><t{space}>{new_text}</t></si>"
+            # a unit written inside a longer heading - "(US$MM)" at the end
+            # of a title - is a piece of an entry, not the whole of it
+            hit = False
+            for key in by_length:
+                if key and key in rendered:
+                    rendered = rendered.replace(key, xml_escape(wanted[key]))
+                    hit = True
+            if not hit:
+                return m.group(0)
+            changed += 1
+            space = ' xml:space="preserve"' \
+                if rendered != rendered.strip() else ""
+            return f"<si><t{space}>{rendered}</t></si>"
+
+        xml = re.sub(r'<si>(.*?)</si>', one_si, xml, flags=re.S)
         self._parts[part] = xml.encode("utf8")
         return changed
+
+    def scrub_parts(self, mapping: Dict[str, str],
+                    parts: Optional[List[str]] = None) -> int:
+        """Replace text in the parts that are not the grid.
+
+        A workbook carries text in more places than its cells: a chart
+        title typed as rich text, a series name cached inside the chart, a
+        text box on a drawing, a table's column name, the author recorded
+        in the document properties, and the absolute path of the folder
+        the file was last saved in. None of it is reachable through a
+        cell, and all of it survives every edit made to the sheets.
+        """
+        hits = 0
+        for name in (parts if parts is not None else list(self._parts)):
+            if name not in self._parts:
+                continue
+            if not (name.endswith(".xml") or name.endswith(".rels")):
+                continue
+            text = self._parts[name].decode("utf8", "replace")
+            before = text
+            for old in sorted(mapping, key=len, reverse=True):
+                key = xml_escape(old)
+                if key in text:
+                    hits += text.count(key)
+                    text = text.replace(key, xml_escape(mapping[old]))
+            if text != before:
+                self._parts[name] = text.encode("utf8")
+        return hits
+
+    def strip_stale_string_caches(self) -> int:
+        """Drop the remembered result of every formula that returned text.
+
+        A formula cell keeps its last computed value. Where that value is
+        text - a label mirrored from another sheet - it is the old label,
+        in the old language, and it is what a reader sees until the
+        workbook recalculates. Removing it makes the cell show what the
+        formula actually says.
+        """
+        self._flush()
+        dropped = 0
+        for name in list(self._parts):
+            if not name.startswith("xl/worksheets/sheet"):
+                continue
+            xml = self._parts[name].decode("utf8")
+
+            def one_cell(m: re.Match) -> str:
+                nonlocal dropped
+                cell = m.group(0)
+                if 't="str"' not in cell or "<f" not in cell:
+                    return cell
+                stripped = re.sub(r'<v>.*?</v>', "", cell, flags=re.S)
+                if stripped != cell:
+                    dropped += 1
+                return stripped
+
+            self._parts[name] = _CELL.sub(one_cell, xml).encode("utf8")
+        return dropped
+
+    def blank_orphan_strings(self) -> int:
+        """Empty the shared strings no cell points at any more.
+
+        Clearing a cell does not clear the text it used to show: the entry
+        stays in the string table, invisible in the grid and perfectly
+        visible to anything that reads the file as text. Amazon's company
+        name, the publisher's disclaimer and a dozen sheet titles survived
+        that way.
+
+        The entries are emptied rather than deleted, because every cell in
+        the workbook refers to a string by its POSITION in this table.
+        Removing one would shift every entry after it and silently
+        relabel the sheet.
+        """
+        part = "xl/sharedStrings.xml"
+        if part not in self._parts:
+            return 0
+        self._flush()
+        used = set()
+        for name, blob in self._parts.items():
+            if not name.startswith("xl/worksheets/sheet"):
+                continue
+            xml = blob.decode("utf8", "replace")
+            for m in _CELL.finditer(xml):
+                cell = m.group(0)
+                if 't="s"' not in cell:
+                    continue
+                v = re.search(r'<v>(\d+)</v>', cell)
+                if v:
+                    used.add(int(v.group(1)))
+        xml = self._parts[part].decode("utf8")
+        index = -1
+        blanked = 0
+
+        def one_si(m: re.Match) -> str:
+            nonlocal index, blanked
+            index += 1
+            if index in used or not re.search(
+                    r'<t[^>]*>[^<]', m.group(0)):
+                return m.group(0)
+            blanked += 1
+            return "<si><t></t></si>"
+
+        xml = re.sub(r'<si>.*?</si>', one_si, xml, flags=re.S)
+        self._parts[part] = xml.encode("utf8")
+        return blanked
 
     def strip_currency_symbols(self) -> int:
         """Take the dollar sign out of the number formats.
@@ -449,6 +584,212 @@ class WorkbookPatch:
         xml = xml.replace("&quot;$&quot;", "")
         self._parts[part] = xml.encode("utf8")
         return before
+
+    def delete_sheet(self, sheet: str) -> List[str]:
+        """Remove a worksheet and everything the package hangs off it.
+
+        A sheet is named in four places at once: the workbook's sheet list,
+        the relationship that list points through, the content-type
+        override for its part, and the part itself, plus whatever rels the
+        part owns (drawings, printer settings). Dropping only the part
+        leaves a workbook that names a sheet it no longer has, and Excel
+        repairs the file by throwing away more than the sheet.
+
+        The caller is responsible for checking that no formula and no
+        defined name still points at it; delete_sheet refuses if one does,
+        because a #REF! spread across the model is much harder to find
+        later than this exception is now.
+        """
+        if sheet not in self._sheet_part:
+            raise KeyError(f"no such sheet: {sheet}")
+        part = self._sheet_part[sheet]
+        quoted = f"'{sheet}'!"
+        bare = f"{sheet}!"
+        for name, blob in self._parts.items():
+            if name == part or not name.endswith(".xml"):
+                continue
+            if not (name.startswith("xl/worksheets/")
+                    or name.startswith("xl/charts/")
+                    or name == "xl/workbook.xml"):
+                continue
+            text = blob.decode("utf8", "replace")
+            if name == "xl/workbook.xml":
+                # the <sheet> entry itself is expected; look only at the
+                # defined names, which are what a formula would resolve
+                # through
+                text = "".join(re.findall(
+                    r'<definedName\b[^>]*>.*?</definedName>', text, re.S))
+            if quoted in text or bare in text:
+                raise ValueError(
+                    f"{name} still refers to {sheet}; not deleting")
+
+        removed = [part]
+        rels_part = part.replace("worksheets/", "worksheets/_rels/") + ".rels"
+        owned: List[str] = []
+        if rels_part in self._parts:
+            rels = self._parts[rels_part].decode("utf8")
+            for tgt in re.findall(r'Target="([^"]*)"', rels):
+                if tgt.startswith("../"):
+                    owned.append("xl/" + tgt[3:])
+            removed.append(rels_part)
+
+        # a drawing or printerSettings part is only ours to delete if no
+        # other sheet points at the same file
+        for cand in owned:
+            others = 0
+            for name, blob in self._parts.items():
+                if not name.endswith(".rels") or name == rels_part:
+                    continue
+                if cand.rsplit("/", 1)[-1] in blob.decode("utf8", "replace"):
+                    others += 1
+            if others == 0:
+                removed.append(cand)
+                drels = cand.replace("drawings/", "drawings/_rels/") + ".rels"
+                if drels in self._parts:
+                    removed.append(drels)
+
+        wb = self._parts["xl/workbook.xml"].decode("utf8")
+        rid = None
+        position = None
+        tags = re.findall(r'<sheet\b[^>]*/?>', wb)
+        for i, tag in enumerate(tags):
+            attrs = dict(re.findall(r'([\w:]+)="([^"]*)"', tag))
+            if attrs.get("name") == sheet:
+                rid = attrs.get("r:id")
+                position = i
+                wb = wb.replace(tag, "")
+        if position is None:
+            raise KeyError(f"{sheet} is not in the workbook's sheet list")
+
+        # A sheet-scoped defined name - a print area, a filter range - does
+        # not name its sheet. It carries localSheetId, which is the sheet's
+        # POSITION in the list above. Removing a sheet shifts every later
+        # position by one, so leaving these alone would quietly re-attach
+        # each print area to its neighbour. Names belonging to the sheet
+        # that is going are dropped; the rest are renumbered.
+        def fix_defined_name(m: re.Match) -> str:
+            whole = m.group(0)
+            lm = re.search(r'localSheetId="(\d+)"', whole)
+            if not lm:
+                return whole
+            idx = int(lm.group(1))
+            if idx == position:
+                return ""
+            if idx < position:
+                return whole
+            return whole[:lm.start()] + f'localSheetId="{idx - 1}"' \
+                + whole[lm.end():]
+
+        wb = re.sub(r'<definedName\b[^>]*>.*?</definedName>',
+                    fix_defined_name, wb, flags=re.S)
+        self._parts["xl/workbook.xml"] = wb.encode("utf8")
+
+        # the calculation chain lists cells by sheet index too, and is a
+        # cache Excel rebuilds when it is absent
+        for chain in ("xl/calcChain.xml",):
+            if chain in self._parts:
+                removed.append(chain)
+                wrels_chain = self._parts[
+                    "xl/_rels/workbook.xml.rels"].decode("utf8")
+                for tag in re.findall(r'<Relationship\b[^>]*/?>',
+                                      wrels_chain):
+                    if "calcChain" in tag:
+                        wrels_chain = wrels_chain.replace(tag, "")
+                self._parts["xl/_rels/workbook.xml.rels"] = \
+                    wrels_chain.encode("utf8")
+
+        wrels = self._parts["xl/_rels/workbook.xml.rels"].decode("utf8")
+        for tag in re.findall(r'<Relationship\b[^>]*/?>', wrels):
+            attrs = dict(re.findall(r'(\w+)="([^"]*)"', tag))
+            if attrs.get("Id") == rid:
+                wrels = wrels.replace(tag, "")
+        self._parts["xl/_rels/workbook.xml.rels"] = wrels.encode("utf8")
+
+        ct = self._parts["[Content_Types].xml"].decode("utf8")
+        for gone in removed:
+            for tag in re.findall(r'<Override\b[^>]*/?>', ct):
+                if f'PartName="/{gone}"' in tag:
+                    ct = ct.replace(tag, "")
+        self._parts["[Content_Types].xml"] = ct.encode("utf8")
+
+        # docProps/app.xml lists every sheet and counts them; a list that
+        # disagrees with the workbook makes Excel offer to repair the file
+        app_part = "docProps/app.xml"
+        if app_part in self._parts:
+            app = self._parts[app_part].decode("utf8")
+            entry = f"<vt:lpstr>{xml_escape(sheet)}</vt:lpstr>"
+            if entry in app:
+                app = app.replace(entry, "", 1)
+                app = re.sub(
+                    r'(<vt:vector size=")(\d+)(" baseType="lpstr">)',
+                    lambda m: m.group(1) + str(int(m.group(2)) - 1)
+                    + m.group(3), app, count=1)
+                app = re.sub(
+                    r'(<vt:lpstr>Worksheets</vt:lpstr></vt:variant>'
+                    r'<vt:variant><vt:i4>)(\d+)(</vt:i4>)',
+                    lambda m: m.group(1) + str(int(m.group(2)) - 1)
+                    + m.group(3), app, count=1)
+                self._parts[app_part] = app.encode("utf8")
+
+        for gone in removed:
+            self._parts.pop(gone, None)
+            if gone in self._names:
+                self._names.remove(gone)
+        self._sheet_part.pop(sheet, None)
+        self._pending.pop(sheet, None)
+        self._hidden.pop(sheet, None)
+        return removed
+
+    def remove_pictures(self) -> int:
+        """Drop every picture, keeping the charts in the same drawing part.
+
+        A drawing part holds pictures and charts side by side. Deleting the
+        part would take the charts with it, so only the <xdr:pic> anchors
+        go, along with the image relationships they were the last user of.
+        """
+        gone = 0
+        used: Dict[str, int] = {}
+        for name in list(self._parts):
+            if not re.fullmatch(r'xl/drawings/drawing\d+\.xml', name):
+                continue
+            xml = self._parts[name].decode("utf8")
+            kept = []
+            # the prefix is not fixed: this model writes xdr:, other
+            # writers declare the drawing namespace as the default and
+            # write the same elements bare
+            for m in re.finditer(
+                    r'<(xdr:)?(twoCellAnchor|oneCellAnchor|absoluteAnchor)\b'
+                    r'.*?</\1?\2>', xml, re.S):
+                if re.search(r'<(xdr:)?pic[\s>]', m.group(0)):
+                    kept.append(m.group(0))
+            for anchor in kept:
+                xml = xml.replace(anchor, "")
+                gone += 1
+            self._parts[name] = xml.encode("utf8")
+            rels_name = name.replace("drawings/", "drawings/_rels/") + ".rels"
+            if rels_name not in self._parts:
+                continue
+            rels = self._parts[rels_name].decode("utf8")
+            for tag in re.findall(r'<Relationship\b[^>]*/?>', rels):
+                attrs = dict(re.findall(r'(\w+)="([^"]*)"', tag))
+                tgt = attrs.get("Target", "")
+                if "media/" not in tgt:
+                    continue
+                if attrs.get("Id", "") in xml:
+                    used[tgt] = used.get(tgt, 0) + 1
+                    continue
+                rels = rels.replace(tag, "")
+            self._parts[rels_name] = rels.encode("utf8")
+
+        for name in list(self._parts):
+            if not name.startswith("xl/media/"):
+                continue
+            if any(name.endswith(t.rsplit("/", 1)[-1]) for t in used):
+                continue
+            self._parts.pop(name)
+            if name in self._names:
+                self._names.remove(name)
+        return gone
 
     def _force_recalc(self) -> None:
         """Ask for a recalculation without discarding how to calculate.
@@ -496,13 +837,24 @@ class WorkbookPatch:
 
             self._parts[part] = _ROW.sub(one_row, xml).encode("utf8")
 
-    def save(self, dest: str) -> None:
+    def _flush(self) -> None:
+        """Write the queued edits into the sheet XML.
+
+        Anything that reads the sheets rather than writing them - counting
+        which shared strings are still referenced, say - has to run after
+        this, or it reads the file as it was before the edit and reaches
+        the opposite conclusion.
+        """
         for sheet, se in self._pending.items():
             if se.edits:
                 self._patch_sheet(sheet, se.edits)
+        self._pending.clear()
         self._apply_hidden()
+        self._hidden.clear()
+
+    def save(self, dest: str) -> None:
+        self._flush()
         self._force_recalc()
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
             for n in self._names:
                 z.writestr(n, self._parts[n])
-        self._pending.clear()

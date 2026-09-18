@@ -126,6 +126,18 @@ def fill(src: str, dest: str) -> None:
                 w.set_value(RD, f"{col}{row}", round(year[key], 3))
         w.set_value(RD, f"{col}{V.PRICE_ROW}", year["price"])
         w.set_value(RD, f"{col}{V.DPS_ROW}", round(year["dps"], 3))
+
+    # The WACC inputs the blank template leaves empty. They are invented,
+    # like every other figure in this file, and they are here only so the
+    # DCF has something to discount with - with them empty the whole
+    # valuation half stays blank, which is correct for a template and
+    # useless for an example. Anyone using the real template supplies
+    # their own.
+    for ref, value in (("F31", 0.030), ("G31", 0.034),   # lãi suất phi rủi ro
+                       ("F32", 0.075), ("G32", 0.085),   # phần bù vốn cổ phần
+                       ("F37", 0.90), ("G37", 1.10)):    # beta
+        w.set_value("Control Panel", ref, value)
+
     w.save(dest)
     print(f"wrote {dest}")
 

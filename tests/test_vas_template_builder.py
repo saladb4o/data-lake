@@ -281,3 +281,278 @@ class TestColumnsAreOnlyEverWidened:
         ws = openpyxl.load_workbook(out)["Data"]
         assert round(ws.column_dimensions["C"].width, 1) == 15.5
         assert round(ws.column_dimensions["D"].width, 1) == 15.5
+
+
+@pytest.fixture
+def two_sheets(tmp_path):
+    """Two sheets, where only one is referenced from elsewhere."""
+    path = tmp_path / "two.xlsx"
+    wb = openpyxl.Workbook()
+    keep = wb.active
+    keep.title = "Keep"
+    keep["A1"] = 1
+    gone = wb.create_sheet("Gone")
+    gone["A1"] = 2
+    wb.save(path)
+    return str(path)
+
+
+class TestDeletingASheetLeavesNoTraceOfIt:
+    def test_the_sheet_and_its_part_are_both_gone(self, two_sheets, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(two_sheets)
+        removed = w.delete_sheet("Gone")
+        w.save(out)
+        wb = openpyxl.load_workbook(out)
+        assert wb.sheetnames == ["Keep"]
+        with zipfile.ZipFile(out) as z:
+            names = z.namelist()
+            assert not any(r in names for r in removed)
+            ct = z.read("[Content_Types].xml").decode()
+            for r in removed:
+                assert f'PartName="/{r}"' not in ct
+            rels = z.read("xl/_rels/workbook.xml.rels").decode()
+            book = z.read("xl/workbook.xml").decode()
+            import re
+            rids = set(re.findall(r'Id="([^"]+)"', rels))
+            for rid in re.findall(r'r:id="([^"]+)"', book):
+                assert rid in rids
+
+    def test_a_sheet_something_still_points_at_is_refused(
+            self, two_sheets, tmp_path):
+        wb = openpyxl.load_workbook(two_sheets)
+        wb["Keep"]["B1"] = "=Gone!A1"
+        src = str(tmp_path / "linked.xlsx")
+        wb.save(src)
+        w = WorkbookPatch(src)
+        with pytest.raises(ValueError):
+            w.delete_sheet("Gone")
+        assert "Gone" in w.sheets()
+
+    def test_the_part_count_in_app_xml_follows(self, two_sheets, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(two_sheets)
+        before = w._parts.get("docProps/app.xml", b"").decode()
+        w.delete_sheet("Gone")
+        w.save(out)
+        if not before:
+            pytest.skip("this writer stores no app.xml")
+        with zipfile.ZipFile(out) as z:
+            app = z.read("docProps/app.xml").decode()
+        assert "<vt:lpstr>Gone</vt:lpstr>" not in app
+
+
+class TestRemovingPicturesKeepsTheCharts:
+    """A picture and a chart can share one drawing part.
+
+    Deleting the part would take the chart with it, so only the picture
+    anchors go. The element prefix is not fixed: this model writes xdr:,
+    while openpyxl declares the drawing namespace as the default and
+    writes the same elements bare. A pattern that knows only one of the
+    two removes nothing and says so by returning zero, which is exactly
+    what a caller reads as "there were no pictures".
+    """
+
+    @pytest.mark.parametrize("prefix", ["", "xdr:"])
+    def test_a_chart_survives_its_neighbour_being_removed(
+            self, tmp_path, prefix):
+        import re
+        src = tmp_path / "chart.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Data"
+        for i, v in enumerate([1, 2, 3], start=1):
+            ws.cell(row=i, column=1, value=v)
+        chart = openpyxl.chart.BarChart()
+        chart.add_data(openpyxl.chart.Reference(
+            ws, min_col=1, min_row=1, max_row=3))
+        ws.add_chart(chart, "C1")
+        wb.save(src)
+
+        raw = {}
+        with zipfile.ZipFile(src) as z:
+            for n in z.namelist():
+                raw[n] = z.read(n)
+        target = next(n for n in raw
+                      if re.fullmatch(r"xl/drawings/drawing\d+\.xml", n))
+        p = prefix
+        pic = (f"<{p}twoCellAnchor><{p}from><{p}col>8</{p}col>"
+               f"<{p}row>0</{p}row></{p}from>"
+               f"<{p}pic><{p}nvPicPr/><{p}blipFill/></{p}pic>"
+               f"<{p}clientData/></{p}twoCellAnchor>")
+        d = raw[target].decode()
+        if prefix:
+            d = d.replace(
+                "<wsDr ",
+                '<wsDr xmlns:xdr="http://schemas.openxmlformats.org/'
+                'drawingml/2006/spreadsheetDrawing" ', 1)
+        raw[target] = d.replace("</wsDr>", pic + "</wsDr>").encode()
+        patched = tmp_path / "withpic.xlsx"
+        with zipfile.ZipFile(patched, "w") as z:
+            for n, b in raw.items():
+                z.writestr(n, b)
+
+        w = WorkbookPatch(str(patched))
+        assert w.remove_pictures() == 1
+        out = str(tmp_path / "out.xlsx")
+        w.save(out)
+        with zipfile.ZipFile(out) as z:
+            after = z.read(target).decode()
+        assert f"<{p}pic>" not in after
+        assert "graphicFrame" in after
+
+
+class TestASheetScopedNameFollowsItsSheet:
+    """localSheetId is a position, not a name.
+
+    A print area, a filter range or any sheet-scoped defined name does not
+    say which sheet it belongs to; it carries the sheet's index in the
+    workbook's list. Remove a sheet and every later index means a
+    different sheet than it did - so each print area would quietly attach
+    itself to its neighbour. Nothing about the file would look wrong.
+    """
+
+    @pytest.fixture
+    def scoped(self, tmp_path):
+        path = tmp_path / "scoped.xlsx"
+        wb = openpyxl.Workbook()
+        first = wb.active
+        first.title = "Gone"
+        second = wb.create_sheet("Middle")
+        third = wb.create_sheet("Last")
+        second.print_area = "A1:C3"
+        third.print_area = "A1:D4"
+        wb.save(path)
+        return str(path)
+
+    def test_indices_after_the_deleted_sheet_move_down(
+            self, scoped, tmp_path):
+        import re
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(scoped)
+        w.delete_sheet("Gone")
+        w.save(out)
+        with zipfile.ZipFile(out) as z:
+            book = z.read("xl/workbook.xml").decode()
+        order = [m for m in re.findall(r'<sheet\b[^>]*name="([^"]+)"', book)]
+        assert order == ["Middle", "Last"]
+        areas = {}
+        for m in re.finditer(
+                r'<definedName\b([^>]*)>(.*?)</definedName>', book, re.S):
+            attrs = dict(re.findall(r'([\w:.]+)="([^"]*)"', m.group(1)))
+            if attrs.get("name") == "_xlnm.Print_Area":
+                areas[int(attrs["localSheetId"])] = m.group(2)
+        assert set(areas) == {0, 1}
+        assert "Middle" in areas[0]
+        assert "Last" in areas[1]
+
+    def test_the_calculation_chain_is_dropped(self, scoped, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(scoped)
+        w._parts["xl/calcChain.xml"] = b"<calcChain/>"
+        w._names.append("xl/calcChain.xml")
+        w.delete_sheet("Gone")
+        w.save(out)
+        with zipfile.ZipFile(out) as z:
+            assert "xl/calcChain.xml" not in z.namelist()
+            rels = z.read("xl/_rels/workbook.xml.rels").decode()
+        assert "calcChain" not in rels
+
+
+class TestALabelSplitAcrossRunsIsStillFound:
+    def test_a_superscript_footnote_does_not_hide_the_label(self, tmp_path):
+        """"Current Trading Multiples" with a raised 3 is two runs.
+
+        Searched for as the reader sees it, the label is in neither run,
+        so a plain text search finds nothing and reports success.
+        """
+        src = tmp_path / "rich.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active["A1"] = "placeholder"
+        wb.save(src)
+        raw = {}
+        with zipfile.ZipFile(src) as z:
+            for n in z.namelist():
+                raw[n] = z.read(n)
+        raw["xl/sharedStrings.xml"] = (
+            '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats'
+            '.org/spreadsheetml/2006/main" count="1" uniqueCount="1">'
+            '<si><r><t>Current Trading Multiples</t></r>'
+            '<r><rPr><vertAlign val="superscript"/></rPr><t>3</t></r></si>'
+            "</sst>").encode()
+        patched = tmp_path / "patched.xlsx"
+        with zipfile.ZipFile(patched, "w") as z:
+            for n, b in raw.items():
+                z.writestr(n, b)
+
+        w = WorkbookPatch(str(patched))
+        assert w.replace_shared_strings(
+            {"Current Trading Multiples3": "Bội số giao dịch hiện tại"}) == 1
+        assert b"B\xe1\xbb\x99i s\xe1\xbb\x91" in w._parts[
+            "xl/sharedStrings.xml"]
+
+    def test_a_unit_inside_a_longer_heading_is_replaced(self, tmp_path):
+        """The unit is a piece of the heading, not the whole of it."""
+        src = tmp_path / "u.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active["A1"] = "placeholder"
+        wb.save(src)
+        raw = {}
+        with zipfile.ZipFile(src) as z:
+            for n in z.namelist():
+                raw[n] = z.read(n)
+        raw["xl/sharedStrings.xml"] = (
+            '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats'
+            '.org/spreadsheetml/2006/main" count="1" uniqueCount="1">'
+            "<si><t>Revenue Summary (US$MM)</t></si></sst>").encode()
+        patched = tmp_path / "patched.xlsx"
+        with zipfile.ZipFile(patched, "w") as z:
+            for n, b in raw.items():
+                z.writestr(n, b)
+        w = WorkbookPatch(str(patched))
+        assert w.replace_shared_strings({"US$MM": "triệu đồng"}) == 1
+        assert "triệu đồng" in w._parts["xl/sharedStrings.xml"].decode()
+        assert "Revenue Summary" in w._parts["xl/sharedStrings.xml"].decode()
+
+
+class TestReadingTheSheetsBackWaitsForTheEdits:
+    def test_a_string_freed_by_a_queued_edit_counts_as_unused(
+            self, tmp_path):
+        """Edits are queued, not written when they are asked for.
+
+        Counting which shared strings are still referenced before the
+        queue is written reads the sheet as it was, so a label the edit
+        just removed still looks used and survives in the table - visible
+        to anything that reads the file as text, invisible in the grid.
+        """
+        src = tmp_path / "s.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active["A1"] = "placeholder"
+        wb.save(src)
+        raw = {}
+        with zipfile.ZipFile(src) as z:
+            for n in z.namelist():
+                raw[n] = z.read(n)
+        raw["xl/sharedStrings.xml"] = (
+            '<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats'
+            '.org/spreadsheetml/2006/main" count="1" uniqueCount="1">'
+            "<si><t>Amazon.com, Inc.</t></si></sst>").encode()
+        target = next(n for n in raw if n.startswith("xl/worksheets/sheet"))
+        body = raw[target].decode()
+        body = body.replace(
+            "</sheetData>",
+            '<row r="9"><c r="A9" t="s"><v>0</v></c></row></sheetData>')
+        raw[target] = body.encode()
+        patched = tmp_path / "p.xlsx"
+        with zipfile.ZipFile(patched, "w") as z:
+            for n, b in raw.items():
+                z.writestr(n, b)
+
+        w = WorkbookPatch(str(patched))
+        name = w.sheets()[0]
+        w.clear(name, "A9")
+        assert w.blank_orphan_strings() == 1
+        out = str(tmp_path / "out.xlsx")
+        w.save(out)
+        with zipfile.ZipFile(out) as z:
+            assert b"Amazon" not in z.read("xl/sharedStrings.xml")
