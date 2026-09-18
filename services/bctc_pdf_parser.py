@@ -291,6 +291,33 @@ _CODE_AND_FIGURE = re.compile(
     r"(?<![\d.])(\d{1,3})\s+\(?-?\d{1,3}(?:[.,]\d{3}){2,}",
 )
 
+# A balance sheet prints how its own codes add up: "(100=110+120+130+140+150)".
+# An income statement and a cash flow statement print the same kind of
+# formula, but theirs are built from one and two digit codes, because that
+# is how their lines are numbered. A three digit total made of three digit
+# parts occurs in no other statement.
+_COMPOSITION_FORMULA = re.compile(r"\(\s*(\d{3})\s*=\s*([\d\s+\-]{7,})\)")
+
+
+def balance_sheet_composition_formulas(text: str) -> int:
+    """How many times a page states a balance sheet code composition.
+
+    These survive what headings do not. BSR's Q4 filing carries a font
+    that drops every accented character, so the page holding the balance
+    sheet says "A -" where it should say a section name and offers no
+    spelling of its own title at all - but it still prints
+    "(100=110+120+130+140+150)", in digits, intact. A label is an
+    assertion; a composition the document prints about itself is closer to
+    a measurement.
+    """
+    found = 0
+    for total, members in _COMPOSITION_FORMULA.findall(text or ""):
+        parts = [p for p in re.findall(r"\d+", members)]
+        if len(parts) >= 2 and all(len(p) == 3 for p in parts):
+            if int(total) in BALANCE_SHEET_MARKER_CODES:
+                found += 1
+    return found
+
 
 def looks_like_a_statement_table(text: str) -> bool:
     """A column of short codes against figures in the millions or more.
@@ -319,6 +346,9 @@ def statement_from_its_rows(text: str):
     scores = {}
     for key, markers in STATEMENT_ROW_MARKERS.items():
         scores[key] = sum(1 for m in markers if squash(m) in squashed)
+
+    if balance_sheet_composition_formulas(text):
+        return "balance_sheet"
 
     if len(codes & BALANCE_SHEET_MARKER_CODES) >= 3 and scores["balance_sheet"]:
         return "balance_sheet"

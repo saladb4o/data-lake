@@ -30,6 +30,8 @@ from services.bctc_pdf_parser import (
     page_own_text,
     repeated_overlay_lines,
     statement_from_its_rows,
+    balance_sheet_composition_formulas,
+    squash,
 )
 
 fitz = pytest.importorskip("fitz")
@@ -300,3 +302,44 @@ class TestASpuriousHeadingDoesNotBlockTheTable:
             found = parser.locate_statement_pages()
         assert found["balance_sheet"] == [0]
         assert parser.located_by[0] == "heading"
+
+
+class TestABalanceSheetNamesItselfInDigits:
+    """BSR's Q4 filing, run 35311827356.
+
+    Its font drops every accented character. Page 3 is the balance sheet
+    and offers no spelling of "BANG CAN DOI KE TOAN" at all - the section
+    label survives as "A -". The page was recognised as a table and then
+    discarded, because nothing on it said which statement it was, and a
+    page assigned to the wrong extractor is worse than a page nobody
+    reads. Meanwhile a notes page matched a heading fragment and took the
+    balance sheet, so the run parsed the notes and reported zero rows.
+
+    What the page does still print, in digits, is how its own codes add
+    up. That is what is read here.
+    """
+
+    ASSETS = "A - (100=110+120+130+140+150) 100 70.173.060.674.346"
+    CAPITAL = "C - (440 = 300 + 400) 440 24.583.223.364.493"
+
+    def test_the_page_offers_no_heading_to_read(self):
+        assert squash("BANG CAN DOI KE TOAN") not in squash(self.ASSETS)
+
+    def test_the_row_labels_are_gone_too(self):
+        # Nothing in STATEMENT_ROW_MARKERS can match what the font left.
+        assert statement_from_its_rows("A - C - 100 300 440") is None
+
+    def test_a_composition_of_three_digit_codes_settles_it(self):
+        assert statement_from_its_rows(self.ASSETS) == "balance_sheet"
+        assert statement_from_its_rows(self.CAPITAL) == "balance_sheet"
+
+    def test_an_income_statement_formula_is_not_mistaken_for_one(self):
+        # The income statement prints formulas too, from its own codes.
+        assert balance_sheet_composition_formulas("(20=10-11)") == 0
+        assert balance_sheet_composition_formulas("(50 = 30 + 40)") == 0
+
+    def test_a_cash_flow_formula_is_not_mistaken_for_one(self):
+        assert balance_sheet_composition_formulas("(20=1+2+3)") == 0
+
+    def test_a_single_member_is_not_a_composition(self):
+        assert balance_sheet_composition_formulas("(100=110)") == 0
