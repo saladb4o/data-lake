@@ -209,9 +209,12 @@ class TestTheStructuralPassNeverOverrulesAHeading:
         assert found["balance_sheet"] == [1]
         assert parser.located_by[1] == "heading"
 
-    def test_a_statement_located_by_heading_is_not_added_to_structurally(self):
-        # A document whose headings were read is located by its headings,
-        # so a notes page shaped like a table cannot join the list.
+    def test_a_heading_over_a_single_line_does_not_settle_the_statement(self):
+        # This asserted the opposite until run 35303194219, on the reading
+        # that any heading hit means the statement was found. It does not:
+        # one row under a heading is a mention, and treating it as the
+        # statement is what left BSR's Q4 balance sheet on a notes page
+        # while the pages holding the table went unread.
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "mixed.pdf")
             doc = fitz.open()
@@ -226,4 +229,74 @@ class TestTheStructuralPassNeverOverrulesAHeading:
             doc.save(path)
             doc.close()
             found = BCTCPdfParser(path, symbol="BSR").locate_statement_pages()
+        assert found["balance_sheet"] == [0, 1]
+
+
+class TestASpuriousHeadingDoesNotBlockTheTable:
+    """Run 35303194219 showed the structural pass firing on nothing.
+
+    BSR's Q4 filing still returned zero items, and the reason was the rule
+    meant to keep the structural pass safe. Its balance sheet had been
+    "placed" on page 10 - a notes page that kept a fragment of the form
+    code and no table at all - and because the statement was placed, the
+    structural pass skipped the pages that did hold it.
+
+    A heading on a page with no table is a cross-reference. It can still
+    locate the page, since a statement may begin at the foot of one, but
+    it no longer counts as having found the statement.
+    """
+
+    @staticmethod
+    def _build(tmpdir):
+        path = os.path.join(tmpdir, "bsr_q4.pdf")
+        doc = fitz.open()
+        doc.new_page().insert_text((40, 80), "CONG TY CO PHAN LOC HOA DAU",
+                                   fontsize=11)
+        table = doc.new_page()
+        for row, line in enumerate(
+                TestATableIsRecognisedByItsShape.BSR_PAGE.splitlines()):
+            table.insert_text((40, 60 + row * 13), line, fontsize=9)
+        notes = doc.new_page()
+        notes.insert_text((40, 80), "Xem BANG CAN DOI KE TOAN trang truoc",
+                          fontsize=10)
+        notes.insert_text((40, 100), "Thuyet minh ve chinh sach ke toan",
+                          fontsize=10)
+        doc.save(path)
+        doc.close()
+        return path
+
+    def test_the_real_table_is_found_despite_the_cross_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            parser = BCTCPdfParser(self._build(tmp), symbol="BSR")
+            found = parser.locate_statement_pages()
+        assert 1 in found["balance_sheet"]
+        assert parser.located_by[1] == "table"
+
+    def test_the_cross_reference_page_is_still_listed(self):
+        # It is not evidence of nothing - a statement can begin at the
+        # foot of a page - so it keeps its place in the list.
+        with tempfile.TemporaryDirectory() as tmp:
+            found = BCTCPdfParser(self._build(tmp),
+                                  symbol="BSR").locate_statement_pages()
+        assert 2 in found["balance_sheet"]
+
+    def test_a_heading_on_a_real_table_still_blocks_the_structural_pass(self):
+        # The guard against loosening this into "anything goes".
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "headed.pdf")
+            doc = fitz.open()
+            page = doc.new_page()
+            page.insert_text((40, 50), "BANG CAN DOI KE TOAN", fontsize=13)
+            for row, line in enumerate(
+                    TestATableIsRecognisedByItsShape.BSR_PAGE.splitlines()):
+                page.insert_text((40, 80 + row * 13), line, fontsize=9)
+            other = doc.new_page()
+            for row, line in enumerate(
+                    TestATableIsRecognisedByItsShape.BSR_PAGE.splitlines()):
+                other.insert_text((40, 60 + row * 13), line, fontsize=9)
+            doc.save(path)
+            doc.close()
+            parser = BCTCPdfParser(path, symbol="BSR")
+            found = parser.locate_statement_pages()
         assert found["balance_sheet"] == [0]
+        assert parser.located_by[0] == "heading"

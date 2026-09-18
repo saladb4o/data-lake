@@ -901,6 +901,13 @@ class BCTCPdfParser:
         # Pass 1: Native Vector Text
         with fitz.open(self.pdf_path) as doc:
             structural: Dict[int, str] = {}
+            # Statements a heading placed on a page that is also shaped
+            # like one. A heading match on a page with no table is a
+            # cross-reference, and run 35303194219 showed what it costs:
+            # BSR's Q4 balance sheet was "placed" on page 10, a notes page
+            # keeping a fragment of the form code, and that one spurious
+            # hit blocked the structural pass for the whole statement.
+            placed: set = set()
             for page_idx in range(len(doc)):
                 txt_raw = page_own_text(doc[page_idx].get_text(),
                                         self.overlay_lines)
@@ -925,10 +932,13 @@ class BCTCPdfParser:
                                        "income_statement", "cash_flow")
                            if any(squash(w) in page_squashed
                                   for w in STATEMENT_HEADINGS[k])]
+                    shaped = looks_like_a_statement_table(txt_raw)
                     if not names_all_the_statements(hit):
                         for key in hit:
                             locations[key].append(page_idx)
                             self.located_by.setdefault(page_idx, "heading")
+                            if shaped:
+                                placed.add(key)
 
                     # Where no heading was readable, the table still is.
                     # BSR's embedded font drops accented characters, so
@@ -949,7 +959,7 @@ class BCTCPdfParser:
             # nowhere at all. A document whose heading was read is
             # located by its heading, and this cannot overrule it.
             unheaded = {k for k in ("balance_sheet", "income_statement",
-                                    "cash_flow") if not locations[k]}
+                                    "cash_flow") if k not in placed}
             for page_idx, key in sorted(structural.items()):
                 if key not in unheaded:
                     continue
@@ -986,6 +996,7 @@ class BCTCPdfParser:
                         for key in hit:
                             if p_idx not in locations[key]:
                                 locations[key].append(p_idx)
+                            self.located_by.setdefault(p_idx, "ocr heading")
 
                     # Early exit if core statements are found
                     if locations["balance_sheet"] and locations["auditor_report"] and locations["income_statement"] and (locations["cash_flow"] or p_idx >= 12):
@@ -1595,6 +1606,28 @@ class BCTCPdfParser:
             "repaired_from": "code 70 comparative column",
         }
 
+    @staticmethod
+    def _is_a_code_and_not_a_page_number(lines: List[str], i: int) -> bool:
+        """Whether a bare one or two digit line is a TT200 code.
+
+        It is the same digits either way, so the line alone cannot say.
+        What separates them is what surrounds them: a statement prints
+        "label, code, figure" and a page number stands on its own at the
+        foot of the page with figures above it.
+
+        Run 35220475916 showed the cost of not asking. FPT's cash flow
+        came back in the order 1, 2, 3, 60, 20, 21 - code 60 bound before
+        code 20 on a statement that prints them the other way round - and
+        code 1 had taken the closing cash balance, 1,905,249,672,046,
+        which is code 70's figure. Those rows counted as extracted like
+        any other, and the opening-balance identity missed by 1.8
+        trillion because of them.
+        """
+        if i >= len(lines) - 2:
+            return False  # The foot of the page is where page numbers live.
+        window = lines[max(0, i - 3):i]
+        return any(sum(ch.isalpha() for ch in ln) >= 3 for ln in window)
+
     def _parse_ocr_lines_for_cash_flow(self, lines: List[str], items_dict: Dict[int, Any]) -> None:
         """Parses OCR output lines into TT200 Cash Flow items."""
         for i, line in enumerate(lines):
@@ -1602,6 +1635,8 @@ class BCTCPdfParser:
             if m:
                 code = int(m.group(1))
                 if code not in TT200_CASH_FLOW_CODES:
+                    continue
+                if not self._is_a_code_and_not_a_page_number(lines, i):
                     continue
                 numbers = []
                 for next_line in lines[i + 1:i + 6]:
