@@ -959,33 +959,53 @@ def build_tidy(w: WorkbookPatch) -> None:
 
 
 def build_wacc(w: WorkbookPatch) -> None:
-    """Take out the eighteen US comparables and let beta be an input.
+    """Re-shape the comparables table for a Vietnamese peer group.
 
-    The sheet derived beta as the median of Walmart, Alphabet, Oracle and
-    fifteen other US names, unlevered against their own capital
-    structures. Those betas were left over from the Amazon model. Clearing
-    the comparables (which had to go - they valued a Vietnamese company
-    against Walmart) left the median blank, and a blank beta silently
-    emptied the whole chain down to enterprise value.
+    The sheet derived beta as the median of eighteen US comparables -
+    Walmart, Alphabet, Oracle - unlevered against their own capital
+    structures, with the betas typed in from a 2021 pull. Those had to go:
+    a median of US retail and tech betas is not the systematic risk of a
+    company listed in Ho Chi Minh City, and nothing on the sheet said
+    where the number came from.
 
-    Beta is therefore a number the user states, low and high, the same way
-    they state the risk-free rate next to it. Nothing here invents one.
+    The table stays, in the same shape, because the method is sound - it
+    is the constituents that were wrong. The columns that must be
+    measured (debt, equity, tax rate, levered beta) are inputs; the two
+    that follow from them are formulas. scripts/xlsxvas/fill_peers.py
+    fills the table for one symbol from the repository's own peer engine
+    and price history, and stamps what it used.
+
+    Beta reaches the cost of equity by whichever route is available: the
+    table's median unlevered beta relevered to this company's capital
+    structure when the table is filled, and the beta typed on the Control
+    Panel when it is not. Neither route invents one.
     """
-    for row in range(10, 30):
-        for col in "BCDEFGHIJK":
+    for row in range(10, 28):
+        for col in "BCDEFIJ":
             w.clear(WC, f"{col}{row}")
-    for ref in ("C6", "E8", "F8", "G8", "H8", "I8", "J8", "K8",
-                "B9", "C9", "D9", "E9", "F9", "G9", "H9", "I9", "J9", "K9",
-                "C31", "C32"):
-        w.clear(WC, ref)
-    # the comparables filled columns B..K and the calculation that used
-    # them sits in M..R on the SAME rows, so the emptied space is a block
-    # of columns, not a block of rows
-    w.hide_columns(WC, "B", "L")
-    w.widen_columns(WC, "M", "M", 34.0)     # the label column
-    w.widen_columns(WC, "Q", "R", 13.0)     # low and high
+        w.set_formula(WC, f"G{row}", f'IFERROR(E{row}/F{row},"")')
+        w.set_formula(WC, f"H{row}", f'IFERROR(E{row}/(F{row}+E{row}),"")')
+        w.set_formula(
+            WC, f"K{row}",
+            f'IF(OR(J{row}="",G{row}=""),"",J{row}/(1+(1-I{row})*G{row}))')
 
-    w.set_value(CP, "B37", "Beta vốn chủ sở hữu (có đòn bẩy)")
+    w.set_value(WC, "C6", "Beta của doanh nghiệp cùng ngành")
+    for ref, text in (("B9", "Mã CK"), ("C9", "Tên doanh nghiệp"),
+                      ("D9", "Sàn"), ("E9", "Nợ vay"),
+                      ("F9", "Vốn chủ sở hữu"), ("G9", "Nợ / VCSH"),
+                      ("H9", "Nợ / tổng vốn"), ("I9", "Thuế suất"),
+                      ("J9", "Beta có đòn bẩy"), ("K9", "Beta không đòn bẩy"),
+                      ("E8", ""), ("F8", ""), ("G8", ""), ("H8", ""),
+                      ("I8", ""), ("J8", ""), ("K8", "")):
+        w.set_value(WC, ref, text or None)
+    w.set_value(WC, "C28", "Bình quân")
+    w.set_value(WC, "C29", "Trung vị")
+    w.set_value(WC, "C31", "Ghi chú:")
+    w.set_value(WC, "C32", "(chưa nạp - chạy scripts/xlsxvas/fill_peers.py)")
+    w.widen_columns(WC, "C", "C", 30.0)
+    w.widen_columns(WC, "E", "K", 13.0)
+
+    w.set_value(CP, "B37", "Beta vốn chủ sở hữu (dùng khi bảng trống)")
     w.copy_row_style(CP, 35, 37, "BFG")
     w.set_value(CP, "F37", None)
     w.set_value(CP, "G37", None)
@@ -1003,9 +1023,14 @@ def build_wacc(w: WorkbookPatch) -> None:
     # carried through as blank, and every cell built on one stays blank
     # until it is supplied.
     for out, src in (("Q24", "$F$31"), ("R24", "$G$31"),
-                     ("Q25", "$F$32"), ("R25", "$G$32"),
-                     ("Q29", "$F$37"), ("R29", "$G$37")):
+                     ("Q25", "$F$32"), ("R25", "$G$32")):
         w.set_formula(WC, out, f"IF('{CP}'!{src}=\"\",\"\",'{CP}'!{src})")
+    # the table when it has been filled, the typed beta when it has not
+    for col, src in (("Q", "$F$37"), ("R", "$G$37")):
+        w.set_formula(
+            WC, f"{col}29",
+            f'IF($K$29<>"",$K$29*(1+$R$16*(1-{col}20)),'
+            f"IF('{CP}'!{src}=\"\",\"\",'{CP}'!{src}))")
     for col in ("Q", "R"):
         w.set_formula(
             WC, f"{col}30",
@@ -1016,6 +1041,8 @@ def build_wacc(w: WorkbookPatch) -> None:
             f'IF({col}30="","",({col}30*{col}11)+({col}10*{col}21))')
     w.set_formula(WC, "R33",
                   'IF(OR(Q32="",R32=""),"",ROUND(AVERAGE(Q32:R32),2))')
+    w.widen_columns(WC, "M", "M", 34.0)     # the label column
+    w.widen_columns(WC, "Q", "R", 13.0)     # low and high
 
 
 def build_dcf_gate(w: WorkbookPatch) -> None:
