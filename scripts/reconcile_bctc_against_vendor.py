@@ -221,7 +221,13 @@ def check_identities(items: Dict[Any, Any],
             _val(items, c) or 0.0 for c in minus)
         diff = lhs - got
         closed = abs(diff) <= max(ABS_TOLERANCE, abs(got) * REL_TOLERANCE)
-        if closed:
+        if abs(got) <= ABS_TOLERANCE and abs(lhs) <= ABS_TOLERANCE:
+            # 0 = 0 tests nothing. REE's native Q4 bound codes 400 and 440
+            # to zero and scored two passing balance-sheet identities on
+            # it, which put "2/0" in the verdict table for a document that
+            # had established nothing. A vacuous check is not a result.
+            status = "vacuous"
+        elif closed:
             status = "ok"
         elif absent:
             status = "unclear"
@@ -451,6 +457,13 @@ def run_symbol(symbol: str, year: int, limit: int,
         counts = {n: (result.get(n) or {}).get("items", 0)
                   for n in ("balance_sheet", "income_statement", "cash_flow")}
         print(f"- items: {counts}")
+        # Every extractor is gated on the locator, so zero items has two
+        # causes that look identical from the count alone: no page found,
+        # or a page found and nothing read off it. Two changes landed on
+        # the locator at once - matching without spaces, and a fallback for
+        # headings past page 26 - and without this line a run cannot say
+        # which of them fired, or whether either did.
+        print(f"- pages located: `{result.get('located')}`")
         print()
 
         entry: Dict[str, Any] = {"symbol": symbol, "scope": scope,
@@ -485,6 +498,8 @@ def run_symbol(symbol: str, year: int, limit: int,
                                           if c["status"] == "BROKEN")
             entry[f"{name}_unclear"] = sum(1 for c in checks
                                            if c["status"] == "unclear")
+            entry[f"{name}_vacuous"] = sum(1 for c in checks
+                                           if c["status"] == "vacuous")
 
         if scope == "consolidated" and period in ("Q4", "FY") and cf_items:
             print(f"### {symbol}: BCTC against VNDIRECT for {year}")
@@ -524,8 +539,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # The verdict goes last because that is where a long log gets read from.
     print("# Verdict")
     print()
-    print("| symbol | scope | period | route | BS ok/bad | IS ok/bad | "
-          "CF ok/bad | vendor |")
+    print("| symbol | scope | period | route | BS ok/bad/void | "
+          "IS ok/bad/void | CF ok/bad/void | vendor |")
     print("|---|---|---|---|---|---|---|---|")
     for v in verdicts:
         if v.get("note"):
@@ -534,9 +549,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             continue
         print(f"| {v['symbol']} | {v.get('scope')} | {v.get('period')} | "
               f"{v.get('route')} | "
-              f"{v.get('balance_sheet_ok',0)}/{v.get('balance_sheet_broken',0)} | "
-              f"{v.get('income_statement_ok',0)}/{v.get('income_statement_broken',0)} | "
-              f"{v.get('cash_flow_ok',0)}/{v.get('cash_flow_broken',0)} | "
+              f"{v.get('balance_sheet_ok',0)}/{v.get('balance_sheet_broken',0)}"
+              f"/{v.get('balance_sheet_vacuous',0)} | "
+              f"{v.get('income_statement_ok',0)}/{v.get('income_statement_broken',0)}"
+              f"/{v.get('income_statement_vacuous',0)} | "
+              f"{v.get('cash_flow_ok',0)}/{v.get('cash_flow_broken',0)}"
+              f"/{v.get('cash_flow_vacuous',0)} | "
               f"{v.get('vendor','')} |")
     print()
     parsed = [v for v in verdicts if not v.get("note")]

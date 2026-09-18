@@ -117,6 +117,54 @@ TT200_BALANCE_SHEET_CODES = {
     440: "TỔNG CỘNG NGUỒN VỐN"
 }
 
+# The headings that mark each statement, in one place.
+#
+# These used to be written twice - once in the native pass of
+# locate_statement_pages and once in the OCR pass - and the two lists had
+# drifted apart. The native pass demanded the whole of "BANG CAN DOI KE
+# TOAN" while the OCR pass accepted "BANG CAN DOI", so a document whose
+# heading the OCR pass would have caught was missed when it happened to
+# carry vector text. Run 35222930322 measured the result: six native
+# documents produced 44 items between them and almost no cash flow at all,
+# against forty-plus items per document on the OCR route.
+#
+# Both passes now match against this, with squash() applied to each side.
+STATEMENT_HEADINGS = {
+    "auditor_report": [
+        "BAO CAO CUA CONG TY KIEM TOAN", "BAO CAO KIEM TOAN",
+        "KIEM TOAN VIEN", "AUDITOR", "REVIEW REPORT",
+    ],
+    "balance_sheet": [
+        "BANG CAN DOI KE TOAN", "CAN DOI KE TOAN", "BANG CAN DOI",
+        "MAU SO B 01", "MAU B 01", "B 01/TCTD", "B 01 - TCTD",
+        "B 01 - CTC", "B 01 - DN",
+        "FINANCIAL POSITION", "BALANCE SHEET", "TINH HINH TAI CHINH",
+    ],
+    "income_statement": [
+        "KET QUA HOAT DONG KINH DOANH", "KET QUA KINH DOANH",
+        "MAU SO B 02", "MAU B 02", "B 02/TCTD", "B 02 - TCTD",
+        "B 02 - CTC", "B 02 - DN",
+        "INCOME STATEMENT", "FINANCIAL PERFORMANCE",
+    ],
+    "cash_flow": [
+        "LUU CHUYEN TIEN TE", "LUU CHUYEN TIEN",
+        "MAU SO B 03", "MAU B 03", "B 03/TCTD", "B 03 - TCTD",
+        "B 03 - CTC", "B 03 - DN",
+        "CASH FLOW",
+    ],
+}
+
+# Statements sit at the front of a filing; past this the same words are
+# usually a cross-reference in the notes. Only used as a bound on where a
+# heading counts, never as a bound on how much is read.
+NATIVE_STATEMENT_WINDOW = 25
+
+FOOTNOTE_HEADINGS = [
+    "THUYET MINH BAO CAO TAI CHINH", "THUYET MINH BCTC",
+    "NOTES TO THE FINANCIAL", "THUYET MINH",
+]
+
+
 TT200_INCOME_CODES = {
     1: "Doanh thu bán hàng và cung cấp dịch vụ",
     2: "Các khoản giảm trừ doanh thu",
@@ -671,6 +719,12 @@ class BCTCPdfParser:
         if not fitz:
             return locations
 
+        # Headings found past the window, kept aside as a fallback.
+        late_hits: Dict[str, List[int]] = {
+            "auditor_report": [], "balance_sheet": [],
+            "income_statement": [], "cash_flow": [],
+        }
+
         # Pass 1: Native Vector Text
         with fitz.open(self.pdf_path) as doc:
             for page_idx in range(len(doc)):
@@ -682,27 +736,40 @@ class BCTCPdfParser:
                 if is_toc and page_idx < 8:
                     continue
 
-                if page_idx <= 25:
-                    if any(k in txt_norm for k in ["BAO CAO CUA CONG TY KIEM TOAN", "BAO CAO KIEM TOAN", "KIEM TOAN VIEN", "AUDITOR"]):
-                        locations["auditor_report"].append(page_idx)
-                    if any(k in txt_norm for k in [
-                        "BANG CAN DOI KE TOAN", "MAU SO B 01", "MAU B 01", "B 01/TCTD", "B 01 - TCTD", "B 01 - CTC",
-                        "FINANCIAL POSITION", "BALANCE SHEET", "TINH HINH TAI CHINH"
-                    ]):
-                        locations["balance_sheet"].append(page_idx)
-                    if any(k in txt_norm for k in [
-                        "KET QUA HOAT DONG KINH DOANH", "MAU SO B 02", "MAU B 02", "B 02/TCTD", "B 02 - TCTD", "B 02 - CTC",
-                        "INCOME STATEMENT", "FINANCIAL PERFORMANCE", "KET QUA KINH DOANH"
-                    ]):
-                        locations["income_statement"].append(page_idx)
-                    if any(k in txt_norm for k in [
-                        "LUU CHUYEN TIEN TE", "MAU SO B 03", "MAU B 03", "B 03/TCTD", "B 03 - TCTD", "B 03 - CTC", "CASH FLOW"
-                    ]):
-                        locations["cash_flow"].append(page_idx)
-                if any(k in txt_norm for k in [
-                    "THUYET MINH BAO CAO TAI CHINH", "THUYET MINH BCTC", "NOTES TO THE FINANCIAL", "THUYET MINH"
-                ]):
+                # Matched with the spaces removed from both sides, exactly
+                # as the OCR pass does. A PDF heading is typeset as
+                # separate text runs, so get_text() returns it broken by
+                # newlines - "LUU CHUYEN\nTIEN TE" for one centred line -
+                # and a keyword carrying a space matches neither that nor
+                # the run-together spelling. It is the OCR spacing bug
+                # arriving through a different mechanism. See squash().
+                page_squashed = squash(txt_raw)
+
+                for key in ("auditor_report", "balance_sheet",
+                            "income_statement", "cash_flow"):
+                    if any(squash(k) in page_squashed
+                           for k in STATEMENT_HEADINGS[key]):
+                        if page_idx <= NATIVE_STATEMENT_WINDOW:
+                            locations[key].append(page_idx)
+                        else:
+                            late_hits[key].append(page_idx)
+                if any(squash(k) in page_squashed for k in FOOTNOTE_HEADINGS):
                     locations["footnotes"].append(page_idx)
+
+        # A heading past page 26 is used only when nothing was found inside
+        # it. Statements normally sit at the front, and the window keeps a
+        # cross-reference in the notes from being read as the statement
+        # itself - but an audited consolidated report can run to 146 pages
+        # with a long bilingual front section, and there the window is the
+        # thing hiding the statement. Falling back only on an empty result
+        # leaves the ordinary case exactly as it was.
+        #
+        # This is a hypothesis, unlike the spacing fix beside it: no
+        # document has yet been shown to need it. The locator's output is
+        # reported per document so a run can say whether it fired at all.
+        for key, pages in late_hits.items():
+            if not locations[key] and pages:
+                locations[key].extend(pages[:3])
 
         # Pass 2: If Balance Sheet not found and document is SCANNED, scan candidate pages with RapidOCR
         if not locations["balance_sheet"] and self.doc_type in ("SCANNED_IMAGE", "SCANNED") and _rapid_ocr_engine:
@@ -718,26 +785,12 @@ class BCTCPdfParser:
                     # keyword list silently matches nothing. See squash().
                     page_text = squash(" ".join(ocr_lines))
 
-                    if any(squash(k) in page_text for k in ["REVIEW REPORT", "AUDITOR", "KIEM TOAN"]):
-                        if p_idx not in locations["auditor_report"]:
-                            locations["auditor_report"].append(p_idx)
-                    if any(squash(k) in page_text for k in [
-                        "FINANCIAL POSITION", "BALANCE SHEET", "BANG CAN DOI", "CAN DOI KE TOAN",
-                        "MAU SO B 01", "B 01 - DN", "B 01 - CTC"
-                    ]):
-                        if p_idx not in locations["balance_sheet"]:
-                            locations["balance_sheet"].append(p_idx)
-                    if any(squash(k) in page_text for k in [
-                        "INCOME STATEMENT", "KET QUA KINH DOANH", "FINANCIAL PERFORMANCE",
-                        "KET QUA HOAT DONG KINH DOANH", "MAU SO B 02"
-                    ]):
-                        if p_idx not in locations["income_statement"]:
-                            locations["income_statement"].append(p_idx)
-                    if any(squash(k) in page_text for k in [
-                        "LUU CHUYEN TIEN TE", "CASH FLOW", "LUU CHUYEN TIEN", "MAU SO B 03"
-                    ]):
-                        if p_idx not in locations["cash_flow"]:
-                            locations["cash_flow"].append(p_idx)
+                    for key in ("auditor_report", "balance_sheet",
+                                "income_statement", "cash_flow"):
+                        if any(squash(k) in page_text
+                               for k in STATEMENT_HEADINGS[key]):
+                            if p_idx not in locations[key]:
+                                locations[key].append(p_idx)
 
                     # Early exit if core statements are found
                     if locations["balance_sheet"] and locations["auditor_report"] and locations["income_statement"] and (locations["cash_flow"] or p_idx >= 12):
