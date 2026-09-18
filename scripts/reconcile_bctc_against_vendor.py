@@ -60,6 +60,29 @@ nothing - the script says so and refuses the verdict rather than reporting
 a mismatch it cannot attribute. Only when the control ties is the capex
 comparison interpretable.
 
+The control also sets the scale the capex line is judged on, and that
+took a wrong answer to get right. The first version compared each side
+against a flat 1%, which passed the control at 0.522% and failed capex at
+1.037%, printing "32100 is NOT VAS 21" for FPT. The absolute residuals
+say the opposite:
+
+    CFO    10,189,002,966,546 vs 10,136,043,915,911   diff 52,959,050,635
+    capex  -5,150,805,120,441 vs -5,097,919,349,856   diff 52,885,770,585
+
+The same ~52.9bn arrives twice, the two residuals 0.14% apart from each
+other. That is one reconciling item between two sources showing up in
+both lines. A code that meant something else could not agree to 98.96%
+and then leave the control's own residual behind.
+
+A percentage fixed in advance cannot see that, because it asks each line
+to agree with the vendor better than the vendor agrees with the filing.
+So the control's residual is the noise floor and capex is read against
+it, with three outcomes rather than two: supported when the residual is
+within what the control licenses, refuted when the two figures are grossly
+apart whatever the control did, and unclear in between. The residuals are
+printed next to the verdict so the judgement can be disputed from the log
+without paying for another run.
+
 Scope is matched rather than assumed: filings are classified consolidated
 or separate from their own file names, and only consolidated ones are put
 against the vendor.
@@ -136,6 +159,17 @@ INCOME_IDENTITIES = [
 # because a large statement rounds larger.
 ABS_TOLERANCE = 2.0
 REL_TOLERANCE = 1e-6
+
+# How much more than the control a single line may disagree and still be
+# called the same line. One component can reconcile a little worse than
+# the aggregate it sits inside, so this is above 1 - but it is a judgement
+# and the raw residuals are printed beside the verdict so it can be
+# disputed without rerunning anything.
+RESIDUAL_FACTOR = 3.0
+
+# Past this the control is irrelevant: two figures a quarter apart are not
+# the same line reconciling, they are different quantities.
+GROSS_DISAGREEMENT = 0.25
 
 
 def _val(items: Dict[Any, Any], code: int, field: str = "current_val") -> Optional[float]:
@@ -298,10 +332,46 @@ def compare_to_vendor(symbol: str, year: int, cf_items: Dict[Any, Any]
     if bctc_capex is None or v_capex is None:
         out["verdict"] = "control ok, but one side has no capex row"
         return out
-    d = max(abs(bctc_capex), abs(v_capex), 1.0)
-    out["capex_match"] = abs(abs(bctc_capex) - abs(v_capex)) / d < 0.01
-    out["verdict"] = ("32100 IS VAS 21" if out["capex_match"]
-                      else "32100 is NOT VAS 21")
+
+    # The capex line is judged against what the control licenses, not
+    # against a percentage picked in advance. Run 35222930322 is why.
+    #
+    # There the control was 0.522% apart and capex 1.037% apart, so a flat
+    # 1% threshold on each passed the first and failed the second, and the
+    # script printed "32100 is NOT VAS 21". The absolute residuals say the
+    # opposite: 52,959,050,635 on CFO and 52,885,770,585 on capex, the same
+    # ~52.9bn arriving twice, 0.14% apart from each other. Two sources that
+    # disagree by one reconciling item look exactly like that. A code that
+    # meant something else could not agree to 98.96% and then leave behind
+    # the same absolute residual as the control line.
+    #
+    # So the control sets the noise floor and the capex residual is read
+    # against it. Which way that floor scales is not known - source
+    # disagreement may be a fixed amount or proportional to the line - so
+    # both readings are allowed and the larger wins, rather than assuming
+    # the one that happens to be convenient.
+    control_abs = abs(bctc_cfo - v_cfo)
+    control_rel = control_abs / max(abs(v_cfo), 1.0)
+    licensed = max(control_abs, abs(v_capex) * control_rel)
+    capex_abs = abs(abs(bctc_capex) - abs(v_capex))
+    capex_rel = capex_abs / max(abs(v_capex), 1.0)
+
+    out["control_residual"] = control_abs
+    out["capex_residual"] = capex_abs
+    out["residual_ratio"] = capex_abs / max(licensed, 1.0)
+    out["capex_rel_error"] = capex_rel
+
+    if capex_rel > GROSS_DISAGREEMENT:
+        # A quarter of the line apart is not two sources reconciling; it is
+        # two different quantities, whatever the control did.
+        out["verdict"] = "32100 is NOT VAS 21"
+    elif capex_abs <= licensed * RESIDUAL_FACTOR:
+        out["verdict"] = "32100 IS VAS 21"
+    else:
+        # Too close to be a different line, too far for the control to
+        # vouch for. Saying which would be inventing a result.
+        out["verdict"] = "32100 vs VAS 21 unclear - residual exceeds control"
+    out["capex_match"] = out["verdict"].endswith("IS VAS 21")
     return out
 
 

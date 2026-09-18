@@ -150,6 +150,84 @@ class TestTheVendorComparisonRefusesWhatItCannotAttribute:
         out = compare_to_vendor("FPT", 2025, _items(FPT_Q4))
         assert out["verdict"] == "32100 is NOT VAS 21"
 
+
+# FPT's consolidated Q4 2025 against VNDIRECT ANNUAL, exactly as run
+# 35222930322 measured it. These four numbers are the whole reason the
+# comparison criterion changed.
+FPT_CONSOLIDATED = {20: 10189002966546, 21: -5150805120441}
+VENDOR_CFO = 10136043915911.0
+VENDOR_CAPEX = -5097919349856.0
+
+
+def _vendor(cfo, capex):
+    return lambda s, r: [
+        {"itemCode": 32000, "numericValue": cfo, "fiscalDate": "2025-12-31"},
+        {"itemCode": 32100, "numericValue": capex, "fiscalDate": "2025-12-31"},
+    ]
+
+
+class TestCapexIsJudgedAgainstTheControlNotAFixedPercentage:
+    """The bug: a flat 1% each side called FPT's capex a mismatch.
+
+    The control was 0.522% apart and capex 1.037%, so the threshold passed
+    one and failed the other - while the absolute residuals were 52.959bn
+    and 52.886bn, the same amount twice.
+    """
+
+    def test_the_real_numbers_now_support_the_mapping(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, VENDOR_CAPEX))
+        out = compare_to_vendor("FPT", 2025, _items(FPT_CONSOLIDATED))
+        assert out["control_ok"] is True
+        assert out["verdict"] == "32100 IS VAS 21"
+
+    def test_the_two_residuals_are_the_same_amount(self, monkeypatch):
+        # This is the evidence, not the verdict: one reconciling item
+        # showing up in both lines rather than two different quantities.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, VENDOR_CAPEX))
+        out = compare_to_vendor("FPT", 2025, _items(FPT_CONSOLIDATED))
+        assert out["residual_ratio"] == pytest.approx(1.0, abs=0.01)
+        assert abs(out["capex_residual"] - out["control_residual"]) < 1e8
+
+    def test_capex_relative_error_alone_would_still_have_failed_it(self):
+        # Guards against quietly widening the old threshold instead of
+        # changing what is compared: 1.037% is still over 1%.
+        rel = abs(abs(-5150805120441) - abs(VENDOR_CAPEX)) / abs(VENDOR_CAPEX)
+        assert rel > 0.01
+
+    def test_an_order_of_magnitude_apart_is_still_refuted(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, -25748320476719.0))
+        out = compare_to_vendor("FPT", 2025, _items(FPT_CONSOLIDATED))
+        assert out["verdict"] == "32100 is NOT VAS 21"
+
+    def test_a_middling_gap_is_left_unclear_rather_than_decided(self, monkeypatch):
+        # Too close to be a different line, too far for the control to
+        # vouch for. Calling it either way would be inventing a result.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, VENDOR_CAPEX))
+        out = compare_to_vendor("FPT", 2025, _items({20: 10189002966546,
+                                                     21: -5900000000000}))
+        assert out["verdict"].startswith("32100 vs VAS 21 unclear")
+        assert out["capex_match"] is False
+
+    def test_a_broken_control_still_withholds_everything(self, monkeypatch):
+        # The control keeps precedence over the new criterion: VCB read its
+        # CFO as -117,752 against a vendor figure of 116 trillion, and
+        # without this that garbage would have been scored as a verdict.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(116230551000000.0, -1453488000000.0))
+        out = compare_to_vendor("VCB", 2025, _items({20: -117752, 21: -641807}))
+        assert out["control_ok"] is False
+        assert "withheld" in out["verdict"]
+        assert "residual_ratio" not in out
+
     def test_a_silent_vendor_is_said_rather_than_guessed(self, monkeypatch):
         monkeypatch.setattr(
             "scripts.reconcile_bctc_against_vendor.vendor_rows",
