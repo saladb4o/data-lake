@@ -92,6 +92,10 @@ on:
         description: 'Ưu tiên bản hợp nhất hay bản công ty mẹ (consolidated/separate)'
         required: false
         default: 'consolidated'
+      reconcile_dump_pages:
+        description: 'In nguyên văn các trang native này, vd 3,4,10'
+        required: false
+        default: ''
       analyse_run:
         # The expensive stages are fetches; every measurement that reads
         # them is seconds of arithmetic. Paying 43 minutes of universe +
@@ -695,9 +699,11 @@ jobs:
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           RECONCILE_LIMIT: ${{ github.event.inputs.reconcile_limit }}
           RECONCILE_SCOPE: ${{ github.event.inputs.reconcile_scope }}
+          RECONCILE_DUMP_PAGES: ${{ github.event.inputs.reconcile_dump_pages }}
         run: |
           python scripts/reconcile_bctc_against_vendor.py \
             "${{ github.event.inputs.reconcile_for }}" \
             --limit "${RECONCILE_LIMIT:-2}" \
             --scope "${RECONCILE_SCOPE:-consolidated}" \
+            --dump-pages "${RECONCILE_DUMP_PAGES:-}" \
             | tee -a "$GITHUB_STEP_SUMMARY"

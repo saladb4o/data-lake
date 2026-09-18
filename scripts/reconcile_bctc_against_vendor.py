@@ -381,7 +381,8 @@ def compare_to_vendor(symbol: str, year: int, cf_items: Dict[Any, Any]
     return out
 
 
-def render_native_probe(path: str, located: Dict[str, Any]) -> None:
+def render_native_probe(path: str, located: Dict[str, Any],
+                        dump_pages: str = "") -> None:
     """What the native text layer actually holds, page by page.
 
     Printed only when the locator found little, and only for native
@@ -395,10 +396,11 @@ def render_native_probe(path: str, located: Dict[str, Any]) -> None:
     layer is empty, or it holds words the headings do not match, and the
     lines are the evidence either way.
     """
+    wanted = [int(x) for x in re.findall(r"\d+", dump_pages or "")]
     found = sum(len(v) for k, v in located.items()
                 if k in ("balance_sheet", "income_statement", "cash_flow")
                 and isinstance(v, list))
-    if found >= 3:
+    if found >= 3 and not wanted:
         return
     try:
         import fitz
@@ -433,6 +435,22 @@ def render_native_probe(path: str, located: Dict[str, Any]) -> None:
             if overlay:
                 stamp = sorted(overlay, key=len, reverse=True)[0][:110]
                 print(f"\n- overlay removed from every page: `{stamp}`")
+
+            # Truncated lines settled which page to read. They cannot
+            # settle which row failed to bind: BSR's Q4 balance sheet
+            # reached 28 rows and still had neither 270 nor 440, and the
+            # 130-character preview cannot say whether those rows are
+            # absent, typeset apart from their codes, or shadowed by the
+            # notes page still sitting first in the page list.
+            for p_idx in wanted:
+                if p_idx >= limit:
+                    continue
+                own = page_own_text(raws[p_idx], overlay).strip()
+                print(f"\n<details><summary>page {p_idx} in full</summary>\n")
+                print("```")
+                print(own[:6000])
+                print("```")
+                print("\n</details>")
     except Exception as exc:
         print(f"| - | - | probe failed: {type(exc).__name__}: {str(exc)[:70]} |")
     print()
@@ -453,7 +471,8 @@ def render_identities(name: str, checks: List[Dict[str, Any]]) -> None:
 
 def run_symbol(symbol: str, year: int, limit: int,
                verdicts: List[Dict[str, Any]],
-               scope_first: str = "consolidated") -> None:
+               scope_first: str = "consolidated",
+               dump_pages: str = "") -> None:
     from services.bctc_batch_processor import BCTCBatchProcessor
 
     print(f"# {symbol}")
@@ -536,7 +555,8 @@ def run_symbol(symbol: str, year: int, limit: int,
             print(f"- located by: `{result.get('located_by')}`")
         print()
         if result["doc_type"] == "NATIVE":
-            render_native_probe(local, result.get("located") or {})
+            render_native_probe(local, result.get("located") or {},
+                                dump_pages)
 
         entry: Dict[str, Any] = {"symbol": symbol, "scope": scope,
                                  "period": period, "route": result["doc_type"],
@@ -596,6 +616,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--year", type=int, default=2025)
     ap.add_argument("--limit", type=int, default=1,
                     help="documents parsed per symbol")
+    ap.add_argument("--dump-pages", default="",
+                    help="print these native pages in full, e.g. 3,4,10")
     ap.add_argument("--scope", default="consolidated",
                     choices=("consolidated", "separate"),
                     help="which filings to parse first")
@@ -605,7 +627,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     verdicts: List[Dict[str, Any]] = []
     for s in syms:
         try:
-            run_symbol(s, args.year, args.limit, verdicts, args.scope)
+            run_symbol(s, args.year, args.limit, verdicts, args.scope,
+                       args.dump_pages)
         except Exception as exc:
             print(f"- {s} raised {type(exc).__name__}: {str(exc)[:110]}")
             print()
