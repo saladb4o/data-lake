@@ -880,6 +880,73 @@ def build_units_and_titles(w: WorkbookPatch) -> None:
     w.set_value("Cover Page", "C42", DISCLAIMER)
 
 
+def build_tidy(w: WorkbookPatch) -> None:
+    """Put away what emptying the model left behind.
+
+    Two kinds of leftover, and both read as a large blank area rather than
+    as an absence:
+
+      * whole blocks of rows whose contents are gone - the two lease
+        schedules, the depreciation triangle, the restricted cash note -
+        still carrying their banners, their staircase of shaded vintages
+        and their row heights. They are hidden rather than deleted,
+        because every formula in the workbook addresses its neighbours by
+        row number.
+      * banners and input shading on rows that are still in use. The
+        source model shades a cell to say a person typed it there; on a
+        cell that now holds a formula, that shading is a false statement
+        about where the number came from.
+    """
+    # Blocks with nothing left in them.
+    w.hide_rows(FS, 152, 168)       # depreciation triangle
+    w.hide_rows(FS, 175, 285)       # both lease schedules
+    w.hide_rows(FS, 139, 146)       # restricted cash
+    w.hide_rows(RD, 92, 167)        # below the last TT200 line
+    for r in list(range(139, 147)) + list(range(175, 286)):
+        _clear_row(w, FS, r)
+        for col in ("A", "B"):
+            w.clear(FS, f"{col}{r}")
+    _label(w, FS, 174, "(Phụ lục thuê tài chính và thuê hoạt động đã bỏ: "
+                       "VAS 06 không ghi nhận tài sản quyền sử dụng)")
+
+    # Where the source model puts a section banner and where this layout
+    # needs one are different rows. The look is taken from the model's own
+    # banner row rather than invented, and moved.
+    BAND_COLS = "BCDEFG"
+    CLEAN = 24          # a plain data row of the source sheet
+    BANNER = 7          # the one banner row this layout keeps in place
+
+    for row in (15, 25, 43, 80, 85):
+        w.copy_row_style(RD, CLEAN, row, "BCDEFGIJKLMNO")
+    for row in (V.BALANCE[0].row, V.CASHFLOW[0].row, V.MARKET[0].row):
+        w.copy_row_style(RD, BANNER, row, BAND_COLS)
+    for col in "IJ":                      # keep all four banners the same
+        w.copy_style(RD, f"{col}{CLEAN}", [f"{col}{BANNER}"])
+    for row in list(range(8, 14)) + [34]:
+        w.copy_style(RD, f"J{CLEAN}", [f"J{row}"])
+    for col in "JKL":
+        w.copy_style(RD, f"{col}{CLEAN}", [f"{col}37"])
+    for col in "DEFG":
+        w.copy_style(RD, f"{col}{CLEAN}", [f"{col}82"])
+
+    # Amounts in millions of dong need more room than amounts in millions
+    # of dollars did.
+    w.widen_columns(FS, "C", "R", 15.5)
+    w.widen_columns(RD, "C", "G", 15.5)
+    w.widen_columns(RD, "J", "O", 13.0)
+
+    _label(w, FS, 11, "Phân tích lịch sử và dự phóng")
+    # Input shading on forecast cells that hold formulas now. In this model
+    # a shaded cell means a person typed the number, so leaving it is a
+    # false statement about where the figure came from.
+    for row, donor in ((50, 53), (119, 118), (120, 118), (121, 118),
+                       (127, 125), (129, 125), (132, 125)):
+        w.copy_row_style(FS, donor, row, "".join(FCST))
+    w.copy_row_style(FS, 19, 13, "C")
+    for row in range(14, 19):
+        w.copy_row_style(FS, 19, row, "C")
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -893,6 +960,7 @@ def main(src: str, dest: str) -> None:
     build_sotp(w)
     build_market_sheets(w)
     build_units_and_titles(w)
+    build_tidy(w)
     w.save(dest)
     print(f"wrote {dest}")
 

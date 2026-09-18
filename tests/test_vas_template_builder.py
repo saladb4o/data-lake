@@ -196,3 +196,88 @@ class TestTheLayoutIsInternallyConsistent:
 def _rows_in(formula):
     import re
     return [int(n) for n in re.findall(r"C(\d+)", formula)]
+
+
+class TestAppearanceAndContentAreQueuedSeparately:
+    """A row was relabelled, then restyled, and came back with the source
+    workbook's label. Both edits were keyed by cell, so the second threw
+    the first away and the restyle kept whatever had been there - which is
+    how a line reading "Lợi nhuận sau thuế" reverted to "General and
+    Administrative" while reporting success."""
+
+    def test_a_restyle_after_a_value_keeps_the_value(self, sheet, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(sheet)
+        w.set_value("Data", "A1", "nhãn mới")
+        w.copy_style("Data", "A3", ["A1"])
+        w.save(out)
+        assert read(out, "A1") == "nhãn mới"
+
+    def test_a_value_after_a_restyle_keeps_the_value(self, sheet, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(sheet)
+        w.copy_style("Data", "A3", ["A1"])
+        w.set_value("Data", "A1", "nhãn mới")
+        w.save(out)
+        assert read(out, "A1") == "nhãn mới"
+
+    def test_a_restyle_leaves_a_formula_alone(self, sheet, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(sheet)
+        w.copy_style("Data", "A1", ["B5"])
+        w.save(out)
+        assert read(out, "B5") == "=B1+B3"
+
+
+class TestStyleIsCopiedColumnByColumn:
+    def test_each_column_takes_its_own_column_s_style(self, sheet,
+                                                      tmp_path):
+        # One donor cell for a whole row hands the label column's format to
+        # the money columns. The per-row helper must not do that.
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(sheet)
+        w.copy_row_style("Data", 1, 3, "AB")
+        w.save(out)
+        wb = openpyxl.load_workbook(out)["Data"]
+        src = openpyxl.load_workbook(sheet)["Data"]
+        assert wb["A3"]._style == src["A1"]._style
+        assert wb["B3"]._style == src["B1"]._style
+        assert wb["A3"].value == "tail"
+        assert wb["B3"].value == 3
+
+
+class TestRowsAreHiddenRatherThanDeleted:
+    def test_hidden_rows_keep_their_numbers(self, sheet, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(sheet)
+        w.hide_rows("Data", 2, 3)
+        w.save(out)
+        ws = openpyxl.load_workbook(out)["Data"]
+        assert ws.row_dimensions[3].hidden
+        assert not ws.row_dimensions[1].hidden
+        # the formula below still points at the same cells
+        assert ws["B5"].value == "=B1+B3"
+        assert ws["B3"].value == 3
+
+
+class TestColumnsAreOnlyEverWidened:
+    def test_a_wider_column_is_not_narrowed(self, sheet, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        first = WorkbookPatch(sheet)
+        first.widen_columns("Data", "A", "B", 30.0)
+        first.save(out)
+        second = WorkbookPatch(out)
+        second.widen_columns("Data", "A", "B", 12.0)
+        out2 = str(tmp_path / "out2.xlsx")
+        second.save(out2)
+        ws = openpyxl.load_workbook(out2)["Data"]
+        assert ws.column_dimensions["A"].width >= 30.0
+
+    def test_a_narrow_column_is_widened(self, sheet, tmp_path):
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(sheet)
+        w.widen_columns("Data", "C", "D", 15.5)
+        w.save(out)
+        ws = openpyxl.load_workbook(out)["Data"]
+        assert round(ws.column_dimensions["C"].width, 1) == 15.5
+        assert round(ws.column_dimensions["D"].width, 1) == 15.5

@@ -86,10 +86,11 @@ def xml_escape(s: str) -> str:
 
 @dataclass
 class Cell:
-    """One edit. Exactly one of value / formula / blank carries the intent."""
+    """One edit. Exactly one of value / formula / blank / restyle carries it."""
     value: object = None
     formula: Optional[str] = None
     blank: bool = False
+    restyle: bool = False         # keep the contents, change only the look
     style: Optional[int] = None   # keep the cell's own style when None
 
 
@@ -107,6 +108,7 @@ class WorkbookPatch:
         self._sheet_part = self._map_sheets()
         self._pending: Dict[str, SheetEdits] = {}
         self._expanded: set = set()
+        self._hidden: Dict[str, List[Tuple[int, int]]] = {}
 
     # -- sheet name -> zip part -------------------------------------------
     def _map_sheets(self) -> Dict[str, str]:
@@ -145,6 +147,89 @@ class WorkbookPatch:
     def clear(self, sheet: str, ref: str) -> None:
         self._queue(sheet, ref, Cell(blank=True))
 
+    def style_of(self, sheet: str, ref: str) -> Optional[str]:
+        """The style id a cell currently carries, or None if it has none."""
+        part = self._sheet_part[sheet]
+        xml = self._parts[part].decode("utf8")
+        m = re.search(r'<c\b[^>]*?r="%s"[^>]*?(?:/>|>)' % re.escape(ref), xml)
+        if not m:
+            return None
+        sm = re.search(r'\bs="(\d+)"', m.group(0))
+        return sm.group(1) if sm else None
+
+    def copy_style(self, sheet: str, donor: str, targets: List[str]) -> None:
+        """Give cells the look of another cell without touching their contents.
+
+        The source model shades a cell to say a human typed it. Clearing
+        Amazon's numbers left that shading behind on cells that now hold
+        formulas, and left section banners across rows that are no longer
+        sections - which is most of what reads as an empty coloured block.
+        """
+        sid = self.style_of(sheet, donor)
+        for ref in targets:
+            self._queue(sheet, ref, Cell(restyle=True,
+                                         style=int(sid) if sid else 0))
+
+    def copy_row_style(self, sheet: str, donor_row: int, target_row: int,
+                       cols: str) -> None:
+        """Give a row the look of another row, column by column.
+
+        Column by column matters. Taking one donor cell for a whole row
+        hands the label column's formatting to the money columns, which is
+        how a row of figures lost its thousands separators while the band
+        it was supposed to lose stayed where it was, one column further
+        right than the donor could see.
+        """
+        for col in cols:
+            self.copy_style(sheet, f"{col}{donor_row}",
+                            [f"{col}{target_row}"])
+
+    def widen_columns(self, sheet: str, first_col: str, last_col: str,
+                      width: float) -> None:
+        """Raise a span of columns to at least this width, never lower them.
+
+        A figure too wide for its column is shown as ######. In millions of
+        dong a large company's total assets run to eight digits and two
+        separators, which the source model's twelve-character columns were
+        never sized for.
+        """
+        part = self._sheet_part[sheet]
+        xml = self._parts[part].decode("utf8")
+        lo, hi = col_to_index(first_col), col_to_index(last_col)
+        existing: Dict[int, Dict[str, str]] = {}
+        block = re.search(r"<cols>.*?</cols>", xml, re.S)
+        if block:
+            for tag in re.findall(r"<col\b[^>]*/>", block.group(0)):
+                attrs = dict(re.findall(r'(\w+)="([^"]*)"', tag))
+                a, b = int(attrs.get("min", 1)), int(attrs.get("max", 1))
+                for i in range(a, b + 1):
+                    existing[i] = dict(attrs)
+        for i in range(lo, hi + 1):
+            attrs = existing.get(i, {})
+            have = float(attrs.get("width", 0) or 0)
+            attrs["width"] = f"{max(have, width):.2f}"
+            attrs["customWidth"] = "1"
+            attrs["min"] = attrs["max"] = str(i)
+            existing[i] = attrs
+        rebuilt = "<cols>" + "".join(
+            "<col " + " ".join(f'{k}="{v}"' for k, v in sorted(a.items()))
+            + "/>" for _, a in sorted(existing.items())) + "</cols>"
+        if block:
+            xml = xml[:block.start()] + rebuilt + xml[block.end():]
+        else:
+            at = xml.index("<sheetData")
+            xml = xml[:at] + rebuilt + xml[at:]
+        self._parts[part] = xml.encode("utf8")
+
+    def hide_rows(self, sheet: str, first: int, last: int) -> None:
+        """Hide a span of rows, keeping their numbers.
+
+        Rows cannot be deleted here: every formula in the workbook addresses
+        its neighbours by row number, so removing one would silently move
+        everything below it. Hiding leaves the arithmetic alone.
+        """
+        self._hidden.setdefault(sheet, []).append((first, last))
+
     def clear_rows(self, sheet: str, first: int, last: int,
                    cols: Optional[List[str]] = None) -> None:
         """Blank whole rows, keeping the rows themselves and their styles."""
@@ -163,11 +248,29 @@ class WorkbookPatch:
                 self._queue(sheet, ref, Cell(blank=True))
 
     def _queue(self, sheet: str, ref: str, cell: Cell) -> None:
+        """Add an edit, merging a restyle with a content edit for the cell.
+
+        Content and appearance are queued separately and often for the same
+        cell. Keyed edits used to overwrite each other, so restyling a row
+        after labelling it threw the label away and kept whatever the
+        source workbook had said there - which is how a row came back
+        reading "General and Administrative".
+        """
         if sheet not in self._sheet_part:
             raise KeyError(f"no such sheet: {sheet!r}")
         col, row = split_ref(ref)
-        self._pending.setdefault(sheet, SheetEdits()).edits[
-            f"{col}{row}"] = cell
+        key = f"{col}{row}"
+        edits = self._pending.setdefault(sheet, SheetEdits()).edits
+        prior = edits.get(key)
+        if prior is None:
+            edits[key] = cell
+            return
+        if cell.restyle and not prior.restyle:
+            prior.style = cell.style       # keep the content, take the look
+            return
+        if prior.restyle and not cell.restyle:
+            cell.style = prior.style
+        edits[key] = cell
 
     # -- render ------------------------------------------------------------
     @staticmethod
@@ -260,6 +363,16 @@ class WorkbookPatch:
                 if old:
                     sm = re.search(r'\bs="(\d+)"', old)
                     style = sm.group(1) if sm else None
+                if cell.restyle:
+                    base = old or f'<c r="{ref}"/>'
+                    new_s = f' s="{cell.style}"'
+                    if re.search(r'\bs="\d+"', base):
+                        base = re.sub(r'\s*\bs="\d+"', new_s, base, count=1)
+                    else:
+                        base = base.replace(f'r="{ref}"',
+                                            f'r="{ref}"{new_s}', 1)
+                    cells[ref] = base
+                    continue
                 cells[ref] = self._render(ref, cell, style)
             ordered = sorted(cells, key=lambda k: col_to_index(split_ref(k)[0]))
             # spans is advisory; a wrong one makes Excel repair the file.
@@ -363,10 +476,31 @@ class WorkbookPatch:
                             "</workbook>")
         self._parts["xl/workbook.xml"] = wb.encode("utf8")
 
+    def _apply_hidden(self) -> None:
+        for sheet, spans in self._hidden.items():
+            part = self._sheet_part[sheet]
+            self._expand_shared(part)
+            xml = self._parts[part].decode("utf8")
+
+            def one_row(m: re.Match) -> str:
+                whole = m.group(0)
+                r = int(re.search(r'r="(\d+)"', whole).group(1))
+                if not any(a <= r <= b for a, b in spans):
+                    return whole
+                if 'hidden="1"' in whole:
+                    return whole
+                head_end = whole.index(">") if m.group(2) is not None \
+                    else whole.index("/>")
+                return (whole[:head_end] + ' hidden="1"'
+                        + whole[head_end:])
+
+            self._parts[part] = _ROW.sub(one_row, xml).encode("utf8")
+
     def save(self, dest: str) -> None:
         for sheet, se in self._pending.items():
             if se.edits:
                 self._patch_sheet(sheet, se.edits)
+        self._apply_hidden()
         self._force_recalc()
         with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
             for n in self._names:
