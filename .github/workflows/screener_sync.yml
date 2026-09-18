@@ -88,6 +88,10 @@ on:
         description: 'Số tài liệu parse mỗi mã khi đối chiếu (mặc định 2)'
         required: false
         default: '2'
+      reconcile_scope:
+        description: 'Ưu tiên bản hợp nhất hay bản công ty mẹ (consolidated/separate)'
+        required: false
+        default: 'consolidated'
       analyse_run:
         # The expensive stages are fetches; every measurement that reads
         # them is seconds of arithmetic. Paying 43 minutes of universe +
@@ -690,8 +694,10 @@ jobs:
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
           VNSTOCK_API_KEY: ${{ secrets.VNSTOCK_API_KEY }}
           RECONCILE_LIMIT: ${{ github.event.inputs.reconcile_limit }}
+          RECONCILE_SCOPE: ${{ github.event.inputs.reconcile_scope }}
         run: |
           python scripts/reconcile_bctc_against_vendor.py \
             "${{ github.event.inputs.reconcile_for }}" \
             --limit "${RECONCILE_LIMIT:-2}" \
+            --scope "${RECONCILE_SCOPE:-consolidated}" \
             | tee -a "$GITHUB_STEP_SUMMARY"

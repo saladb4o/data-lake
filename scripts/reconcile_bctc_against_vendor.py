@@ -452,7 +452,8 @@ def render_identities(name: str, checks: List[Dict[str, Any]]) -> None:
 
 
 def run_symbol(symbol: str, year: int, limit: int,
-               verdicts: List[Dict[str, Any]]) -> None:
+               verdicts: List[Dict[str, Any]],
+               scope_first: str = "consolidated") -> None:
     from services.bctc_batch_processor import BCTCBatchProcessor
 
     print(f"# {symbol}")
@@ -474,11 +475,21 @@ def run_symbol(symbol: str, year: int, limit: int,
         verdicts.append({"symbol": symbol, "note": "no PDFs listed"})
         return
 
-    # Consolidated filings first: they are the only ones the vendor feed can
-    # be compared with, and a run that spends its budget on parent-only
-    # documents answers the identities but not the vendor question.
+    # Consolidated filings first by default: they are the only ones the
+    # vendor feed can be compared with, and a run that spends its budget
+    # on parent-only documents answers the identities but not the vendor
+    # question.
+    #
+    # It has to be selectable, though, because the ordering can put a
+    # document out of reach entirely. The misbound cash flow rows were
+    # documented on FPT's parent-only Q4 filing, and FPT lists six
+    # consolidated filings ahead of it, so no limit short of parsing them
+    # all reaches the one document that shows the defect. Run 35304662213
+    # came back byte-identical to the run before it for exactly that
+    # reason: the fix could not be measured on the filing it was written
+    # for.
     ordered = sorted(pdfs, key=lambda p: 0 if classify_scope(
-        p.get("title", "")) == "consolidated" else 1)
+        p.get("title", "")) == scope_first else 1)
 
     workdir = tempfile.mkdtemp(prefix=f"rec_{symbol}_")
     processor = BCTCBatchProcessor()
@@ -585,13 +596,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--year", type=int, default=2025)
     ap.add_argument("--limit", type=int, default=1,
                     help="documents parsed per symbol")
+    ap.add_argument("--scope", default="consolidated",
+                    choices=("consolidated", "separate"),
+                    help="which filings to parse first")
     args = ap.parse_args(argv)
 
     syms = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     verdicts: List[Dict[str, Any]] = []
     for s in syms:
         try:
-            run_symbol(s, args.year, args.limit, verdicts)
+            run_symbol(s, args.year, args.limit, verdicts, args.scope)
         except Exception as exc:
             print(f"- {s} raised {type(exc).__name__}: {str(exc)[:110]}")
             print()

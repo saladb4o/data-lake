@@ -253,3 +253,44 @@ class TestVendorValue:
     def test_an_absent_code_is_none_not_zero(self):
         # Zero and "the vendor does not carry it" are different findings.
         assert vendor_value(self.ROWS, 99999, 2025) is None
+
+
+class TestWhichFilingsARunCanReach:
+    """The ordering can put a document out of reach entirely.
+
+    The misbound cash flow rows were documented on FPT's parent-only Q4
+    filing, and CafeF lists six consolidated FPT filings ahead of it. With
+    consolidated always first, no limit short of parsing everything
+    reaches the one document that shows the defect - which is why run
+    35304662213 came back byte-identical to the run before it.
+    """
+
+    PDFS = [
+        {"title": "20260319_-_FPT_-_BCTC_hop_nhat_nam_2025_da_kiem_toan.pdf"},
+        {"title": "20260126_-_FPT_-_BCTC_hop_nhat_Quy_4_2025.pdf"},
+        {"title": "20260126_-_FPT_-_BCTC_cong_ty_me_Quy_4_2025.pdf"},
+        {"title": "FPT_Baocaotaichinh_Q3_2025_Hopnhat.pdf"},
+    ]
+
+    @staticmethod
+    def _ordered(pdfs, scope_first):
+        return sorted(pdfs, key=lambda p: 0 if classify_scope(
+            p.get("title", "")) == scope_first else 1)
+
+    def test_consolidated_first_is_still_the_default_ordering(self):
+        first = self._ordered(self.PDFS, "consolidated")[0]["title"]
+        assert classify_scope(first) == "consolidated"
+
+    def test_the_parent_only_filing_is_unreachable_at_a_limit_of_two(self):
+        # The bug, stated as a fact about the old ordering.
+        reached = self._ordered(self.PDFS, "consolidated")[:2]
+        assert all(classify_scope(p["title"]) == "consolidated"
+                   for p in reached)
+
+    def test_asking_for_separate_reaches_it_first(self):
+        first = self._ordered(self.PDFS, "separate")[0]["title"]
+        assert "cong_ty_me" in first
+
+    def test_no_filing_is_dropped_by_either_ordering(self):
+        for scope in ("consolidated", "separate"):
+            assert len(self._ordered(self.PDFS, scope)) == len(self.PDFS)
