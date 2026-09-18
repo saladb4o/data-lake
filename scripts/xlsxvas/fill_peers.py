@@ -35,10 +35,39 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(
 from xlsx_patch import WorkbookPatch            # noqa: E402
 
 WC = "WACC"
+CM = "Comps"
 FIRST_ROW = 10
 LAST_ROW = 27
 INDEX_SYMBOL = "VNINDEX"
 MIN_OBSERVATIONS = 120          # roughly six months of trading days
+
+# The rows the Comps sheet keeps for peers, in five groups.
+COMPS_ROWS = (list(range(13, 17)) + list(range(23, 26))
+              + list(range(32, 35)) + list(range(41, 45))
+              + list(range(51, 55)))
+
+# Units, in one place, because this is where they go wrong. The screener
+# quotes a market capitalisation in ty dong and a reference price the way
+# a board does, in thousands of dong. The workbook wants dong per share
+# and millions of shares.
+#
+#   shares (million) = cap (ty dong) * 1e9 / (price_thousands * 1e3) / 1e6
+#                    = cap / price_thousands
+#
+# ACB is the check: 115,000 ty dong at 25.6 gives 4,492 million shares,
+# against the 4.47 billion it has in issue.
+PRICE_THOUSANDS_TO_DONG = 1000.0
+
+
+def price_in_dong(reference: float) -> float:
+    return reference * PRICE_THOUSANDS_TO_DONG
+
+
+def shares_in_millions(market_cap_ty: float, reference: float):
+    """None rather than a number when either side is missing or zero."""
+    if not market_cap_ty or not reference:
+        return None
+    return market_cap_ty / reference
 
 
 def log_returns(closes: Sequence[float]) -> List[float]:
@@ -134,10 +163,14 @@ def collect(symbol: str, top_k: int) -> Tuple[List[Dict], List[str]]:
         if not sym:
             continue
         measured = beta_for(sym, index_closes, fetch) if index_closes else None
+        cap = p.get("market_cap")
+        ref = p.get("price")
         rows.append({
             "symbol": sym,
             "name": p.get("name") or "",
             "exchange": p.get("exchange") or "",
+            "price": price_in_dong(ref) if ref else None,
+            "shares": shares_in_millions(cap, ref),
             "beta": measured[0] if measured else None,
             "n": measured[1] if measured else 0,
             "r2": measured[2] if measured else None,
@@ -165,6 +198,24 @@ def write(src: str, dest: str, symbol: str, rows: List[Dict],
         w.set_value(WC, f"D{row}", r["exchange"])
         w.set_value(WC, f"J{row}", round(r["beta"], 4)
                     if r["beta"] is not None else None)
+    # the same peer set, on the sheet that takes multiples off it
+    priced = [r for r in rows if r.get("price") and r.get("shares")]
+    for slot, row in enumerate(COMPS_ROWS):
+        if slot >= len(rows):
+            for col in ("B", "D", "E"):
+                w.set_value(CM, f"{col}{row}", None)
+            continue
+        r = rows[slot]
+        w.set_value(CM, f"B{row}", f"{r['symbol']} - {r['name']}"[:60])
+        w.set_value(CM, f"D{row}", round(r["price"], 0)
+                    if r.get("price") else None)
+        w.set_value(CM, f"E{row}", round(r["shares"], 2)
+                    if r.get("shares") else None)
+    w.set_value(CM, "B62",
+                f"Nguồn: bộ máy so sánh của kho, {len(priced)}/{len(rows)} "
+                f"mã có giá và số cổ phiếu. Nợ vay, tiền và số liệu dự "
+                f"phóng của từng mã vẫn phải nhập tay.")
+
     measured = [r for r in rows if r["beta"] is not None]
     stamp = (f"Nguồn: bộ máy so sánh + lịch sử giá của kho, hồi quy lợi suất "
              f"log ngày trên {INDEX_SYMBOL}. "

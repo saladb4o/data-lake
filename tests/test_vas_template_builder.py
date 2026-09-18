@@ -684,3 +684,57 @@ class TestTheLayoutFollowsTheRepositorysOwnCodeTables:
         assert "224" in V.BS_ROW          # the asset
         assert "35" in V.CF_ROW           # the principal repayment
         assert "320" in V.BS_ROW and "338" in V.BS_ROW   # the liability
+
+
+class TestAnEmptyRangeIsNotAZero:
+    """MIN and MAX do not fail on an empty range; they answer zero.
+
+    AVERAGE and MEDIAN raise, so IFERROR catches them and the cell goes
+    blank. MIN and MAX of a range holding only empty strings return 0,
+    which IFERROR never sees. A lowest comparable multiple of zero then
+    travels to SOTP, values every segment at nothing, and the sheet
+    reports a sum-of-the-parts equity value equal to the net debt.
+
+    So the formula the builder writes must decide on a count, not on an
+    error. This reads the formula it actually wrote.
+    """
+
+    @pytest.fixture
+    def comps(self, tmp_path):
+        path = tmp_path / "comps.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active.title = "Comps"
+        wb.create_sheet("SOTP")
+        wb.save(path)
+        return str(path)
+
+    def _formulas(self, comps, tmp_path):
+        sys.path.insert(0, os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "scripts", "xlsxvas"))
+        import build_vas_template as B
+        w = WorkbookPatch(comps)
+        B.build_comps(w)
+        out = str(tmp_path / "out.xlsx")
+        w.save(out)
+        ws = openpyxl.load_workbook(out)["Comps"]
+        return ws
+
+    @pytest.mark.parametrize("ref", ["U17", "U18", "U19", "U20"])
+    def test_each_group_statistic_decides_on_a_count(
+            self, comps, tmp_path, ref):
+        ws = self._formulas(comps, tmp_path)
+        formula = ws[ref].value
+        assert formula.startswith("=IF(COUNT("), formula
+        assert 'COUNT(U13:U16)=0' in formula, formula
+
+    def test_a_multiple_with_no_denominator_stays_blank(
+            self, comps, tmp_path):
+        ws = self._formulas(comps, tmp_path)
+        assert ws["U13"].value == '=IF(OR($J13="",L13="",L13<=0),"",$J13/L13)'
+
+    def test_all_four_statistics_are_present(self, comps, tmp_path):
+        ws = self._formulas(comps, tmp_path)
+        got = " ".join(ws[r].value for r in ("U17", "U18", "U19", "U20"))
+        for fn in ("AVERAGE", "MEDIAN", "MIN", "MAX"):
+            assert fn in got

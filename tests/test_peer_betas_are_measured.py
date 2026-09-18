@@ -106,3 +106,34 @@ class TestTheHistoryShapeIsReadNotAssumed:
     def test_an_empty_answer_is_not_a_zero_price(self):
         assert F.closes_by_date({}) == {}
         assert F.closes_by_date({"candles": [{"time": "2024-01-02"}]}) == {}
+
+
+class TestUnitsAreConvertedInOnePlace:
+    """A board quotes 25.6 and means 25,600 dong.
+
+    The screener carries a market capitalisation in ty dong beside a
+    reference price in thousands. The workbook wants dong per share and
+    millions of shares. Nothing in either number says which it is, so the
+    conversion is written once and checked against a company whose share
+    count is known.
+    """
+
+    def test_a_board_price_becomes_dong(self):
+        assert F.price_in_dong(25.6) == 25600.0
+
+    def test_acb_comes_back_with_the_shares_it_has(self):
+        # 115,000 ty dong at 25.6; ACB has about 4.47 billion shares
+        got = F.shares_in_millions(115_000, 25.6)
+        assert got == pytest.approx(4492.0, abs=1.0)
+        assert 4_000 < got < 5_000
+
+    def test_the_conversion_survives_a_round_trip(self):
+        cap_ty, ref = 142_000, 50.0
+        shares_m = F.shares_in_millions(cap_ty, ref)
+        rebuilt = shares_m * 1e6 * F.price_in_dong(ref)
+        assert rebuilt == pytest.approx(cap_ty * 1e9, rel=1e-12)
+
+    @pytest.mark.parametrize("cap,ref", [(0, 25.6), (115_000, 0),
+                                         (None, 25.6), (115_000, None)])
+    def test_a_missing_side_is_not_a_share_count(self, cap, ref):
+        assert F.shares_in_millions(cap, ref) is None

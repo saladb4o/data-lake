@@ -37,6 +37,8 @@ RD = "Raw Data"
 FS = "Financial Statements"
 CP = "Control Panel"
 SC = "Scenarios"
+CM = "Comps"
+SP = "SOTP"
 WC = "WACC"
 DC = "DCF"
 
@@ -1165,6 +1167,91 @@ def build_translate(w: WorkbookPatch) -> int:
     return w.replace_shared_strings(TERMS)
 
 
+def build_comps(w: WorkbookPatch) -> None:
+    """Empty the comparables of their US financials and stop them reading 0.
+
+    Clearing the peers' names and prices last time left their forecast
+    revenue, EBITDA, earnings and cash flow in place - eighteen rows of
+    Amazon's comparables, in US dollars, still dividing into a blank
+    market capitalisation. Every multiple came out 0 rather than blank,
+    the group averages came out 0, and SOTP multiplied 0 by this
+    company's segment revenue to reach an enterprise value of 0. Adding
+    net debt to that gave a per-share figure of 10,240 dong presented as
+    a sum-of-the-parts valuation. It is the same failure the DCF had: not
+    an error cell, a plausible number.
+    """
+    PEERS = list(range(13, 17)) + list(range(23, 26)) + \
+        list(range(32, 35)) + list(range(41, 45)) + list(range(51, 55))
+    STATS = [(17, 20, 13, 16), (26, 29, 23, 25), (35, 38, 32, 34),
+             (45, 48, 41, 44), (55, 58, 51, 54)]
+    # numerator column -> the multiple columns it feeds and their divisors
+    MULTIPLES = [("J", "U", "L"), ("J", "V", "M"),
+                 ("J", "W", "N"), ("J", "X", "O"),
+                 ("F", "Y", "P"), ("F", "Z", "Q"),
+                 ("F", "AA", "R"), ("F", "AB", "S")]
+
+    for row in PEERS + [10]:
+        if row != 10:
+            for col in ("B", "D", "E", "G", "H", "L", "M", "N", "O",
+                        "P", "Q", "R", "S", "AD", "AE"):
+                w.clear(CM, f"{col}{row}")
+            w.set_formula(CM, f"F{row}", f'IF(OR(D{row}="",E{row}=""),"",'
+                                         f"D{row}*E{row})")
+            w.set_formula(CM, f"I{row}", f'IF(OR(G{row}="",H{row}=""),"",'
+                                         f"G{row}-H{row})")
+            w.set_formula(CM, f"J{row}", f'IF(OR(F{row}="",I{row}=""),"",'
+                                         f"F{row}+I{row})")
+        for num, out, den in MULTIPLES:
+            w.set_formula(
+                CM, f"{out}{row}",
+                f'IF(OR(${num}{row}="",{den}{row}="",{den}{row}<=0),"",'
+                f"${num}{row}/{den}{row})")
+
+    for first, last, plo, phi in STATS:
+        for _, out, _ in MULTIPLES:
+            rng = f"{out}{plo}:{out}{phi}"
+            # AVERAGE and MEDIAN of an empty range are errors, which
+            # IFERROR catches. MIN and MAX of an empty range are 0, which
+            # it does not - and a lowest multiple of zero travels to SOTP
+            # and values a segment at nothing. Counting first treats all
+            # four the same way.
+            for row, fn in ((first, "AVERAGE"), (first + 1, "MEDIAN"),
+                            (first + 2, "MIN"), (first + 3, "MAX")):
+                w.set_formula(
+                    CM, f"{out}{row}",
+                    f'IF(COUNT({rng})=0,"",IFERROR({fn}({rng}),""))')
+
+    w.set_value(CM, "B62", "Nguồn: (chạy scripts/xlsxvas/fill_peers.py)")
+
+
+def build_sotp_gate(w: WorkbookPatch) -> None:
+    """Keep a missing multiple out of the sum of the parts.
+
+    A blank multiple times a real segment revenue is not zero, it is
+    unknown, and a total that treats it as zero understates the company
+    by exactly the parts nobody has valued yet.
+    """
+    # A unary plus in front of a reference coerces an empty string to
+    # zero, so gating the multiplication downstream was not enough: the
+    # blank arrived here already turned into a number.
+    SOURCES = {12: (19, 17), 16: (28, 26), 20: (37, 35),
+               24: (47, 45), 28: (57, 55)}
+    for row, (low, mid) in SOURCES.items():
+        for col, src in (("F", low), ("G", mid)):
+            w.set_formula(SP, f"{col}{row}",
+                          f'IF(\'{CM}\'!$U${src}="","",\'{CM}\'!$U${src})')
+        # a segment with no revenue is a segment nobody has filled in,
+        # not a segment worth nothing
+        w.set_formula(SP, f"J{row}",
+                      f'IF(OR(F{row}="",D{row}="",D{row}=0),"",'
+                      f"F{row}*D{row})")
+    w.set_formula(SP, "J31",
+                  'IF(COUNT(J12,J16,J20,J24,J28)<5,"",'
+                  "J12+J16+J20+J24+J28)")
+    w.set_formula(SP, "J34", 'IF(J31="","",J31+J33)')
+    w.set_formula(SP, "J37", 'IF(OR(J34="",J36="",J36=0),"",J34/J36)')
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -1178,6 +1265,8 @@ def main(src: str, dest: str) -> None:
     build_sotp(w)
     build_market_sheets(w)
     build_units_and_titles(w)
+    build_comps(w)
+    build_sotp_gate(w)
     build_wacc(w)
     build_dcf_gate(w)
     build_translate(w)
