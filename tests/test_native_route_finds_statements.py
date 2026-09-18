@@ -140,12 +140,14 @@ class TestOnARealVectorPdf:
         assert 1 in found["cash_flow"]
 
 
-class TestTheLateHeadingFallback:
-    """Past page 26 a heading counts only when nothing was found before it.
+class TestTheWindowIsAHardBound:
+    """The late-heading fallback was removed after a run declined it.
 
-    An audited consolidated report can run past a hundred pages with a long
-    bilingual front section. The window that keeps a note's cross-reference
-    from being read as the statement is then the thing hiding it.
+    It was added on the guess that PVS's 146-page audited report had its
+    statements past page 26. Run 35300394193 says otherwise: no document
+    used the fallback, PVS located nothing beyond one page, and BSR
+    located nothing at all. Speculative code in a parser that no measured
+    document needs is a liability, so the window is a hard bound again.
     """
 
     @staticmethod
@@ -168,20 +170,59 @@ class TestTheLateHeadingFallback:
         parser = BCTCPdfParser(self._build(tmpdir, heading_pages), symbol="TEST")
         return parser.locate_statement_pages()
 
-    def test_a_heading_only_past_the_window_is_still_reached(self):
+    def test_a_heading_past_the_window_is_not_counted(self):
         with tempfile.TemporaryDirectory() as tmp:
             found = self._locate(tmp, {28})
-        assert found["cash_flow"] == [28]
+        assert found["cash_flow"] == []
 
-    def test_an_early_heading_keeps_the_late_one_out(self):
-        # The ordinary case must not change: the fallback fires only on an
-        # empty result, so a cross-reference in the notes stays excluded.
+    def test_a_heading_inside_the_window_is(self):
         with tempfile.TemporaryDirectory() as tmp:
             found = self._locate(tmp, {4, 28})
         assert found["cash_flow"] == [4]
 
-    def test_the_fallback_does_not_invent_pages(self):
+    def test_nothing_is_invented_from_an_empty_document(self):
         with tempfile.TemporaryDirectory() as tmp:
             found = self._locate(tmp, set())
         assert found["cash_flow"] == []
         assert found["balance_sheet"] == []
+
+
+class TestAContentsPageIsNotAStatement:
+    """PVS's cover page was located as all five sections at once.
+
+    Every extractor then ran against the cover and found nothing, and the
+    document reported zero items as though the parser could not read it.
+    """
+
+    def test_a_page_naming_all_three_statements_is_excluded(self):
+        from services.bctc_pdf_parser import BCTCPdfParser
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "cover.pdf")
+            doc = fitz.open()
+            cover = doc.new_page()
+            for n, line in enumerate([
+                "BAO CAO TAI CHINH HOP NHAT",
+                "BANG CAN DOI KE TOAN",
+                "BAO CAO KET QUA HOAT DONG KINH DOANH",
+                "BAO CAO LUU CHUYEN TIEN TE",
+                "THUYET MINH BAO CAO TAI CHINH",
+            ]):
+                cover.insert_text((72, 100 + n * 20), line, fontsize=12)
+            real = doc.new_page()
+            real.insert_text((72, 100), "BANG CAN DOI KE TOAN", fontsize=14)
+            doc.save(path)
+            doc.close()
+            found = BCTCPdfParser(path, symbol="TEST").locate_statement_pages()
+        assert 0 not in found["balance_sheet"]
+        assert 0 not in found["cash_flow"]
+        assert found["balance_sheet"] == [1]
+
+    def test_two_statements_on_one_page_are_still_kept(self):
+        # A statement continuing onto the page where the next begins is
+        # ordinary - FPT has pages in two lists at once - so the line is
+        # drawn at all three, not at two.
+        from services.bctc_pdf_parser import names_all_the_statements
+        assert not names_all_the_statements(["balance_sheet", "income_statement"])
+        assert not names_all_the_statements(["balance_sheet", "cash_flow"])
+        assert names_all_the_statements(
+            ["balance_sheet", "income_statement", "cash_flow"])

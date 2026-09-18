@@ -159,6 +159,27 @@ STATEMENT_HEADINGS = {
 # heading counts, never as a bound on how much is read.
 NATIVE_STATEMENT_WINDOW = 25
 
+
+def names_all_the_statements(hit_keys) -> bool:
+    """True when one page names every statement - a contents page.
+
+    PVS's 110-page filing put all three statements and the auditor's
+    report and the notes on page 0 in run 35300394193, because page 0 is
+    the cover listing what the document contains. Every extractor then
+    ran against the cover and found nothing, and the filing reported zero
+    items as though the parser could not read it.
+
+    The existing table-of-contents guard misses this: it wants dotted
+    leaders and page numbers, and a cover page has neither. But a page
+    that names the balance sheet AND the income statement AND the cash
+    flow statement is listing them rather than being one. Two together
+    happen legitimately - a statement continues onto the page where the
+    next begins, which is why FPT has pages in two lists at once - so the
+    line is drawn at all three.
+    """
+    return len({"balance_sheet", "income_statement",
+                "cash_flow"} & set(hit_keys)) == 3
+
 FOOTNOTE_HEADINGS = [
     "THUYET MINH BAO CAO TAI CHINH", "THUYET MINH BCTC",
     "NOTES TO THE FINANCIAL", "THUYET MINH",
@@ -719,12 +740,6 @@ class BCTCPdfParser:
         if not fitz:
             return locations
 
-        # Headings found past the window, kept aside as a fallback.
-        late_hits: Dict[str, List[int]] = {
-            "auditor_report": [], "balance_sheet": [],
-            "income_statement": [], "cash_flow": [],
-        }
-
         # Pass 1: Native Vector Text
         with fitz.open(self.pdf_path) as doc:
             for page_idx in range(len(doc)):
@@ -745,31 +760,16 @@ class BCTCPdfParser:
                 # arriving through a different mechanism. See squash().
                 page_squashed = squash(txt_raw)
 
-                for key in ("auditor_report", "balance_sheet",
-                            "income_statement", "cash_flow"):
-                    if any(squash(k) in page_squashed
-                           for k in STATEMENT_HEADINGS[key]):
-                        if page_idx <= NATIVE_STATEMENT_WINDOW:
+                if page_idx <= NATIVE_STATEMENT_WINDOW:
+                    hit = [k for k in ("auditor_report", "balance_sheet",
+                                       "income_statement", "cash_flow")
+                           if any(squash(w) in page_squashed
+                                  for w in STATEMENT_HEADINGS[k])]
+                    if not names_all_the_statements(hit):
+                        for key in hit:
                             locations[key].append(page_idx)
-                        else:
-                            late_hits[key].append(page_idx)
                 if any(squash(k) in page_squashed for k in FOOTNOTE_HEADINGS):
                     locations["footnotes"].append(page_idx)
-
-        # A heading past page 26 is used only when nothing was found inside
-        # it. Statements normally sit at the front, and the window keeps a
-        # cross-reference in the notes from being read as the statement
-        # itself - but an audited consolidated report can run to 146 pages
-        # with a long bilingual front section, and there the window is the
-        # thing hiding the statement. Falling back only on an empty result
-        # leaves the ordinary case exactly as it was.
-        #
-        # This is a hypothesis, unlike the spacing fix beside it: no
-        # document has yet been shown to need it. The locator's output is
-        # reported per document so a run can say whether it fired at all.
-        for key, pages in late_hits.items():
-            if not locations[key] and pages:
-                locations[key].extend(pages[:3])
 
         # Pass 2: If Balance Sheet not found and document is SCANNED, scan candidate pages with RapidOCR
         if not locations["balance_sheet"] and self.doc_type in ("SCANNED_IMAGE", "SCANNED") and _rapid_ocr_engine:
@@ -785,10 +785,12 @@ class BCTCPdfParser:
                     # keyword list silently matches nothing. See squash().
                     page_text = squash(" ".join(ocr_lines))
 
-                    for key in ("auditor_report", "balance_sheet",
-                                "income_statement", "cash_flow"):
-                        if any(squash(k) in page_text
-                               for k in STATEMENT_HEADINGS[key]):
+                    hit = [k for k in ("auditor_report", "balance_sheet",
+                                       "income_statement", "cash_flow")
+                           if any(squash(w) in page_text
+                                  for w in STATEMENT_HEADINGS[k])]
+                    if not names_all_the_statements(hit):
+                        for key in hit:
                             if p_idx not in locations[key]:
                                 locations[key].append(p_idx)
 
@@ -1310,6 +1312,8 @@ class BCTCPdfParser:
                     lines = self._get_ocr_lines_for_page(doc, p_idx)
                     self._parse_ocr_lines_for_cash_flow(lines, items)
 
+        self._repair_opening_cash(items)
+
         cfo = items.get(20, {}).get("current_val")
         capex_raw = items.get(21, {}).get("current_val")
         capex = abs(capex_raw) if capex_raw is not None else None
@@ -1344,6 +1348,58 @@ class BCTCPdfParser:
             "is_net_cash_flow_balanced": is_net_cf_balanced,
             "is_cash_ending_balanced": is_cash_ending_balanced,
             "extraction_method": method_used
+        }
+
+    @staticmethod
+    def _repair_opening_cash(items: Dict[int, Any]) -> None:
+        """Take the opening cash balance from the prior period's closing.
+
+        Code 60 comes back wrong often enough to be systematic. On FPT's
+        Q4 2025 parent-only filing the extractor bound it to 42,728,190,111
+        against a closing balance of 1,905,249,672,046, and the identity
+        the statement guarantees missed by 1.8 trillion. The same break
+        showed on both consolidated filings in run 35300394193.
+
+        The cause is upstream: a bare one or two digit line is read as a
+        code, so page numbers and note references are picked up as codes
+        and take whatever figure follows. The order the items came back in
+        shows it - 1, 2, 3, 60, 20, 21 - code 60 bound before code 20 on a
+        statement that prints them the other way round. That is a separate
+        bug and this does not pretend to fix it.
+
+        What can be repaired here is one line, on an accounting identity
+        rather than a guess: cash at the start of a period is cash at the
+        end of the one before, which the statement itself prints as code
+        70's comparative column. On FPT's filing that substitution closes
+        60 + 50 + 61 = 70 exactly, to the dong.
+
+        The repair is applied only when it makes the identity close. If
+        the arithmetic still does not work the extracted value stays, and
+        the statement keeps reporting itself as broken - a wrong number is
+        better left visible than replaced with a different wrong number.
+        """
+        closing = items.get(70) or {}
+        prior_close = closing.get("previous_val")
+        end = closing.get("current_val")
+        net = (items.get(50) or {}).get("current_val")
+        if prior_close is None or end is None or net is None:
+            return
+
+        fx = (items.get(61) or {}).get("current_val") or 0.0
+        begin = (items.get(60) or {}).get("current_val")
+
+        tolerance = max(1000.0, abs(end) * 1e-6)
+        if begin is not None and abs((begin + net + fx) - end) <= tolerance:
+            return  # Already consistent; nothing to repair.
+        if abs((prior_close + net + fx) - end) > tolerance:
+            return  # The substitution would not close it either.
+
+        items[60] = {
+            "code": 60,
+            "name": TT200_CASH_FLOW_CODES[60],
+            "current_val": prior_close,
+            "previous_val": (items.get(60) or {}).get("previous_val"),
+            "repaired_from": "code 70 comparative column",
         }
 
     def _parse_ocr_lines_for_cash_flow(self, lines: List[str], items_dict: Dict[int, Any]) -> None:

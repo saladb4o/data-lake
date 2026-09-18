@@ -381,6 +381,43 @@ def compare_to_vendor(symbol: str, year: int, cf_items: Dict[Any, Any]
     return out
 
 
+def render_native_probe(path: str, located: Dict[str, Any]) -> None:
+    """What the native text layer actually holds, page by page.
+
+    Printed only when the locator found little, and only for native
+    documents, where reading the text costs nothing - no OCR runs here.
+
+    BSR's audited consolidated filing located nothing at all in run
+    35300394193, and its Q4 filing located a balance-sheet page and then
+    extracted zero items from it. Those are two different failures that a
+    count of zero cannot tell apart, and the same question settled the
+    OCR bug twice: print what the page actually says. Either the text
+    layer is empty, or it holds words the headings do not match, and the
+    lines are the evidence either way.
+    """
+    found = sum(len(v) for k, v in located.items()
+                if k in ("balance_sheet", "income_statement", "cash_flow")
+                and isinstance(v, list))
+    if found >= 3:
+        return
+    try:
+        import fitz
+    except ImportError:
+        return
+    print("| page | chars | what the text layer holds |")
+    print("|---:|---:|---|")
+    try:
+        with fitz.open(path) as doc:
+            for p_idx in range(min(14, len(doc))):
+                raw = (doc[p_idx].get_text() or "").strip()
+                shown = " / ".join(
+                    ln.strip() for ln in raw.splitlines() if ln.strip())[:150]
+                print(f"| {p_idx} | {len(raw)} | {shown or '(empty)'} |")
+    except Exception as exc:
+        print(f"| - | - | probe failed: {type(exc).__name__}: {str(exc)[:70]} |")
+    print()
+
+
 def render_identities(name: str, checks: List[Dict[str, Any]]) -> None:
     print(f"| {name} | result | lhs | rhs | diff |")
     print("|---|---|---:|---:|---:|")
@@ -465,6 +502,8 @@ def run_symbol(symbol: str, year: int, limit: int,
         # which of them fired, or whether either did.
         print(f"- pages located: `{result.get('located')}`")
         print()
+        if result["doc_type"] == "NATIVE":
+            render_native_probe(local, result.get("located") or {})
 
         entry: Dict[str, Any] = {"symbol": symbol, "scope": scope,
                                  "period": period, "route": result["doc_type"],
