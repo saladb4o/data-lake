@@ -978,7 +978,12 @@ def build_wacc(w: WorkbookPatch) -> None:
                 "B9", "C9", "D9", "E9", "F9", "G9", "H9", "I9", "J9", "K9",
                 "C31", "C32"):
         w.clear(WC, ref)
-    w.hide_rows(WC, 6, 32)
+    # the comparables filled columns B..K and the calculation that used
+    # them sits in M..R on the SAME rows, so the emptied space is a block
+    # of columns, not a block of rows
+    w.hide_columns(WC, "B", "L")
+    w.widen_columns(WC, "M", "M", 34.0)     # the label column
+    w.widen_columns(WC, "Q", "R", 13.0)     # low and high
 
     w.set_value(CP, "B37", "Beta vốn chủ sở hữu (có đòn bẩy)")
     w.copy_row_style(CP, 35, 37, "BFG")

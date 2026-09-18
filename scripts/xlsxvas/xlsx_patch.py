@@ -221,6 +221,46 @@ class WorkbookPatch:
             xml = xml[:at] + rebuilt + xml[at:]
         self._parts[part] = xml.encode("utf8")
 
+    def hide_columns(self, sheet: str, first_col: str,
+                     last_col: str) -> None:
+        """Put a span of columns away.
+
+        Where a sheet carries two blocks side by side, only one of which
+        was emptied, hiding rows takes both. The WACC sheet is laid out
+        that way: the comparables table filled columns B to K and the
+        calculation that uses it sits in M to R, on the same rows. Hiding
+        the rows of the table hid the calculation with it and left the
+        sheet showing a single line.
+        """
+        part = self._sheet_part[sheet]
+        xml = self._parts[part].decode("utf8")
+        lo, hi = col_to_index(first_col), col_to_index(last_col)
+        existing: Dict[int, Dict[str, str]] = {}
+        block = re.search(r"<cols>.*?</cols>", xml, re.S)
+        if block:
+            for tag in re.findall(r"<col\b[^>]*/>", block.group(0)):
+                attrs = dict(re.findall(r'(\w+)="([^"]*)"', tag))
+                a, b = int(attrs.get("min", 1)), int(attrs.get("max", 1))
+                for i in range(a, b + 1):
+                    one = dict(attrs)
+                    one["min"] = one["max"] = str(i)
+                    existing[i] = one
+        for i in range(lo, hi + 1):
+            attrs = existing.get(i, {"min": str(i), "max": str(i)})
+            attrs["hidden"] = "1"
+            attrs["min"] = attrs["max"] = str(i)
+            attrs.setdefault("width", "0")
+            existing[i] = attrs
+        rebuilt = "<cols>" + "".join(
+            "<col " + " ".join(f'{k}="{v}"' for k, v in sorted(a.items()))
+            + "/>" for _, a in sorted(existing.items())) + "</cols>"
+        if block:
+            xml = xml[:block.start()] + rebuilt + xml[block.end():]
+        else:
+            at = xml.index("<sheetData")
+            xml = xml[:at] + rebuilt + xml[at:]
+        self._parts[part] = xml.encode("utf8")
+
     def hide_rows(self, sheet: str, first: int, last: int) -> None:
         """Hide a span of rows, keeping their numbers.
 

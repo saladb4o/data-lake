@@ -556,3 +556,49 @@ class TestReadingTheSheetsBackWaitsForTheEdits:
         w.save(out)
         with zipfile.ZipFile(out) as z:
             assert b"Amazon" not in z.read("xl/sharedStrings.xml")
+
+
+class TestPuttingAwayABlockOfColumns:
+    """Two blocks side by side, only one of them emptied.
+
+    Hiding the rows of the emptied block hides the other one with it.
+    The WACC sheet was laid out that way and came back showing a single
+    line - the only row the calculation did not share with the
+    comparables table.
+    """
+
+    def test_hiding_columns_leaves_the_rows_alone(self, tmp_path):
+        src = tmp_path / "side.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Data"
+        for r in range(1, 6):
+            ws.cell(row=r, column=2, value=f"left {r}")
+            ws.cell(row=r, column=8, value=f"right {r}")
+        wb.save(src)
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(str(src))
+        w.hide_columns("Data", "B", "F")
+        w.save(out)
+        ws2 = openpyxl.load_workbook(out)["Data"]
+        assert ws2.column_dimensions["B"].hidden
+        assert ws2.column_dimensions["F"].hidden
+        assert not ws2.column_dimensions["H"].hidden
+        for r in range(1, 6):
+            assert not ws2.row_dimensions[r].hidden
+            assert ws2.cell(row=r, column=8).value == f"right {r}"
+
+    def test_a_width_set_earlier_is_kept_when_hiding(self, tmp_path):
+        src = tmp_path / "side.xlsx"
+        wb = openpyxl.Workbook()
+        wb.active.title = "Data"
+        wb.active["B1"] = 1
+        wb.save(src)
+        out = str(tmp_path / "out.xlsx")
+        w = WorkbookPatch(str(src))
+        w.widen_columns("Data", "B", "B", 20.0)
+        w.hide_columns("Data", "B", "B")
+        w.save(out)
+        ws = openpyxl.load_workbook(out)["Data"]
+        assert ws.column_dimensions["B"].hidden
+        assert round(ws.column_dimensions["B"].width, 1) == 20.0
