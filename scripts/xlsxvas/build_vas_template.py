@@ -670,23 +670,30 @@ def build_control_panel(w: WorkbookPatch) -> None:
 def build_scenarios(w: WorkbookPatch) -> None:
     w.set_value(SC, "A2", "Kịch bản dự phóng")
     w.set_value(SC, "A3", "Đơn vị: triệu đồng")
-    for block_row, title in ((13, "Tăng trưởng doanh thu thuần"),
-                             (23, "Tăng trưởng doanh thu thuần"),
-                             (33, "Tăng trưởng doanh thu thuần"),
-                             (43, "Tăng trưởng doanh thu thuần"),
-                             (53, "Tăng trưởng doanh thu thuần")):
-        w.set_value(SC, f"B{block_row}", title)
-    # one revenue line per scenario instead of six segments
-    for first in (14, 24, 34, 44, 54):
+    w.set_value(SC, "B7", "Kỳ báo cáo")
+    w.set_value(SC, "B8", "Đầu kỳ")
+    w.set_value(SC, "B9", "Cuối kỳ")
+    w.set_value(SC, "B10", "Số ngày")
+    # one revenue line per scenario instead of Amazon's six segments
+    CASES = ((12, 13, 14, 20, "KỊCH BẢN ĐANG DÙNG"),
+             (22, 23, 24, 30, "KỊCH BẢN CƠ SỞ"),
+             (32, 33, 34, 40, "KỊCH BẢN LẠC QUAN"),
+             (42, 43, 44, 50, "KỊCH BẢN THẬN TRỌNG"),
+             (52, 53, 54, 60, "KỊCH BẢN KHÁC"))
+    for banner, title_row, first, total_row, banner_text in CASES:
+        w.set_value(SC, f"B{banner}", banner_text)
+        w.set_value(SC, f"B{title_row}", "Tăng trưởng doanh thu thuần")
         w.set_value(SC, f"B{first}", "Doanh thu thuần")
+        w.set_value(SC, f"B{total_row}", "Tổng doanh thu thuần")
+        # the five emptied segment rows: clear, then put them away so the
+        # sheet does not show a block of blank shaded cells
         for r in range(first + 1, first + 6):
             w.set_value(SC, f"B{r}", None)
             for c in ALL_COLS:
                 w.clear(SC, f"{c}{r}")
+        w.hide_rows(SC, first + 1, first + 5)
     w.set_formula(SC, "H24", f"'{RD}'!O16")
-    w.set_value(SC, "B20", "Tổng doanh thu thuần")
-    w.set_value(SC, "B12", "KỊCH BẢN ĐANG DÙNG")
-    w.set_value(SC, "B22", "KỊCH BẢN CƠ SỞ")
+    w.widen_columns(SC, "C", "R", 12.5)
 
 
 def build_sotp(w: WorkbookPatch) -> None:
