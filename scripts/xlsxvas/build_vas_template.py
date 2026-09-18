@@ -124,6 +124,19 @@ def build_drivers(w: WorkbookPatch) -> None:
         34: ("Khấu hao (%% TSCĐ đầu kỳ)",
              'IFERROR({c}%d/{p}%d,"na")' % (CF["02"], BS["220"]),
              True),
+        # Depreciation over opening gross cost, now that the cost is a
+        # line of its own. The ratio over net book value moves whenever
+        # the asset base ages, even with no change in policy; over gross
+        # cost it is close to the reciprocal of the useful life.
+        35: ("Khấu hao (%% nguyên giá đầu kỳ)",
+             'IFERROR({c}%d/{p}%d,"na")' % (CF["02"], BS["222"]), True),
+        # Accumulated depreciation should grow by the year's charge. What
+        # it does not account for is disposals, so this is a memo, not a
+        # check: a large number here is a year with disposals or a
+        # revaluation, not necessarily an error.
+        38: ("Chênh lệch hao mòn lũy kế và khấu hao (thanh lý)",
+             'IFERROR(({p}%d-{c}%d)-{c}%d,"na")'
+             % (BS["223"], BS["223"], CF["02"]), True),
         36: ("Tăng trưởng đầu tư tài chính ngắn hạn",
              'IFERROR({c}%d/{p}%d-1,"na")' % (BS["120"], BS["120"]), True),
         37: ("Cổ tức đã trả (%% lợi nhuận sau thuế)",
@@ -912,13 +925,15 @@ def build_tidy(w: WorkbookPatch) -> None:
     w.hide_rows(FS, 152, 168)       # depreciation triangle
     w.hide_rows(FS, 175, 285)       # both lease schedules
     w.hide_rows(FS, 139, 146)       # restricted cash
-    w.hide_rows(RD, 92, 167)        # below the last TT200 line
+    w.hide_rows(RD, V.LAST_ROW + 4, 180)   # below the last TT200 line
     for r in list(range(139, 147)) + list(range(175, 286)):
         _clear_row(w, FS, r)
         for col in ("A", "B"):
             w.clear(FS, f"{col}{r}")
-    _label(w, FS, 174, "(Phụ lục thuê tài chính và thuê hoạt động đã bỏ: "
-                       "VAS 06 không ghi nhận tài sản quyền sử dụng)")
+    _label(w, FS, 174,
+           "(Phụ lục thuê theo IFRS 16 đã bỏ. VAS/TT200 CÓ ghi nhận thuê "
+           "tài chính: tài sản ở mã 224/225/226, tiền trả gốc ở mã 35, "
+           "nợ thuê nằm trong mã 320 và 338 và không tách trên mặt biểu)")
 
     # Where the source model puts a section banner and where this layout
     # needs one are different rows. The look is taken from the model's own

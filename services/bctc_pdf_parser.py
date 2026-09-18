@@ -91,8 +91,18 @@ TT200_BALANCE_SHEET_CODES = {
     200: "TÀI SẢN DÀI HẠN",
     210: "Phải thu dài hạn",
     220: "Tài sản cố định",
-    221: "Nguyên giá TSCĐ hữu hình",
-    222: "Giá trị hao mòn lũy kế TSCĐ hữu hình",
+    # 221/222 were the wrong way round, and 223 was missing. What settles
+    # it is arithmetic, not the label: on SHS's filed balance sheet
+    # 221 + 227 = 30,251,990,576 = 220, to the dong, so 221 is the
+    # carrying amount of tangible fixed assets and not their cost. 222
+    # (54.8bn) is larger than 221 (11.7bn), which is what a gross cost
+    # looks like next to a net book value.
+    221: "Tài sản cố định hữu hình",
+    222: "Nguyên giá TSCĐ hữu hình",
+    223: "Giá trị hao mòn lũy kế TSCĐ hữu hình",
+    224: "Tài sản cố định thuê tài chính",
+    225: "Nguyên giá TSCĐ thuê tài chính",
+    226: "Giá trị hao mòn lũy kế TSCĐ thuê tài chính",
     227: "Tài sản cố định vô hình",
     228: "Nguyên giá TSCĐ vô hình",
     229: "Giá trị hao mòn lũy kế TSCĐ vô hình",
@@ -110,10 +120,18 @@ TT200_BALANCE_SHEET_CODES = {
     330: "Nợ dài hạn",
     338: "Vay và nợ thuê tài chính dài hạn",
     400: "VỐN CHỦ SỞ HỮU",
-    410: "Vốn góp của chủ sở hữu",
-    411: "Cổ phiếu phổ thông có quyền biểu quyết",
+    # 410 and 411 were off by one level, the same way 221/222 were. The
+    # composition 400 = 410 + 430 is read whole off a filed consolidated
+    # balance sheet; it can only hold if 410 is the parent, because a
+    # sub-line would leave retained earnings out of the total.
+    410: "Vốn chủ sở hữu",
+    411: "Vốn góp của chủ sở hữu",
     418: "Quỹ đầu tư phát triển",
     421: "Lợi nhuận sau thuế chưa phân phối",
+    # neither of these was carried at all, so a consolidated filing's
+    # minority interest had nowhere to land
+    429: "Lợi ích cổ đông không kiểm soát",
+    430: "Nguồn kinh phí và quỹ khác",
     440: "TỔNG CỘNG NGUỒN VỐN"
 }
 
@@ -430,8 +448,14 @@ TITLE_TO_BS_CODES = [
     ("tai san dai han", 200),
     ("phai thu dai han", 210),
     ("tai san co dinh", 220),
-    ("nguyen gia", 221),
-    ("gia tri hao mon luy ke", 222),
+    # "Nguyên giá" and "Giá trị hao mòn luỹ kế" are each printed three
+    # times on B 01-DN - under tangible, under finance-lease and under
+    # intangible assets - so a title alone cannot say which one it is.
+    # This list is scanned first-match-wins, so a bare pattern would
+    # always claim the first block it met and the other two would be
+    # dropped as duplicates. Extracting nothing is better than filing a
+    # number under the wrong code; the printed code disambiguates and
+    # Strategy A reads it.
     ("bat dong san dau tu", 230),
     ("tai san do dang dai han", 240),
     ("chi phi xay dung co ban do dang", 242),

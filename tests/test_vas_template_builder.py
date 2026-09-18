@@ -22,6 +22,7 @@ their own file, in the shapes that broke.
 """
 
 import os
+import re
 import sys
 import zipfile
 
@@ -172,19 +173,52 @@ class TestTheLayoutIsInternallyConsistent:
             for row in _rows_in(line.formula):
                 assert row in named, f"{line.label} points at empty {row}"
 
-    def test_the_balance_sheet_checks_use_the_official_compositions(self):
-        by_row = {l.row: l for l in V.BALANCE}
-        assets = by_row[47].formula.format(c="C")
-        capital = by_row[64].formula.format(c="C")
-        assert _rows_in(assets) == [V.BS_ROW["100"], V.BS_ROW["200"],
-                                    V.BS_ROW["270"]]
-        assert _rows_in(capital) == [V.BS_ROW["300"], V.BS_ROW["400"],
-                                     V.BS_ROW["440"]]
+    def test_every_composition_tt200_imposes_has_a_check(self):
+        """Find each check by what it references, not by where it sits.
 
-    def test_the_cash_identity_is_the_one_tt200_imposes(self):
-        by_row = {l.row: l for l in V.CASHFLOW}
-        assert _rows_in(by_row[83].formula.format(c="C")) == [
-            V.CF_ROW["50"], V.CF_ROW["60"], V.CF_ROW["61"], V.CF_ROW["70"]]
+        Naming the row would make this test the second place a row number
+        is written, which is the drift the layout module exists to stop.
+        """
+        wanted = {
+            "100 + 200 = 270": [V.BS_ROW[c] for c in ("100", "200", "270")],
+            "310 + 330 = 300": [V.BS_ROW[c] for c in ("310", "330", "300")],
+            "300 + 400 = 440": [V.BS_ROW[c] for c in ("300", "400", "440")],
+            "220 = 221 + 224 + 227":
+                [V.BS_ROW[c] for c in ("220", "221", "224", "227")],
+            "221 = 222 + 223":
+                [V.BS_ROW[c] for c in ("221", "222", "223")],
+            "50 + 60 + 61 = 70":
+                [V.CF_ROW[c] for c in ("50", "60", "61", "70")],
+        }
+        present = [sorted(_rows_in(l.formula.format(c="C")))
+                   for l in V.ALL_LINES if l.kind == "check"]
+        for name, rows in wanted.items():
+            assert sorted(rows) in present, f"không có phép kiểm {name}"
+
+    def test_the_investing_and_financing_totals_are_checked_as_sums(self):
+        """A total nobody can check is a total the reader must trust.
+
+        Investing carried three of its seven components and financing
+        four of its six, so codes 30 and 40 could only be taken as given
+        and the model plugged the difference into a residual row.
+        """
+        ranges = [l.formula.format(c="C") for l in V.ALL_LINES
+                  if l.kind == "check" and "SUM(" in (l.formula or "")]
+        assert len(ranges) == 2
+        spans = []
+        for f in ranges:
+            m = re.search(r"SUM\(C(\d+):C(\d+)\)", f)
+            spans.append((int(m.group(1)), int(m.group(2))))
+        investing = (V.CF_ROW["21"], V.CF_ROW["27"])
+        financing = (V.CF_ROW["31"], V.CF_ROW["36"])
+        assert investing in spans
+        assert financing in spans
+        # every component between the ends is a real line, or the sum
+        # would quietly skip one
+        named = {l.row for l in V.ALL_LINES}
+        for lo, hi in spans:
+            for row in range(lo, hi + 1):
+                assert row in named
 
     def test_the_forecast_reaches_the_column_the_dcf_reads(self):
         # The valuation reads the last four forecast columns directly. A
@@ -194,7 +228,6 @@ class TestTheLayoutIsInternallyConsistent:
 
 
 def _rows_in(formula):
-    import re
     return [int(n) for n in re.findall(r"C(\d+)", formula)]
 
 
@@ -602,3 +635,52 @@ class TestPuttingAwayABlockOfColumns:
         ws = openpyxl.load_workbook(out)["Data"]
         assert ws.column_dimensions["B"].hidden
         assert round(ws.column_dimensions["B"].width, 1) == 20.0
+
+
+class TestTheLayoutFollowsTheRepositorysOwnCodeTables:
+    """The layout and the parser must agree on what TT200 contains.
+
+    They are two hand-written lists of the same thing. When they drift,
+    the exporter writes a code the template has no row for, or the
+    template asks for a code the parser never extracts, and neither says
+    so.
+    """
+
+    @pytest.fixture
+    def parser(self):
+        return pytest.importorskip("services.bctc_pdf_parser")
+
+    def test_every_code_in_the_layout_is_one_the_parser_knows(self, parser):
+        tables = {
+            "IS": (V.IS_ROW, parser.TT200_INCOME_CODES),
+            "BS": (V.BS_ROW, parser.TT200_BALANCE_SHEET_CODES),
+            "CF": (V.CF_ROW, parser.TT200_CASH_FLOW_CODES),
+        }
+        for name, (mine, theirs) in tables.items():
+            known = {str(int(k)) for k in theirs}
+            unknown = [c for c in mine if str(int(c)) not in known]
+            assert not unknown, f"{name}: {unknown} không có trong parser"
+
+    def test_the_layout_carries_the_lines_the_parser_can_read(self, parser):
+        """Whatever the parser extracts should have somewhere to land."""
+        tables = {
+            "IS": (V.IS_ROW, parser.TT200_INCOME_CODES),
+            "BS": (V.BS_ROW, parser.TT200_BALANCE_SHEET_CODES),
+            "CF": (V.CF_ROW, parser.TT200_CASH_FLOW_CODES),
+        }
+        # the breakdown lines under a parent are optional; the lines that
+        # carry a statement's structure are not
+        optional = {"111", "112", "131", "132", "136", "137", "141", "149",
+                    "225", "226", "228", "229", "242"}
+        for name, (mine, theirs) in tables.items():
+            have = {str(int(c)) for c in mine}
+            missing = [str(int(k)) for k in theirs
+                       if str(int(k)) not in have
+                       and str(int(k)) not in optional]
+            assert not missing, f"{name}: bố cục thiếu {missing}"
+
+    def test_finance_leases_have_a_home(self, parser):
+        """VAS capitalises them; only IFRS 16 operating leases have none."""
+        assert "224" in V.BS_ROW          # the asset
+        assert "35" in V.CF_ROW           # the principal repayment
+        assert "320" in V.BS_ROW and "338" in V.BS_ROW   # the liability

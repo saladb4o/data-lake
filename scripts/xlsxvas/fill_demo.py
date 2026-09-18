@@ -2,7 +2,8 @@
 
 The numbers are invented. What is not invented is that they satisfy every
 identity TT200 imposes - 100+200=270, 310+330=300, 410+430=400,
-300+400=440, 50+60+61=70 - so any non-zero check the workbook reports
+300+400=440, 50+60+61=70, 220=221+224+227, 221=222+223,
+30=21+..+27, 40=31+..+36 - so any non-zero check the workbook reports
 afterwards is the workbook's fault, not the data's.
 """
 from __future__ import annotations
@@ -25,6 +26,7 @@ def dataset():
     cash = 1_400_000.0
     ppe = 6_800_000.0
     retained = 900_000.0
+    accum_dep = -3_200_000.0
     for i in range(5):
         rev *= 1.12
         gross_rev = rev * 1.02
@@ -44,17 +46,39 @@ def dataset():
 
         dep = ppe * 0.09
         capex = -rev * 0.055
+        wc_before = net + dep                    # mã 03
         cfo = net + dep + rev * 0.004
-        cfi = capex + rev * 0.003
+        # investing, component by component, so code 30 is a sum the
+        # workbook can check rather than a total it has to be told
+        disposal = rev * 0.003
+        lend_out, lend_back = -rev * 0.012, rev * 0.009
+        equity_out, equity_back = -rev * 0.004, rev * 0.002
+        interest_received = rev * 0.0025
+        cfi = (capex + disposal + lend_out + lend_back
+               + equity_out + equity_back + interest_received)
         borrow, repay = rev * 0.06, -rev * 0.045
+        lease_repay = -rev * 0.004                # mã 35
+        buyback = -rev * 0.001                    # mã 32
         dividend = -net * 0.30
         equity_issue = 0.0
-        cff = borrow + repay + dividend + equity_issue
+        cff = (equity_issue + buyback + borrow + repay + lease_repay
+               + dividend)
         fx = rev * 0.0004
         net_cf = cfo + cfi + cff
         open_cash, cash = cash, cash + net_cf + fx
 
         ppe = ppe - dep - capex
+        # the fixed-asset block as B 01-DN prints it: the carrying amount,
+        # its gross cost and the accumulated depreciation against it
+        lease_assets = ppe * 0.06
+        intangibles = ppe * 0.08
+        tangible = ppe - lease_assets - intangibles
+        # accumulated depreciation is rolled by the year's charge, not
+        # struck as a percentage, so the memo row comparing the two reads
+        # zero here and any non-zero reading in real data is a disposal
+        accum_dep = accum_dep - dep
+        # the gross cost is then the figure that closes 221 = 222 + 223
+        gross_cost = tangible - accum_dep
         inventory, receivable = cogs * 0.18, rev * 0.14
         st_invest, other_ca = 600_000.0 + i * 40_000, rev * 0.01
         ca = cash + st_invest + receivable + inventory + other_ca
@@ -86,10 +110,13 @@ def dataset():
             "22": fin_exp, "23": interest, "25": sell, "26": admin,
             "31": other_inc, "32": other_exp, "51": tax_cur, "52": tax_def,
             "61": net * 0.97, "62": net * 0.03, "70_eps": net * 0.97 / 300,
+            "71": net * 0.97 / 310,
             "shares_avg": 300.0, "shares_end": 300.0,
             "110": cash, "120": st_invest, "130": receivable,
             "140": inventory, "150": other_ca, "100": ca,
             "210": lt_receivable, "220": ppe, "230": invest_prop,
+            "221": tangible, "222": gross_cost, "223": accum_dep,
+            "224": lease_assets, "227": intangibles,
             "240": cip, "250": lt_invest, "260": other_la, "200": la,
             "270": total_assets,
             "311": payable, "312": advance, "320": st_debt, "310": cl,
@@ -97,9 +124,12 @@ def dataset():
             "411": paid_in, "418": dev_fund, "421": retained,
             "429": minority, "410": equity_410, "430": other_fund,
             "440": liabilities + equity_400,
-            "cf01": pretax, "cf02": dep, "cf20": cfo, "cf21": capex,
-            "cf22": rev * 0.003, "cf30": cfi, "cf31": equity_issue,
-            "cf33": borrow, "cf34": repay, "cf36": dividend,
+            "cf01": pretax, "cf02": dep, "cf03": wc_before, "cf20": cfo,
+            "cf21": capex, "cf22": disposal, "cf23": lend_out,
+            "cf24": lend_back, "cf25": equity_out, "cf26": equity_back,
+            "cf27": interest_received, "cf30": cfi,
+            "cf31": equity_issue, "cf32": buyback, "cf33": borrow,
+            "cf34": repay, "cf35": lease_repay, "cf36": dividend,
             "cf40": cff, "cf60": open_cash, "cf61": fx, "cf70": cash,
             "price": 28_500.0, "dps": -dividend / 300,
         })
