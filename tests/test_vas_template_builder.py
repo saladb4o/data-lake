@@ -738,3 +738,56 @@ class TestAnEmptyRangeIsNotAZero:
         got = " ".join(ws[r].value for r in ("U17", "U18", "U19", "U20"))
         for fn in ("AVERAGE", "MEDIAN", "MIN", "MAX"):
             assert fn in got
+
+
+def test_clearing_a_cell_does_not_remove_its_hyperlink(tmp_path):
+    """The reason two American sources survived a pass that cleared them.
+
+    This pins the behaviour that fooled the audit, so that the next
+    person who calls clear() on a linked cell finds out here rather
+    than from a workbook that still opens cbo.gov.
+    """
+    src = tmp_path / "linked.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Macro"
+    ws["B16"] = "https://www.cbo.gov/publication/56465"
+    ws["B16"].hyperlink = "https://www.cbo.gov/publication/56465"
+    wb.save(src)
+
+    out = tmp_path / "cleared.xlsx"
+    w = WorkbookPatch(str(src))
+    w.clear("Macro", "B16")
+    w.save(str(out))
+
+    # the text is gone from the cell, but the link is not
+    got = openpyxl.load_workbook(out)["Macro"]["B16"]
+    assert got.hyperlink is not None
+
+
+def test_remove_hyperlinks_takes_the_link_with_the_text(tmp_path):
+    src = tmp_path / "linked.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Macro"
+    for ref, url in (("B16", "https://www.cbo.gov/publication/56465"),
+                     ("B17", "https://economics.td.com/ca-long-term-forecast"),
+                     ("B20", "https://keep.me/please")):
+        ws[ref] = url
+        ws[ref].hyperlink = url
+    wb.save(src)
+
+    out = tmp_path / "cleaned.xlsx"
+    w = WorkbookPatch(str(src))
+    w.clear("Macro", "B16")
+    w.clear("Macro", "B17")
+    dropped = w.remove_hyperlinks("Macro", ["B16", "B17"])
+    w.save(str(out))
+
+    assert dropped == 2
+    ws2 = openpyxl.load_workbook(out)["Macro"]
+    assert ws2["B16"].value is None
+    assert ws2["B16"].hyperlink is None
+    assert ws2["B17"].hyperlink is None
+    # a link nobody asked to remove is still there
+    assert ws2["B20"].hyperlink is not None

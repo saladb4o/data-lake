@@ -15,21 +15,19 @@ space or a footnote digit is part of the key.
 """
 
 # Terms kept in English on purpose (see the module docstring).
+# Plain column headings - Low, Mid, High, Median, Acquirer, Target and
+# the rest - used to sit here. They were never deliberate: they were
+# short enough to look risky to substitute, and a workbook written for
+# one Vietnamese reader has no reason to head a column "Acquirer".
 KEEP = {
     "WACC", "DCF", "SOTP", "EBITDA", "FCFF", "NOPAT", "EV/EBITDA",
-    "EV/Revenue", "P/CF", "EV / EBITDA", "Beta", "CapEx", "Base", "Bull",
-    "Bear", "Other", "Mid", "Low", "High", "Total", "Name", "Ticker",
-    "Type", "Value", "Date", "Dates", "Price", "Share", "Current",
-    "Average", "Median", "Mean", "Mode", "Cash", "Equity", "Revenue",
-    "Earnings", "Capital", "Country", "Debt", "Label", "Comments",
-    "Action", "Target", "Acquirer", "Announced", "Implied", "Enterprise",
-    "Levered", "Unlevered", "Subs", "Cloud", "Advertising", "Buy",
-    "Notes:", "Source:", "Sources:", "Transaction", "Cash Flow",
-    "Market", "Recommendation", "BOP", "EOP", "Days", "Time Periods",
-    "Defined Name", "Input", "Effective Date", "Company Name",
-    "EBIT", "Mua",
-    # the Control Panel documents each defined name next to its input cell;
-    # the name is what Excel answers to, so translating it would be a lie
+    "EV/Revenue", "P/CF", "EV / EBITDA", "Beta", "CapEx", "Base",
+    "Bull", "Bear", "Other", "Total", "Name", "Ticker", "Dates",
+    "Price", "Share", "Cash", "Equity", "Capital", "Country", "Debt",
+    "Label", "Enterprise", "Levered", "Unlevered", "Subs", "Cloud",
+    "Advertising", "Buy", "Notes:", "Source:", "Transaction",
+    "Cash Flow", "Market", "BOP", "EOP", "Days", "Time Periods",
+    "Defined Name", "Input", "Company Name", "EBIT", "Mua",
     "_CompanyName", "_Vdate", "_YEdate_After", "_RoundBillions",
     "_TaxRate", "_WACC", "_LTGrowth",
 }
@@ -247,3 +245,34 @@ TERMS = {
     # -- the copyright line the model stamped on every sheet --------------
     "© Corporate Finance Institute. All rights reserved.": "",
 }
+
+# Table headings the audit could not see. The heuristic that found the
+# half-translated heads looks for three consecutive words with no
+# Vietnamese diacritics, so by construction it is blind to a one-word
+# column heading - and a comparables table is almost entirely one-word
+# column headings.
+ONE_WORD_HEADS = {
+    "Low": "Thấp",
+    "Mid": "Giữa",
+    "High": "Cao",
+    "Mean": "Trung bình",
+    "Median": "Trung vị",
+    "Mode": "Yếu vị",
+    "Average": "Bình quân",
+    "Revenue": "Doanh thu",
+    "Earnings": "Lợi nhuận",
+    "Announced": "Công bố",
+    "Date": "Ngày",
+    "Acquirer": "Bên mua",
+    "Target": "Bên bị mua",
+    "Type": "Hình thức",
+    "Value": "Giá trị",
+    "Current": "Hiện tại",
+    "Implied": "Ngầm định",
+    "Comments": "Ghi chú",
+    "Sources:": "Nguồn:",
+    "Effective Date": "Ngày hiệu lực",
+    "Action": "Hành động",
+    "Recommendation": "Khuyến nghị",
+}
+TERMS.update(ONE_WORD_HEADS)

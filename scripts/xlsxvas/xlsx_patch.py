@@ -147,6 +147,46 @@ class WorkbookPatch:
     def clear(self, sheet: str, ref: str) -> None:
         self._queue(sheet, ref, Cell(blank=True))
 
+    def remove_hyperlinks(self, sheet: str, refs: List[str]) -> int:
+        """Drop the links on these cells, not just the text in them.
+
+        Blanking the cell is not enough: the link lives in a <hyperlink>
+        element keyed by reference and in the sheet's relationship file,
+        so an emptied cell still opens cbo.gov when clicked, and
+        openpyxl still reports the URL as the cell's value. That is how
+        two American forecast sources survived a pass that had already
+        cleared the text off them.
+        """
+        part = self._sheet_part[sheet]
+        self._flush()
+        xml = self._parts[part].decode("utf8")
+        wanted = set(refs)
+        dropped_ids = []
+
+        def one(m: re.Match) -> str:
+            ref = re.search(r'ref="([^"]+)"', m.group(0))
+            if not ref or ref.group(1) not in wanted:
+                return m.group(0)
+            rid = re.search(r'r:id="([^"]+)"', m.group(0))
+            if rid:
+                dropped_ids.append(rid.group(1))
+            return ""
+
+        xml = re.sub(r'<hyperlink\b[^>]*/>', one, xml)
+        # an empty <hyperlinks> container is invalid, so take it with them
+        xml = re.sub(r'<hyperlinks>\s*</hyperlinks>', "", xml)
+        self._parts[part] = xml.encode("utf8")
+
+        rels_part = part.replace("worksheets/", "worksheets/_rels/") + ".rels"
+        if dropped_ids and rels_part in self._parts:
+            rels = self._parts[rels_part].decode("utf8")
+            for rid in dropped_ids:
+                rels = re.sub(
+                    r'<Relationship\b[^>]*Id="%s"[^>]*/>' % re.escape(rid),
+                    "", rels)
+            self._parts[rels_part] = rels.encode("utf8")
+        return len(dropped_ids)
+
     def style_of(self, sheet: str, ref: str) -> Optional[str]:
         """The style id a cell currently carries, or None if it has none."""
         part = self._sheet_part[sheet]

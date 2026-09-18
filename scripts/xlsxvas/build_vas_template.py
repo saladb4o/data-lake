@@ -1274,12 +1274,28 @@ def build_price_and_market_gates(w: WorkbookPatch) -> None:
             f'IFERROR({fn}(C1122:$C$1374),""))')
 
     MS = "Market Size"
-    for row in range(8, 12):
-        for col in "CDEFGHIJKLMN":
+    # The clear used to stop at column N and at row 11, which left 390.64
+    # sitting alone in O9 - one segment of one year of Amazon's addressable
+    # market, seeding the growth chain for 2028 onwards.
+    for row in range(8, 13):
+        for col in "CDEFGHIJKLMNOPQR":
             w.clear(MS, f"{col}{row}")
     for row in range(14, 18):
         w.set_value(MS, f"C{row}", None)
     w.set_value(MS, "B24", "(nhập nguồn)")
+
+    # The macro sheet still pointed at PwC's global outlook, the US
+    # Congressional Budget Office and TD's Canadian long-term forecast.
+    # The rows underneath them are blank and meant to be typed in, so
+    # these are not data - they are three links telling the reader to
+    # forecast Vietnam off American numbers.
+    MACRO = "Macro"
+    w.set_value(MACRO, "B14", "Nguồn:")
+    for ref in ("B15", "B16", "B17"):
+        w.clear(MACRO, ref)
+    w.set_value(MACRO, "B15", "(nhập nguồn - ví dụ: Tổng cục Thống kê, "
+                              "Ngân hàng Nhà nước, IMF WEO)")
+    w.remove_hyperlinks(MACRO, ["B15", "B16", "B17"])
 
     IVS = "Implied Value Summary"
     blanks = {
@@ -1301,6 +1317,58 @@ def build_price_and_market_gates(w: WorkbookPatch) -> None:
         w.set_formula(IVS, out, f'IF({cap}="","",{cap}+{debt})')
 
 
+def build_precedents_gate(w: WorkbookPatch) -> None:
+    """The sixth place a blank became a zero, and it reported a price.
+
+    Nobody has entered a precedent transaction, so every transaction
+    value in Precedents is empty. AVERAGE, MEDIAN, MIN and MAX over that
+    empty range answer 0 rather than an error, so PrecedentsVal valued
+    the company at zero times its EBITDA, added net debt - which is net
+    cash here, so it added rather than subtracted - and divided by the
+    share count to report 10,240.20 dong a share under "giao dich tien
+    le". That is the same 10,240 the sum of the parts produced from the
+    same net cash, by the same mistake, and it survived four rounds of
+    this audit because nothing about the cell looks wrong: it is a
+    number, in the right units, in the right order of magnitude.
+
+    The table also still carried the acquired companies' trailing
+    financials from the original model - 128,244 and 8,466 in row 17,
+    93.64 in row 18, 1,627.14 in row 19 - because the earlier pass
+    cleared the deal values and left the metrics they divide into.
+    """
+    PR = "Precedents"
+    PV = "PrecedentsVal"
+
+    # Multiples of nothing are not zero, they are unmeasured. COUNT
+    # first, because MIN and MAX of an empty range raise no error for
+    # IFERROR to catch.
+    for row, fn in ((20, "AVERAGE"), (21, "MEDIAN"), (22, "MIN"), (23, "MAX")):
+        for col in "JKLM":
+            rng = f"{col}10:{col}19"
+            w.set_formula(PR, f"{col}{row}",
+                          f'IF(COUNT({rng})=0,"",IFERROR({fn}({rng}),""))')
+
+    # the target metrics the deal values were divided into
+    for row in range(10, 20):
+        for col in "NOPQ":
+            w.clear(PR, f"{col}{row}")
+
+    # Read the multiple through a gate: a unary plus in front of the
+    # reference would coerce the empty string back to zero.
+    for col, src in (("F", "K22"), ("G", "K20"), ("H", "K23")):
+        w.set_formula(PV, f"{col}9",
+                      f'IF({PR}!{src}="","",{PR}!{src})')
+    for col in "JKL":
+        mult = {"J": "F9", "K": "G9", "L": "H9"}[col]
+        w.set_formula(PV, f"{col}9",
+                      f'IF(OR({mult}="",$D$9="",$D$9=0),"",{mult}*$D$9)')
+        # enterprise value unknown means equity value unknown, not net cash
+        w.set_formula(PV, f"{col}12", f'IF({col}9="","",{col}9+{col}11)')
+        w.set_formula(PV, f"{col}15",
+                      f'IF(OR({col}12="",{col}14="",{col}14=0),"",'
+                      f"{col}12/{col}14)")
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -1317,6 +1385,7 @@ def main(src: str, dest: str) -> None:
     build_comps(w)
     build_price_and_market_gates(w)
     build_sotp_gate(w)
+    build_precedents_gate(w)
     build_wacc(w)
     build_dcf_gate(w)
     build_translate(w)
