@@ -1158,6 +1158,33 @@ class BCTCPdfParser:
                                 continue
                             self._parse_balance_sheet_row(row, items)
 
+        # Route 1b: a total that sits below the ruled block is not one of
+        # the table's rows. BSR's Q4 page 4 ends "(440=300+400) / 440 /
+        # 85.068.637.113.074" and route 1 returned 28 rows without it, so
+        # the statement could not be closed and all three identities came
+        # back n/a - on a page whose figures were all present and correct.
+        # Route 2 could have read it, but route 2 only runs when route 1
+        # found nothing at all, and 28 is not nothing.
+        #
+        # The page's own lines carry what the table lost, in the shape the
+        # line parser already reads. It fills gaps only: a code route 1
+        # bound is left alone.
+        if bs_pages and fitz:
+            try:
+                with fitz.open(self.pdf_path) as doc:
+                    for p_idx in bs_pages:
+                        if p_idx >= len(doc):
+                            continue
+                        own = page_own_text(doc[p_idx].get_text(),
+                                            self.overlay_lines)
+                        lines = [ln.strip() for ln in own.splitlines()
+                                 if ln.strip()]
+                        self._parse_ocr_lines_for_balance_sheet(lines, items)
+            except Exception as exc:
+                logger.warning(
+                    "balance sheet line pass failed on %s: %s: %s",
+                    self.pdf_path, type(exc).__name__, exc)
+
         # Route 2: If Route 1 yielded 0 items and document is Scanned / OCR engine available
         if not items and bs_pages and _rapid_ocr_engine:
             method_used = "RAPID_OCR_ONNX"
