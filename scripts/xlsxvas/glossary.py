@@ -165,6 +165,11 @@ TERMS = {
     "hi (bar)": "cận trên (cột)",
     "Fully Diluted Shares Outstanding (MM)":
         "Số cổ phiếu lưu hành pha loãng hoàn toàn (triệu cp)",
+    # the unit pass runs first and turns "(MM)" into "(trieu cp)", which
+    # leaves an English head on a Vietnamese tail - a label that looks
+    # translated to anything checking for Vietnamese characters
+    "Fully Diluted Shares Outstanding":
+        "Số cổ phiếu lưu hành pha loãng hoàn toàn",
 
     # -- comps -------------------------------------------------------------
     "Current Trading Multiples3": "Bội số giao dịch hiện tại",
@@ -228,6 +233,16 @@ TERMS = {
     "Total Amazon Implied Equity Value": "Tổng giá trị vốn chủ sở hữu ước tính",
     "Total Amazon Implied Equity Value per Share ($/sh.)":
         "Giá trị vốn chủ sở hữu ước tính mỗi cổ phiếu (đồng/cp)",
+
+    # -- heads left behind by the unit pass --------------------------------
+    # build_units_and_titles replaces "US$MM" and its relatives inside
+    # longer headings, which turns an English title with a dollar unit
+    # into an English title with a dong unit - a label that reads as
+    # translated to anything looking for Vietnamese characters in it.
+    "Sensitivities - Instrinsic Value": "Độ nhạy - giá trị nội tại",
+    "DCF Value Summary": "Tổng hợp giá trị DCF",
+    "Historical and Forecast Financial Performance":
+        "Kết quả tài chính lịch sử và dự phóng",
 
     # -- the copyright line the model stamped on every sheet --------------
     "© Corporate Finance Institute. All rights reserved.": "",

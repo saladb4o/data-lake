@@ -137,3 +137,32 @@ class TestUnitsAreConvertedInOnePlace:
                                          (None, 25.6), (115_000, None)])
     def test_a_missing_side_is_not_a_share_count(self, cap, ref):
         assert F.shares_in_millions(cap, ref) is None
+
+
+class TestThePriceColumnIsWrittenOldestFirst:
+    """The 52-week window sits at the bottom of the column.
+
+    The sheet reads its high, low and average from the last 253 rows of a
+    1,364-row column, so a series written newest-first would report the
+    oldest year as the recent one - a number that looks entirely
+    reasonable and is off by the length of the history.
+    """
+
+    def test_the_series_comes_back_in_date_order(self):
+        history = {"candles": [
+            {"time": "2024-03-01", "close": 30.0},
+            {"time": "2024-01-01", "close": 10.0},
+            {"time": "2024-02-01", "close": 20.0}]}
+        got = F.price_history("X", lambda s: history)
+        assert got == [("2024-01-01", 10.0), ("2024-02-01", 20.0),
+                       ("2024-03-01", 30.0)]
+
+    def test_no_history_is_an_empty_list_not_a_zero(self):
+        assert F.price_history("X", lambda s: {}) == []
+        assert F.price_history("X", lambda s: None) == []
+
+    def test_the_sheet_has_room_for_the_window_it_reads(self):
+        """The 52-week formulas read C1122:C1374."""
+        room = F.PRICE_LAST_ROW - F.PRICE_FIRST_ROW + 1
+        assert room >= 1374 - 1122 + 1
+        assert F.PRICE_FIRST_ROW > 10        # below the column header

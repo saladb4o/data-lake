@@ -1252,6 +1252,55 @@ def build_sotp_gate(w: WorkbookPatch) -> None:
     w.set_formula(SP, "J37", 'IF(OR(J34="",J36="",J36=0),"",J34/J36)')
 
 
+def build_price_and_market_gates(w: WorkbookPatch) -> None:
+    """The third place a blank became a zero, and this one reached the summary.
+
+    The 52-week high and low are MAX and MIN over an empty price column,
+    which answer 0. Implied Value Summary multiplied that 0 by the share
+    count for a market capitalisation of 0, added net debt, and reported
+    an implied enterprise value of minus 3,072,059 million dong under
+    "52-week trading" and again under "analyst target prices". That
+    number then feeds the football-field chart on the Dashboard.
+
+    Market Size still held Amazon's addressable markets - 722.9, 350.0,
+    195.3 and 665.3, in billions of US dollars - which the growth rows
+    were computing percentage changes on.
+    """
+    SP_SHEET = "Share Price"
+    for ref, fn in (("D6", "MAX"), ("D7", "MIN"), ("D8", "AVERAGE")):
+        w.set_formula(
+            SP_SHEET, ref,
+            'IF(COUNT(C1122:$C$1374)=0,"",'
+            f'IFERROR({fn}(C1122:$C$1374),""))')
+
+    MS = "Market Size"
+    for row in range(8, 12):
+        for col in "CDEFGHIJKLMN":
+            w.clear(MS, f"{col}{row}")
+    for row in range(14, 18):
+        w.set_value(MS, f"C{row}", None)
+    w.set_value(MS, "B24", "(nhập nguồn)")
+
+    IVS = "Implied Value Summary"
+    blanks = {
+        "E32": "'Share Price'!D7", "G32": "'Share Price'!D6",
+        "E33": "Consensus!E36", "G33": "Consensus!E37",
+    }
+    for ref, src in blanks.items():
+        w.set_formula(IVS, ref, f'IF({src}="","",{src})')
+    for ref, src in (("E35", "E32"), ("G35", "G32"),
+                     ("E41", "E33"), ("G41", "G33")):
+        w.set_formula(IVS, ref, f'IF({src}="","",{src})')
+    for out, price, shares in (("E37", "E35", "E36"), ("G37", "G35", "G36"),
+                               ("E43", "E41", "E42"), ("G43", "G41", "G42")):
+        w.set_formula(IVS, out,
+                      f'IF(OR({price}="",{price}=0,{shares}=""),"",'
+                      f"{price}*{shares})")
+    for out, cap, debt in (("E39", "E37", "E38"), ("G39", "G37", "G38"),
+                           ("E45", "E43", "E44"), ("G45", "G43", "G44")):
+        w.set_formula(IVS, out, f'IF({cap}="","",{cap}+{debt})')
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -1266,6 +1315,7 @@ def main(src: str, dest: str) -> None:
     build_market_sheets(w)
     build_units_and_titles(w)
     build_comps(w)
+    build_price_and_market_gates(w)
     build_sotp_gate(w)
     build_wacc(w)
     build_dcf_gate(w)

@@ -36,6 +36,9 @@ from xlsx_patch import WorkbookPatch            # noqa: E402
 
 WC = "WACC"
 CM = "Comps"
+SP = "Share Price"
+PRICE_FIRST_ROW = 11
+PRICE_LAST_ROW = 1374
 FIRST_ROW = 10
 LAST_ROW = 27
 INDEX_SYMBOL = "VNINDEX"
@@ -144,6 +147,19 @@ def beta_for(symbol: str, index_closes: Dict[str, float],
     return ols_beta(log_returns(s), log_returns(i))
 
 
+def price_history(symbol: str, fetch) -> List[Tuple[str, float]]:
+    """The subject company's own daily closes, oldest first.
+
+    The Share Price sheet takes its 52-week high, low and average off
+    this column, and Implied Value Summary takes a valuation band off
+    those three. With the column empty they were MAX and MIN of nothing,
+    which answer zero, and the summary reported an implied enterprise
+    value of minus the net debt.
+    """
+    closes = closes_by_date(fetch(symbol) or {})
+    return sorted(closes.items())
+
+
 def collect(symbol: str, top_k: int) -> Tuple[List[Dict], List[str]]:
     """Gather the peer set and everything measurable about it."""
     from services.stock_service import get_company_peers, get_stock_history
@@ -155,6 +171,10 @@ def collect(symbol: str, top_k: int) -> Tuple[List[Dict], List[str]]:
     index_closes = closes_by_date(fetch(INDEX_SYMBOL) or {})
     if not index_closes:
         notes.append(f"không lấy được lịch sử giá {INDEX_SYMBOL}")
+
+    own = price_history(symbol, fetch)
+    if not own:
+        notes.append(f"không lấy được lịch sử giá {symbol}")
 
     found = get_company_peers(symbol, top_k=top_k)
     rows = []
@@ -180,12 +200,25 @@ def collect(symbol: str, top_k: int) -> Tuple[List[Dict], List[str]]:
     without = [r["symbol"] for r in rows if r["beta"] is None]
     if without:
         notes.append("chưa đo được beta: " + ", ".join(without))
-    return rows, notes
+    return rows, notes, own
 
 
 def write(src: str, dest: str, symbol: str, rows: List[Dict],
-          notes: List[str]) -> None:
+          notes: List[str], own: List[Tuple[str, float]]) -> None:
     w = WorkbookPatch(src)
+    # the last 1,364 trading days the sheet has room for, oldest first, so
+    # the 52-week window at the bottom of the column is the recent one
+    room = PRICE_LAST_ROW - PRICE_FIRST_ROW + 1
+    tail = own[-room:]
+    for offset in range(room):
+        row = PRICE_FIRST_ROW + offset
+        if offset < len(tail):
+            day, close = tail[offset]
+            w.set_value(SP, f"B{row}", day)
+            w.set_value(SP, f"C{row}", close)
+        else:
+            w.set_value(SP, f"B{row}", None)
+            w.set_value(SP, f"C{row}", None)
     for offset in range(LAST_ROW - FIRST_ROW + 1):
         row = FIRST_ROW + offset
         if offset >= len(rows):
@@ -225,8 +258,8 @@ def write(src: str, dest: str, symbol: str, rows: List[Dict],
         w.set_value(WC, "C33", " | ".join(notes)[:250])
     w.set_value(WC, "C31", f"Ghi chú ({symbol}):")
     w.save(dest)
-    print(f"{symbol}: {len(rows)} mã so sánh, {len(measured)} có beta "
-          f"-> {dest}")
+    print(f"{symbol}: {len(rows)} mã so sánh, {len(measured)} có beta, "
+          f"{len(tail)} phiên giá -> {dest}")
     for note in notes:
         print(f"  ! {note}")
 
@@ -238,8 +271,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("dest")
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args(argv)
-    rows, notes = collect(args.symbol.upper(), args.top)
-    write(args.src, args.dest, args.symbol.upper(), rows, notes)
+    rows, notes, own = collect(args.symbol.upper(), args.top)
+    write(args.src, args.dest, args.symbol.upper(), rows, notes, own)
     return 0
 
 
