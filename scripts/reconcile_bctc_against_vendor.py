@@ -404,15 +404,35 @@ def render_native_probe(path: str, located: Dict[str, Any]) -> None:
         import fitz
     except ImportError:
         return
-    print("| page | chars | what the text layer holds |")
-    print("|---:|---:|---|")
+    from services.bctc_pdf_parser import (page_own_text,
+                                           repeated_overlay_lines,
+                                           looks_like_a_statement_table,
+                                           statement_from_its_rows)
+
+    # Own chars is the column that matters now. PVS's pages held 82
+    # characters each and every one of them was the same e-office stamp,
+    # so raw chars said "text" where own chars says "image". The table
+    # column says whether the structural pass could reach a page the
+    # headings could not.
+    print("| page | chars | own | table | what the text layer holds |")
+    print("|---:|---:|---:|---|---|")
     try:
         with fitz.open(path) as doc:
-            for p_idx in range(min(14, len(doc))):
-                raw = (doc[p_idx].get_text() or "").strip()
+            limit = min(20, len(doc))
+            raws = [doc[i].get_text() or "" for i in range(limit)]
+            overlay = repeated_overlay_lines(raws)
+            for p_idx, raw in enumerate(raws):
+                own = page_own_text(raw, overlay).strip()
+                table = ""
+                if looks_like_a_statement_table(own):
+                    table = statement_from_its_rows(own) or "shape only"
                 shown = " / ".join(
-                    ln.strip() for ln in raw.splitlines() if ln.strip())[:150]
-                print(f"| {p_idx} | {len(raw)} | {shown or '(empty)'} |")
+                    ln.strip() for ln in own.splitlines() if ln.strip())[:130]
+                print(f"| {p_idx} | {len(raw.strip())} | {len(own)} | "
+                      f"{table} | {shown or '(empty)'} |")
+            if overlay:
+                stamp = sorted(overlay, key=len, reverse=True)[0][:110]
+                print(f"\n- overlay removed from every page: `{stamp}`")
     except Exception as exc:
         print(f"| - | - | probe failed: {type(exc).__name__}: {str(exc)[:70]} |")
     print()
@@ -501,6 +521,8 @@ def run_symbol(symbol: str, year: int, limit: int,
         # headings past page 26 - and without this line a run cannot say
         # which of them fired, or whether either did.
         print(f"- pages located: `{result.get('located')}`")
+        if result.get("located_by"):
+            print(f"- located by: `{result.get('located_by')}`")
         print()
         if result["doc_type"] == "NATIVE":
             render_native_probe(local, result.get("located") or {})

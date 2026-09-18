@@ -304,6 +304,10 @@ def report_one_pdf(path: str, symbol: str) -> Dict[str, Any]:
     out["ocr_engine"] = bool(getattr(parser_mod, "_rapid_ocr_engine", None))
     try:
         out["located"] = {k: v for k, v in parser.locate_statement_pages().items()}
+        # Which pass claimed each page. A page found by its table rather
+        # than its heading is a page the old locator could not reach, and
+        # the two cannot be told apart from the page list alone.
+        out["located_by"] = dict(getattr(parser, "located_by", {}) or {})
     except Exception as exc:
         out["located"] = {"error": str(exc)[:120]}
 

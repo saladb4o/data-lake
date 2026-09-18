@@ -186,6 +186,152 @@ FOOTNOTE_HEADINGS = [
 ]
 
 
+# An e-office stamp is not text, and a page carrying only one is an image.
+#
+# Run 35301809165 printed PVS's native text layer page by page and every
+# page from 2 to 13 of both filings held exactly 82 characters:
+#
+#     | 2 | 82 | Van ban duoc tai len he thong eoffice.ptsc.com.vn...
+#
+# That line is an overlay stamped onto every page; the statements are
+# images underneath it. The first two pages are a covering letter with
+# real text, and that was enough for the density test to call the whole
+# 110-page document NATIVE, after which get_text() returned the stamp and
+# the OCR pass never ran because the document was not classified scanned.
+#
+# The stamp is recognisable without knowing anything about PTSC: it is the
+# same line on nearly every page. Subtracting the lines a document repeats
+# across most of its pages leaves each page's own text, and it is that,
+# not the raw character count, which says whether a page can be read.
+OVERLAY_PAGE_SHARE = 0.6   # on this fraction of pages, a line is an overlay
+OVERLAY_MIN_PAGES = 4      # below this a document is too short to tell
+NATIVE_MIN_OWN_CHARS = 40  # a page's own text, stamps removed
+
+
+def repeated_overlay_lines(page_texts) -> set:
+    """Lines a document repeats on most of its pages.
+
+    Headers, footers and e-office stamps. Page numbers are excluded by
+    length: a line has to be substantial to count, so "12" repeating is
+    not treated as an overlay.
+    """
+    pages = [p for p in page_texts if p]
+    if len(pages) < OVERLAY_MIN_PAGES:
+        return set()
+    counts: Dict[str, int] = {}
+    for text in pages:
+        seen = {ln.strip() for ln in text.splitlines() if len(ln.strip()) >= 20}
+        for line in seen:
+            counts[line] = counts.get(line, 0) + 1
+    floor = max(2, int(len(pages) * OVERLAY_PAGE_SHARE))
+    return {line for line, n in counts.items() if n >= floor}
+
+
+def page_own_text(text: str, overlay: set) -> str:
+    """The page's text with the document-wide overlay taken out."""
+    if not text:
+        return ""
+    if not overlay:
+        return text
+    kept = [ln for ln in text.splitlines() if ln.strip() not in overlay]
+    return "\n".join(kept)
+
+
+# Where the heading is unreadable, the table still is.
+#
+# The same run printed BSR's text layer, and it is the opposite failure to
+# PVS's. The figures are all there:
+#
+#     | 3 | 1781 | ... (100=110+120+130+140+150) / 100 / 70.173.060.674.346
+#     | 7 |  553 | ... 33 / 127.884.103.960.387 / 34 / (133.236.468.791.732)
+#
+# What is gone is the heading. The embedded font drops most accented
+# characters, so "Mau so B 01a-DN/HN" arrives as "-DN/HN" and "BANG CAN
+# DOI KE TOAN" does not appear in any spelling at all. There is nothing
+# for a heading match to match, and the one page the locator did return
+# was a notes page that happened to keep a fragment.
+#
+# A heading is one line and a statement is fifty, so the table is the more
+# durable evidence. A page is taken as a statement when it is shaped like
+# one - a column of TT200 codes against figures - and something on it says
+# which statement it is.
+STRUCTURAL_MIN_ROWS = 6
+
+# The three-digit codes are decisive on their own: no income statement or
+# cash flow line is numbered 270 or 440.
+BALANCE_SHEET_MARKER_CODES = {100, 200, 270, 300, 310, 330, 400, 410, 440}
+
+# These two share the one and two digit codes, so codes alone cannot tell
+# them apart and the row labels have to. Row labels survive where headings
+# do not: BSR's page 5 kept "1. Doanh thu ban hang va" intact on a page
+# whose heading had been reduced to punctuation.
+STATEMENT_ROW_MARKERS = {
+    "balance_sheet": [
+        "TONG CONG TAI SAN", "TONG CONG NGUON VON", "TAI SAN NGAN HAN",
+        "TAI SAN DAI HAN", "NO PHAI TRA", "VON CHU SO HUU",
+        "NO NGAN HAN", "NO DAI HAN",
+    ],
+    "income_statement": [
+        "DOANH THU BAN HANG", "GIA VON HANG BAN", "LOI NHUAN GOP",
+        "DOANH THU HOAT DONG TAI CHINH", "CHI PHI BAN HANG",
+        "CHI PHI QUAN LY DOANH NGHIEP", "LAI CO BAN TREN CO PHIEU",
+        "TONG LOI NHUAN KE TOAN TRUOC THUE", "CHI PHI THUE TNDN",
+    ],
+    "cash_flow": [
+        "LUU CHUYEN TIEN THUAN", "KHAU HAO TAI SAN CO DINH",
+        "TIEN CHI DE MUA SAM", "TIEN THU TU DI VAY",
+        "TIEN CHI TRA NO GOC VAY", "TIEN LAI VAY DA TRA",
+        "TIEN VA TUONG DUONG TIEN DAU KY", "TIEN VA TUONG DUONG TIEN CUOI KY",
+        "LOI NHUAN TRUOC THUE",
+    ],
+}
+STRUCTURAL_MIN_MARKERS = 2
+
+_CODE_AND_FIGURE = re.compile(
+    r"(?<![\d.])(\d{1,3})\s+\(?-?\d{1,3}(?:[.,]\d{3}){2,}",
+)
+
+
+def looks_like_a_statement_table(text: str) -> bool:
+    """A column of short codes against figures in the millions or more.
+
+    Three thousands separators is the floor, so a note reference beside a
+    year or a percentage does not qualify. What is being recognised is the
+    shape of a statement page, not its content.
+    """
+    return len(_CODE_AND_FIGURE.findall(text or "")) >= STRUCTURAL_MIN_ROWS
+
+
+def statement_from_its_rows(text: str):
+    """Which statement a table-shaped page belongs to, or None.
+
+    Returns None rather than guessing. An income statement and a cash flow
+    statement both number their lines 1 to 70, so a page that says nothing
+    about itself beyond its codes is left alone: a page assigned to the
+    wrong extractor produces bound rows that are wrong, which is worse
+    than a page nobody reads.
+    """
+    squashed = squash(text)
+    if not squashed:
+        return None
+
+    codes = {int(c) for c in re.findall(r"(?<![\d.])(\d{3})(?![\d.])", text or "")}
+    scores = {}
+    for key, markers in STATEMENT_ROW_MARKERS.items():
+        scores[key] = sum(1 for m in markers if squash(m) in squashed)
+
+    if len(codes & BALANCE_SHEET_MARKER_CODES) >= 3 and scores["balance_sheet"]:
+        return "balance_sheet"
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    best, best_score = ranked[0]
+    if best_score < STRUCTURAL_MIN_MARKERS:
+        return None
+    if ranked[1][1] == best_score:
+        return None  # Two families equally supported decides nothing.
+    return best
+
+
 TT200_INCOME_CODES = {
     1: "Doanh thu bán hàng và cung cấp dịch vụ",
     2: "Các khoản giảm trừ doanh thu",
@@ -663,6 +809,8 @@ class BCTCPdfParser:
         self.currency_scale: float = 1.0
         self.period_info: Dict[str, Any] = {}
         self._cached_ocr_pages: Dict[int, List[str]] = {}
+        self.overlay_lines: set = set()
+        self.located_by: Dict[int, str] = {}
         self._inspect_pdf()
 
     def _inspect_pdf(self) -> None:
@@ -683,13 +831,21 @@ class BCTCPdfParser:
             text_rich_pages = 0
             scanned_empty_pages = 0
 
-            for i in range(sample_pages):
-                txt = doc[i].get_text().strip()
+            # Density is measured on each page's own text, with the
+            # document-wide overlay subtracted first. A page holding only
+            # an e-office stamp is an image page however many characters
+            # the stamp runs to, and PVS's stamp runs to 82 - twice the
+            # threshold below.
+            raw_pages = [doc[i].get_text() for i in range(sample_pages)]
+            self.overlay_lines = repeated_overlay_lines(raw_pages)
+
+            for raw in raw_pages:
+                txt = page_own_text(raw, self.overlay_lines).strip()
                 sample_text += " " + txt
                 total_chars += len(txt)
                 if len(txt) > 200:
                     text_rich_pages += 1
-                elif len(txt) < 40:
+                elif len(txt) < NATIVE_MIN_OWN_CHARS:
                     scanned_empty_pages += 1
 
             # Determine doc_type based on interior page text density (cover pages 0-1 often have logo images)
@@ -740,10 +896,14 @@ class BCTCPdfParser:
         if not fitz:
             return locations
 
+        self.located_by = {}
+
         # Pass 1: Native Vector Text
         with fitz.open(self.pdf_path) as doc:
+            structural: Dict[int, str] = {}
             for page_idx in range(len(doc)):
-                txt_raw = doc[page_idx].get_text()
+                txt_raw = page_own_text(doc[page_idx].get_text(),
+                                        self.overlay_lines)
                 txt_norm = strip_accents(txt_raw).upper()
 
                 # Filter out Table of Contents (Mục Lục) - especially on early pages
@@ -768,14 +928,47 @@ class BCTCPdfParser:
                     if not names_all_the_statements(hit):
                         for key in hit:
                             locations[key].append(page_idx)
+                            self.located_by.setdefault(page_idx, "heading")
+
+                    # Where no heading was readable, the table still is.
+                    # BSR's embedded font drops accented characters, so
+                    # its headings do not survive get_text() in any
+                    # spelling while its code column and figures come
+                    # through intact. Only pages the headings did not
+                    # already claim are considered, so this can add pages
+                    # but never move one.
+                    if not hit and looks_like_a_statement_table(txt_raw):
+                        key = statement_from_its_rows(txt_raw)
+                        if key:
+                            structural[page_idx] = key
+
                 if any(squash(k) in page_squashed for k in FOOTNOTE_HEADINGS):
                     locations["footnotes"].append(page_idx)
+
+            # Applied only where the headings found that statement
+            # nowhere at all. A document whose heading was read is
+            # located by its heading, and this cannot overrule it.
+            unheaded = {k for k in ("balance_sheet", "income_statement",
+                                    "cash_flow") if not locations[k]}
+            for page_idx, key in sorted(structural.items()):
+                if key not in unheaded:
+                    continue
+                locations[key].append(page_idx)
+                self.located_by.setdefault(page_idx, "table")
 
         # Pass 2: If Balance Sheet not found and document is SCANNED, scan candidate pages with RapidOCR
         if not locations["balance_sheet"] and self.doc_type in ("SCANNED_IMAGE", "SCANNED") and _rapid_ocr_engine:
             logger.info(f"Native search empty, engaging RapidOCR on candidate pages of {os.path.basename(self.pdf_path)}")
             with fitz.open(self.pdf_path) as doc:
-                scan_limit = min(14, len(doc))
+                # The same bound the native pass uses. These had drifted:
+                # a heading counted to page 25 if the document carried
+                # vector text and to page 14 if it did not, which now
+                # decides whether PVS is reachable at all - its filings
+                # are 110 and 146 pages and reclassifying them scanned
+                # only helps if the OCR pass looks as far as the native
+                # pass does. The early exit below still stops sooner on
+                # documents that are found sooner.
+                scan_limit = min(NATIVE_STATEMENT_WINDOW + 1, len(doc))
                 for p_idx in range(scan_limit):
                     ocr_lines = self._get_ocr_lines_for_page(doc, p_idx)
                     # Matched with the spaces removed from both sides. OCR
