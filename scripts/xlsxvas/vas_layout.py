@@ -195,10 +195,21 @@ LAST_ROW = 106
 # code tables and the other way in some printings of Mẫu số B 02-DN/HN.
 # Nothing in this repository is anchored to a filing on that point, so the
 # template follows the repository's own tables and says so on its face.
+# 221/222/223 and 410/411 were settled by arithmetic on real filings.
+# 61/62 could not be, and the reason is worth recording rather than
+# leaving as "not checked yet": of 1,769 filings in the lake exactly one
+# carries income-statement lines at all, it is OCR off a scanned image,
+# it is a standalone filing so it has no 61/62 by construction, and its
+# own numbers do not reconcile - code 52, deferred tax, holds
+# 341,798,781, which is exactly code 50 minus code 51, so a subtotal has
+# landed in the deferred-tax row. An extraction that cannot reproduce
+# its own subtotal is not evidence about anybody's label.
 EQUITY_SPLIT_UNVERIFIED = (
     "Mã 61/62: theo bảng mã của repo (61 = công ty mẹ, 62 = cổ đông "
-    "không kiểm soát). Chưa đối chiếu với BCTC thật - kiểm tra trước "
-    "khi dùng số phân bổ."
+    "không kiểm soát). Chưa đo được: kho BCTC chỉ có 1/1.769 bản có "
+    "dòng KQKD, là bản OCR từ ảnh scan, báo cáo riêng lẻ nên không có "
+    "61/62, và tự nó không khớp (mã 52 = mã 50 - mã 51). Kiểm tra lại "
+    "trước khi dùng số phân bổ cho cổ đông mẹ."
 )
 
 
