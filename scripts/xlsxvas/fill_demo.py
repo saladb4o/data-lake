@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vas_layout as V
 from xlsx_patch import WorkbookPatch
 
-RD = "Raw Data"
+RD = V.SHEET_NAMES["Raw Data"]
+CP = V.SHEET_NAMES["Control Panel"]
 
 
 def dataset():
@@ -139,7 +140,7 @@ def dataset():
 def fill(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     data = dataset()
-    w.set_value("Control Panel", "F10", "CÔNG TY CỔ PHẦN MẪU (dữ liệu giả)")
+    w.set_value(CP, "F10", "CÔNG TY CỔ PHẦN MẪU (dữ liệu giả)")
     for col, year in zip(V.HIST_COLS, data):
         for code, row in V.IS_ROW.items():
             if code in year:
@@ -166,7 +167,7 @@ def fill(src: str, dest: str) -> None:
     for ref, value in (("F31", 0.030), ("G31", 0.034),   # lãi suất phi rủi ro
                        ("F32", 0.075), ("G32", 0.085),   # phần bù vốn cổ phần
                        ("F37", 0.90), ("G37", 1.10)):    # beta
-        w.set_value("Control Panel", ref, value)
+        w.set_value(CP, ref, value)
 
     w.save(dest)
     print(f"wrote {dest}")

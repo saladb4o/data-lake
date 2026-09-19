@@ -33,10 +33,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))))
 
 from xlsx_patch import WorkbookPatch            # noqa: E402
+import vas_layout as V                          # noqa: E402
 
 WC = "WACC"
 CM = "Comps"
-SP = "Share Price"
+SP = V.SHEET_NAMES["Share Price"]
 PRICE_FIRST_ROW = 11
 PRICE_LAST_ROW = 1374
 FIRST_ROW = 10

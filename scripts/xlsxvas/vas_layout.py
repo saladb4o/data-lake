@@ -200,3 +200,24 @@ EQUITY_SPLIT_UNVERIFIED = (
     "không kiểm soát). Chưa đối chiếu với BCTC thật - kiểm tra trước "
     "khi dùng số phân bổ."
 )
+
+
+# The sheet names the workbook keeps in English, and why: a Vietnamese
+# analyst learns these as DCF, WACC, SOTP and comps, so translating them
+# would make the tab harder to find, not easier to read. Everything else
+# is an ordinary English phrase with an ordinary Vietnamese equivalent.
+SHEET_NAMES = {
+    "Dashboard": "Tổng quan",
+    "Implied Value Summary": "Tổng hợp định giá",
+    "Outputs": "Kết quả",
+    "Control Panel": "Bảng điều khiển",
+    "Financial Statements": "Báo cáo tài chính",
+    "Raw Data": "Dữ liệu thô",
+    "Scenarios": "Kịch bản",
+    "PrecedentsVal": "Định giá tiền lệ",
+    "Precedents": "Giao dịch tiền lệ",
+    "Market Size": "Quy mô thị trường",
+    "Macro": "Vĩ mô",
+    "Consensus": "Khuyến nghị CTCK",
+    "Share Price": "Giá cổ phiếu",
+}

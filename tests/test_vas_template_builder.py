@@ -791,3 +791,128 @@ def test_remove_hyperlinks_takes_the_link_with_the_text(tmp_path):
     assert ws2["B17"].hyperlink is None
     # a link nobody asked to remove is still there
     assert ws2["B20"].hyperlink is not None
+
+
+def _two_sheet_book(tmp_path):
+    """A book whose second sheet refers to the first both ways."""
+    src = tmp_path / "book.xlsx"
+    wb = openpyxl.Workbook()
+    raw = wb.active
+    raw.title = "Raw Data"          # quoted in formulas, it has a space
+    raw["C7"] = 11.0
+    bare = wb.create_sheet("Dashboard")   # bare in formulas, it has none
+    bare["A1"] = 5.0
+    out = wb.create_sheet("Outputs")
+    out["A1"] = "='Raw Data'!C7"
+    out["A2"] = "=Dashboard!A1"
+    out["A3"] = "='Raw Data'!C7+Dashboard!A1"
+    wb.save(src)
+    return src
+
+
+def test_rename_sheets_requotes_a_name_that_gains_a_space(tmp_path):
+    """A bare reference must gain quotes when the new name has a space.
+
+    This is the whole reason renaming is not a string substitution:
+    Dashboard!A1 is valid, 'Tổng quan'!A1 is valid, and Tổng quan!A1 is
+    a file Excel offers to repair.
+    """
+    src = _two_sheet_book(tmp_path)
+    out = tmp_path / "renamed.xlsx"
+    w = WorkbookPatch(str(src))
+    w.rename_sheets({"Raw Data": "Dữ liệu thô", "Dashboard": "Tổng quan"})
+    w.save(str(out))
+
+    wb = openpyxl.load_workbook(out)
+    assert set(wb.sheetnames) == {"Dữ liệu thô", "Tổng quan", "Outputs"}
+    got = wb["Outputs"]
+    assert got["A1"].value == "='Dữ liệu thô'!C7"
+    assert got["A2"].value == "='Tổng quan'!A1"
+    assert got["A3"].value == "='Dữ liệu thô'!C7+'Tổng quan'!A1"
+
+
+def test_rename_sheets_does_not_eat_a_longer_name(tmp_path):
+    """Precedents is a prefix of PrecedentsVal."""
+    src = tmp_path / "p.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.title = "Precedents"
+    wb.active["K20"] = 8.0
+    pv = wb.create_sheet("PrecedentsVal")
+    pv["A1"] = 1.0
+    use = wb.create_sheet("Use")
+    use["A1"] = "=Precedents!K20"
+    use["A2"] = "=PrecedentsVal!A1"
+    wb.save(src)
+
+    out = tmp_path / "o.xlsx"
+    w = WorkbookPatch(str(src))
+    w.rename_sheets({"Precedents": "Giao dịch tiền lệ",
+                     "PrecedentsVal": "Định giá tiền lệ"})
+    w.save(str(out))
+
+    got = openpyxl.load_workbook(out)["Use"]
+    assert got["A1"].value == "='Giao dịch tiền lệ'!K20"
+    assert got["A2"].value == "='Định giá tiền lệ'!A1"
+
+
+def test_rename_sheets_leaves_cell_text_alone(tmp_path):
+    """"Raw Data" written in a cell is prose, not an address."""
+    src = tmp_path / "t.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.title = "Raw Data"
+    note = wb.create_sheet("Note")
+    note["A1"] = "Nguồn: Raw Data"
+    note["A2"] = "='Raw Data'!A1"
+    wb.save(src)
+
+    out = tmp_path / "o.xlsx"
+    w = WorkbookPatch(str(src))
+    w.rename_sheets({"Raw Data": "Dữ liệu thô"})
+    w.save(str(out))
+
+    got = openpyxl.load_workbook(out)["Note"]
+    assert got["A1"].value == "Nguồn: Raw Data"
+    assert got["A2"].value == "='Dữ liệu thô'!A1"
+
+
+def test_rename_sheets_repoints_defined_names(tmp_path):
+    src = tmp_path / "d.xlsx"
+    wb = openpyxl.Workbook()
+    wb.active.title = "Control Panel"
+    wb.active["C5"] = 0.12
+    wb.defined_names.add(
+        openpyxl.workbook.defined_name.DefinedName(
+            "_WACC", attr_text="'Control Panel'!$C$5"))
+    wb.save(src)
+
+    out = tmp_path / "o.xlsx"
+    w = WorkbookPatch(str(src))
+    w.rename_sheets({"Control Panel": "Bảng điều khiển"})
+    w.save(str(out))
+
+    wb2 = openpyxl.load_workbook(out)
+    assert wb2.defined_names["_WACC"].attr_text == "'Bảng điều khiển'!$C$5"
+
+
+def test_the_jargon_sheets_keep_their_english_names():
+    """DCF, WACC, SOTP and Comps are learned in English, so they stay.
+
+    The rest of the tab names are ordinary English phrases and are
+    translated. This pins the distinction so a later pass does not
+    quietly translate WACC into something nobody would go looking for.
+    """
+    for keep in ("DCF", "WACC", "SOTP", "Comps"):
+        assert keep not in V.SHEET_NAMES
+
+    for renamed in ("Financial Statements", "Raw Data", "Control Panel",
+                    "Dashboard", "Share Price", "Implied Value Summary"):
+        assert renamed in V.SHEET_NAMES
+        assert re.search(r"[À-ỹ]", V.SHEET_NAMES[renamed])
+
+
+def test_new_sheet_names_are_legal_excel_names():
+    for old, new in V.SHEET_NAMES.items():
+        assert 0 < len(new) <= 31, f"{old} -> {new} quá dài"
+        assert not set(new) & set(r":\/?*[]"), f"{new} có ký tự cấm"
+        assert new == new.strip("'").strip()
+    assert len(set(V.SHEET_NAMES.values())) == len(V.SHEET_NAMES)

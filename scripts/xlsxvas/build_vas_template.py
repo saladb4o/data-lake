@@ -1369,6 +1369,20 @@ def build_precedents_gate(w: WorkbookPatch) -> None:
                       f"{col}12/{col}14)")
 
 
+def build_drop_dead_names(w: WorkbookPatch) -> None:
+    """Names a vendor add-in left behind, already broken in the source."""
+    gone = w.drop_defined_names(lambda name, body: body.strip() == "#REF!")
+    # One name is written once per sheet it is scoped to, so the element
+    # count is several times the number of names a reader would see.
+    print(f"bỏ {len(set(gone))} tên đã hỏng sẵn "
+          f"({len(gone)} phần tử, mỗi tên lặp theo từng sheet)")
+
+
+def build_rename_sheets(w: WorkbookPatch) -> None:
+    """Last, because every other step addresses sheets by their old name."""
+    w.rename_sheets(V.SHEET_NAMES)
+
+
 def main(src: str, dest: str) -> None:
     w = WorkbookPatch(src)
     build_raw_data(w)
@@ -1391,6 +1405,8 @@ def main(src: str, dest: str) -> None:
     build_translate(w)
     build_tidy(w)
     build_deidentify(w)
+    build_drop_dead_names(w)
+    build_rename_sheets(w)
     w.save(dest)
     print(f"wrote {dest}")
 

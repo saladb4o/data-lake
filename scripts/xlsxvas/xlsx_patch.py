@@ -147,6 +147,129 @@ class WorkbookPatch:
     def clear(self, sheet: str, ref: str) -> None:
         self._queue(sheet, ref, Cell(blank=True))
 
+    def rename_sheets(self, mapping: Dict[str, str]) -> None:
+        """Rename sheets and repoint everything that referred to them.
+
+        A sheet name is not a label, it is an address. It appears in the
+        <sheet> entry, in every formula on every sheet, in defined names
+        and print areas, in the cached series references inside each
+        chart, in hyperlink targets, and in the part-title list in
+        docProps/app.xml. Miss one and Excel opens the file with #REF!,
+        or - worse - repairs it silently and drops the chart.
+
+        Quoting is the part that bites. A name with no spaces is written
+        bare (Dashboard!C6); a name with spaces must be quoted
+        ('Raw Data'!C6). Every Vietnamese name here has a space in it, so
+        references that were bare have to gain quotes, which means the
+        replacement cannot be a plain string substitution.
+        """
+        # Longest first, so that Precedents does not eat the start of
+        # PrecedentsVal and leave "ValuationVal" behind.
+        old_names = sorted(mapping, key=len, reverse=True)
+
+        def quoted(name: str) -> str:
+            # Excel doubles an apostrophe inside a quoted sheet name.
+            return "'" + name.replace("'", "''") + "'"
+
+        def needs_quotes(name: str) -> bool:
+            return not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_.]*", name)
+
+        def new_ref(name: str) -> str:
+            new = mapping[name]
+            return quoted(new) if needs_quotes(new) else new
+
+        # One pattern for every reference form, so a bare name and a
+        # quoted name are found in the same pass and each is rewritten
+        # with whatever quoting the NEW name needs.
+        alternatives = []
+        for name in old_names:
+            esc = re.escape(name)
+            alternatives.append("'" + esc.replace("'", "''") + "'")
+            if not needs_quotes(name):
+                # bare, but not when it is part of a longer identifier
+                alternatives.append(r"(?<![A-Za-z0-9_.'])" + esc
+                                    + r"(?![A-Za-z0-9_])")
+        ref_re = re.compile("(" + "|".join(alternatives) + r")(?=!)")
+
+        def repoint(text: str) -> str:
+            def one(m: re.Match) -> str:
+                tok = m.group(1)
+                if tok.startswith("'"):
+                    tok = tok[1:-1].replace("''", "'")
+                return new_ref(tok) if tok in mapping else m.group(0)
+            return ref_re.sub(one, text)
+
+        for part, blob in list(self._parts.items()):
+            if not part.endswith(".xml"):
+                continue
+            if part in ("xl/sharedStrings.xml", "xl/styles.xml"):
+                # cell text that happens to read "Raw Data" is prose,
+                # not an address
+                continue
+            try:
+                xml = blob.decode("utf8")
+            except UnicodeDecodeError:
+                # customXml/item1.xml is UTF-16. Nothing in a custom XML
+                # part addresses a sheet, and guessing at an encoding in
+                # order to rewrite it would be the riskier move.
+                continue
+            before = xml
+
+            if part == "xl/workbook.xml":
+                def sheet_tag(m: re.Match) -> str:
+                    whole = m.group(0)
+                    nm = re.search(r'name="([^"]*)"', whole)
+                    if not nm or nm.group(1) not in mapping:
+                        return whole
+                    new = xml_escape(mapping[nm.group(1)])
+                    return (whole[:nm.start(1)] + new + whole[nm.end(1):])
+                xml = re.sub(r'<sheet\b[^>]*/?>', sheet_tag, xml)
+
+            if part == "docProps/app.xml":
+                def title(m: re.Match) -> str:
+                    inner = m.group(1)
+                    return ("<vt:lpstr>" + xml_escape(mapping[inner])
+                            + "</vt:lpstr>") if inner in mapping else m.group(0)
+                xml = re.sub(r'<vt:lpstr>([^<]*)</vt:lpstr>', title, xml)
+
+            xml = repoint(xml)
+            if xml != before:
+                self._parts[part] = xml.encode("utf8")
+
+        # keep the name -> part map usable for later edits
+        self._sheet_part = {mapping.get(k, k): v
+                            for k, v in self._sheet_part.items()}
+        self._pending = {mapping.get(k, k): v
+                         for k, v in self._pending.items()}
+        self._hidden = {mapping.get(k, k): v
+                        for k, v in self._hidden.items()}
+
+    def drop_defined_names(self, predicate) -> List[str]:
+        """Remove defined names the predicate accepts, by name and body.
+
+        The source file carries 37 names left by a vendor's Excel add-in
+        whose bodies are already #REF! - they were broken before this
+        template existed. Nothing references them, which is why the
+        workbook still reports no error cells, but they are dead vendor
+        residue in a file being stripped of exactly that.
+        """
+        wb = self._parts["xl/workbook.xml"].decode("utf8")
+        dropped = []
+
+        def one(m: re.Match) -> str:
+            whole = m.group(0)
+            nm = re.search(r'name="([^"]*)"', whole)
+            body = re.sub(r'<definedName\b[^>]*>|</definedName>', "", whole)
+            if nm and predicate(nm.group(1), body):
+                dropped.append(nm.group(1))
+                return ""
+            return whole
+
+        wb = re.sub(r'<definedName\b[^>]*>.*?</definedName>', one, wb, flags=re.S)
+        wb = re.sub(r'<definedNames>\s*</definedNames>', "", wb)
+        self._parts["xl/workbook.xml"] = wb.encode("utf8")
+        return dropped
+
     def remove_hyperlinks(self, sheet: str, refs: List[str]) -> int:
         """Drop the links on these cells, not just the text in them.
 

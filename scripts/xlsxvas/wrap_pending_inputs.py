@@ -14,18 +14,23 @@ from __future__ import annotations
 
 import os
 import sys
+
 from typing import Dict, List, Set, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import openpyxl
 
+import vas_layout as V                     # noqa: E402
+
 from recalc import recalculate
 from xlsx_patch import WorkbookPatch
 
 # The accounting core must never be quieted: a broken identity there is the
 # whole point of the template and has to stay visible.
-PROTECTED: Set[str] = {"Financial Statements", "Raw Data", "Control Panel"}
+PROTECTED: Set[str] = {V.SHEET_NAMES["Financial Statements"],
+                       V.SHEET_NAMES["Raw Data"],
+                       V.SHEET_NAMES["Control Panel"]}
 
 
 def find_error_cells(path: str) -> List[Tuple[str, str, str]]:
