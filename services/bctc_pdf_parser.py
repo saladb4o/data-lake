@@ -52,6 +52,25 @@ def strip_accents(s: str) -> str:
     stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
     return stripped.replace("đ", "d").replace("Đ", "D")
 
+def squash(s: str) -> str:
+    """Accent-free, space-free, uppercase - for matching OCR output.
+
+    RapidOCR drops spaces unpredictably on these documents. Run 35219855885
+    read page 2 of FPT's Q4 2025 filing as "BAO CAO TAI CHINH CONG TYME" and
+    page 3 as "BAOCAOTAICHINHRIENG": the same words, spaced three different
+    ways on three lines. Every keyword list here is written with spaces, so
+    substring matching found nothing on a document OCR had read correctly -
+    189 lines on one page - and the locator returned empty lists, which made
+    every extractor downstream return zero items.
+
+    Removing the spaces from both sides makes the match independent of where
+    OCR decided to put them. It is deliberately blunt: punctuation and digits
+    stay, because "B 01" and "B01" must both reach "B01".
+    """
+    return re.sub(r"[^A-Z0-9]", "", strip_accents(str(s or "")).upper())
+
+
+
 
 # Standard Vietnamese Accounting Code Mappings (Thông tư 200/2014/TT-BTC)
 TT200_BALANCE_SHEET_CODES = {
@@ -72,8 +91,18 @@ TT200_BALANCE_SHEET_CODES = {
     200: "TÀI SẢN DÀI HẠN",
     210: "Phải thu dài hạn",
     220: "Tài sản cố định",
-    221: "Nguyên giá TSCĐ hữu hình",
-    222: "Giá trị hao mòn lũy kế TSCĐ hữu hình",
+    # 221/222 were the wrong way round, and 223 was missing. What settles
+    # it is arithmetic, not the label: on SHS's filed balance sheet
+    # 221 + 227 = 30,251,990,576 = 220, to the dong, so 221 is the
+    # carrying amount of tangible fixed assets and not their cost. 222
+    # (54.8bn) is larger than 221 (11.7bn), which is what a gross cost
+    # looks like next to a net book value.
+    221: "Tài sản cố định hữu hình",
+    222: "Nguyên giá TSCĐ hữu hình",
+    223: "Giá trị hao mòn lũy kế TSCĐ hữu hình",
+    224: "Tài sản cố định thuê tài chính",
+    225: "Nguyên giá TSCĐ thuê tài chính",
+    226: "Giá trị hao mòn lũy kế TSCĐ thuê tài chính",
     227: "Tài sản cố định vô hình",
     228: "Nguyên giá TSCĐ vô hình",
     229: "Giá trị hao mòn lũy kế TSCĐ vô hình",
@@ -91,12 +120,265 @@ TT200_BALANCE_SHEET_CODES = {
     330: "Nợ dài hạn",
     338: "Vay và nợ thuê tài chính dài hạn",
     400: "VỐN CHỦ SỞ HỮU",
-    410: "Vốn góp của chủ sở hữu",
-    411: "Cổ phiếu phổ thông có quyền biểu quyết",
+    # 410 and 411 were off by one level, the same way 221/222 were. The
+    # composition 400 = 410 + 430 is read whole off a filed consolidated
+    # balance sheet; it can only hold if 410 is the parent, because a
+    # sub-line would leave retained earnings out of the total.
+    410: "Vốn chủ sở hữu",
+    411: "Vốn góp của chủ sở hữu",
     418: "Quỹ đầu tư phát triển",
     421: "Lợi nhuận sau thuế chưa phân phối",
+    # neither of these was carried at all, so a consolidated filing's
+    # minority interest had nowhere to land
+    429: "Lợi ích cổ đông không kiểm soát",
+    430: "Nguồn kinh phí và quỹ khác",
     440: "TỔNG CỘNG NGUỒN VỐN"
 }
+
+# The headings that mark each statement, in one place.
+#
+# These used to be written twice - once in the native pass of
+# locate_statement_pages and once in the OCR pass - and the two lists had
+# drifted apart. The native pass demanded the whole of "BANG CAN DOI KE
+# TOAN" while the OCR pass accepted "BANG CAN DOI", so a document whose
+# heading the OCR pass would have caught was missed when it happened to
+# carry vector text. Run 35222930322 measured the result: six native
+# documents produced 44 items between them and almost no cash flow at all,
+# against forty-plus items per document on the OCR route.
+#
+# Both passes now match against this, with squash() applied to each side.
+STATEMENT_HEADINGS = {
+    "auditor_report": [
+        "BAO CAO CUA CONG TY KIEM TOAN", "BAO CAO KIEM TOAN",
+        "KIEM TOAN VIEN", "AUDITOR", "REVIEW REPORT",
+    ],
+    "balance_sheet": [
+        "BANG CAN DOI KE TOAN", "CAN DOI KE TOAN", "BANG CAN DOI",
+        "MAU SO B 01", "MAU B 01", "B 01/TCTD", "B 01 - TCTD",
+        "B 01 - CTC", "B 01 - DN",
+        "FINANCIAL POSITION", "BALANCE SHEET", "TINH HINH TAI CHINH",
+    ],
+    "income_statement": [
+        "KET QUA HOAT DONG KINH DOANH", "KET QUA KINH DOANH",
+        "MAU SO B 02", "MAU B 02", "B 02/TCTD", "B 02 - TCTD",
+        "B 02 - CTC", "B 02 - DN",
+        "INCOME STATEMENT", "FINANCIAL PERFORMANCE",
+    ],
+    "cash_flow": [
+        "LUU CHUYEN TIEN TE", "LUU CHUYEN TIEN",
+        "MAU SO B 03", "MAU B 03", "B 03/TCTD", "B 03 - TCTD",
+        "B 03 - CTC", "B 03 - DN",
+        "CASH FLOW",
+    ],
+}
+
+# Statements sit at the front of a filing; past this the same words are
+# usually a cross-reference in the notes. Only used as a bound on where a
+# heading counts, never as a bound on how much is read.
+NATIVE_STATEMENT_WINDOW = 25
+
+
+def names_all_the_statements(hit_keys) -> bool:
+    """True when one page names every statement - a contents page.
+
+    PVS's 110-page filing put all three statements and the auditor's
+    report and the notes on page 0 in run 35300394193, because page 0 is
+    the cover listing what the document contains. Every extractor then
+    ran against the cover and found nothing, and the filing reported zero
+    items as though the parser could not read it.
+
+    The existing table-of-contents guard misses this: it wants dotted
+    leaders and page numbers, and a cover page has neither. But a page
+    that names the balance sheet AND the income statement AND the cash
+    flow statement is listing them rather than being one. Two together
+    happen legitimately - a statement continues onto the page where the
+    next begins, which is why FPT has pages in two lists at once - so the
+    line is drawn at all three.
+    """
+    return len({"balance_sheet", "income_statement",
+                "cash_flow"} & set(hit_keys)) == 3
+
+FOOTNOTE_HEADINGS = [
+    "THUYET MINH BAO CAO TAI CHINH", "THUYET MINH BCTC",
+    "NOTES TO THE FINANCIAL", "THUYET MINH",
+]
+
+
+# An e-office stamp is not text, and a page carrying only one is an image.
+#
+# Run 35301809165 printed PVS's native text layer page by page and every
+# page from 2 to 13 of both filings held exactly 82 characters:
+#
+#     | 2 | 82 | Van ban duoc tai len he thong eoffice.ptsc.com.vn...
+#
+# That line is an overlay stamped onto every page; the statements are
+# images underneath it. The first two pages are a covering letter with
+# real text, and that was enough for the density test to call the whole
+# 110-page document NATIVE, after which get_text() returned the stamp and
+# the OCR pass never ran because the document was not classified scanned.
+#
+# The stamp is recognisable without knowing anything about PTSC: it is the
+# same line on nearly every page. Subtracting the lines a document repeats
+# across most of its pages leaves each page's own text, and it is that,
+# not the raw character count, which says whether a page can be read.
+OVERLAY_PAGE_SHARE = 0.6   # on this fraction of pages, a line is an overlay
+OVERLAY_MIN_PAGES = 4      # below this a document is too short to tell
+NATIVE_MIN_OWN_CHARS = 40  # a page's own text, stamps removed
+
+
+def repeated_overlay_lines(page_texts) -> set:
+    """Lines a document repeats on most of its pages.
+
+    Headers, footers and e-office stamps. Page numbers are excluded by
+    length: a line has to be substantial to count, so "12" repeating is
+    not treated as an overlay.
+    """
+    pages = [p for p in page_texts if p]
+    if len(pages) < OVERLAY_MIN_PAGES:
+        return set()
+    counts: Dict[str, int] = {}
+    for text in pages:
+        seen = {ln.strip() for ln in text.splitlines() if len(ln.strip()) >= 20}
+        for line in seen:
+            counts[line] = counts.get(line, 0) + 1
+    floor = max(2, int(len(pages) * OVERLAY_PAGE_SHARE))
+    return {line for line, n in counts.items() if n >= floor}
+
+
+def page_own_text(text: str, overlay: set) -> str:
+    """The page's text with the document-wide overlay taken out."""
+    if not text:
+        return ""
+    if not overlay:
+        return text
+    kept = [ln for ln in text.splitlines() if ln.strip() not in overlay]
+    return "\n".join(kept)
+
+
+# Where the heading is unreadable, the table still is.
+#
+# The same run printed BSR's text layer, and it is the opposite failure to
+# PVS's. The figures are all there:
+#
+#     | 3 | 1781 | ... (100=110+120+130+140+150) / 100 / 70.173.060.674.346
+#     | 7 |  553 | ... 33 / 127.884.103.960.387 / 34 / (133.236.468.791.732)
+#
+# What is gone is the heading. The embedded font drops most accented
+# characters, so "Mau so B 01a-DN/HN" arrives as "-DN/HN" and "BANG CAN
+# DOI KE TOAN" does not appear in any spelling at all. There is nothing
+# for a heading match to match, and the one page the locator did return
+# was a notes page that happened to keep a fragment.
+#
+# A heading is one line and a statement is fifty, so the table is the more
+# durable evidence. A page is taken as a statement when it is shaped like
+# one - a column of TT200 codes against figures - and something on it says
+# which statement it is.
+STRUCTURAL_MIN_ROWS = 6
+
+# The three-digit codes are decisive on their own: no income statement or
+# cash flow line is numbered 270 or 440.
+BALANCE_SHEET_MARKER_CODES = {100, 200, 270, 300, 310, 330, 400, 410, 440}
+
+# These two share the one and two digit codes, so codes alone cannot tell
+# them apart and the row labels have to. Row labels survive where headings
+# do not: BSR's page 5 kept "1. Doanh thu ban hang va" intact on a page
+# whose heading had been reduced to punctuation.
+STATEMENT_ROW_MARKERS = {
+    "balance_sheet": [
+        "TONG CONG TAI SAN", "TONG CONG NGUON VON", "TAI SAN NGAN HAN",
+        "TAI SAN DAI HAN", "NO PHAI TRA", "VON CHU SO HUU",
+        "NO NGAN HAN", "NO DAI HAN",
+    ],
+    "income_statement": [
+        "DOANH THU BAN HANG", "GIA VON HANG BAN", "LOI NHUAN GOP",
+        "DOANH THU HOAT DONG TAI CHINH", "CHI PHI BAN HANG",
+        "CHI PHI QUAN LY DOANH NGHIEP", "LAI CO BAN TREN CO PHIEU",
+        "TONG LOI NHUAN KE TOAN TRUOC THUE", "CHI PHI THUE TNDN",
+    ],
+    "cash_flow": [
+        "LUU CHUYEN TIEN THUAN", "KHAU HAO TAI SAN CO DINH",
+        "TIEN CHI DE MUA SAM", "TIEN THU TU DI VAY",
+        "TIEN CHI TRA NO GOC VAY", "TIEN LAI VAY DA TRA",
+        "TIEN VA TUONG DUONG TIEN DAU KY", "TIEN VA TUONG DUONG TIEN CUOI KY",
+        "LOI NHUAN TRUOC THUE",
+    ],
+}
+STRUCTURAL_MIN_MARKERS = 2
+
+_CODE_AND_FIGURE = re.compile(
+    r"(?<![\d.])(\d{1,3})\s+\(?-?\d{1,3}(?:[.,]\d{3}){2,}",
+)
+
+# A balance sheet prints how its own codes add up: "(100=110+120+130+140+150)".
+# An income statement and a cash flow statement print the same kind of
+# formula, but theirs are built from one and two digit codes, because that
+# is how their lines are numbered. A three digit total made of three digit
+# parts occurs in no other statement.
+_COMPOSITION_FORMULA = re.compile(r"\(\s*(\d{3})\s*=\s*([\d\s+\-]{7,})\)")
+
+
+def balance_sheet_composition_formulas(text: str) -> int:
+    """How many times a page states a balance sheet code composition.
+
+    These survive what headings do not. BSR's Q4 filing carries a font
+    that drops every accented character, so the page holding the balance
+    sheet says "A -" where it should say a section name and offers no
+    spelling of its own title at all - but it still prints
+    "(100=110+120+130+140+150)", in digits, intact. A label is an
+    assertion; a composition the document prints about itself is closer to
+    a measurement.
+    """
+    found = 0
+    for total, members in _COMPOSITION_FORMULA.findall(text or ""):
+        parts = [p for p in re.findall(r"\d+", members)]
+        if len(parts) >= 2 and all(len(p) == 3 for p in parts):
+            if int(total) in BALANCE_SHEET_MARKER_CODES:
+                found += 1
+    return found
+
+
+def looks_like_a_statement_table(text: str) -> bool:
+    """A column of short codes against figures in the millions or more.
+
+    Three thousands separators is the floor, so a note reference beside a
+    year or a percentage does not qualify. What is being recognised is the
+    shape of a statement page, not its content.
+    """
+    return len(_CODE_AND_FIGURE.findall(text or "")) >= STRUCTURAL_MIN_ROWS
+
+
+def statement_from_its_rows(text: str):
+    """Which statement a table-shaped page belongs to, or None.
+
+    Returns None rather than guessing. An income statement and a cash flow
+    statement both number their lines 1 to 70, so a page that says nothing
+    about itself beyond its codes is left alone: a page assigned to the
+    wrong extractor produces bound rows that are wrong, which is worse
+    than a page nobody reads.
+    """
+    squashed = squash(text)
+    if not squashed:
+        return None
+
+    codes = {int(c) for c in re.findall(r"(?<![\d.])(\d{3})(?![\d.])", text or "")}
+    scores = {}
+    for key, markers in STATEMENT_ROW_MARKERS.items():
+        scores[key] = sum(1 for m in markers if squash(m) in squashed)
+
+    if balance_sheet_composition_formulas(text):
+        return "balance_sheet"
+
+    if len(codes & BALANCE_SHEET_MARKER_CODES) >= 3 and scores["balance_sheet"]:
+        return "balance_sheet"
+
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
+    best, best_score = ranked[0]
+    if best_score < STRUCTURAL_MIN_MARKERS:
+        return None
+    if ranked[1][1] == best_score:
+        return None  # Two families equally supported decides nothing.
+    return best
+
 
 TT200_INCOME_CODES = {
     1: "Doanh thu bán hàng và cung cấp dịch vụ",
@@ -166,8 +448,14 @@ TITLE_TO_BS_CODES = [
     ("tai san dai han", 200),
     ("phai thu dai han", 210),
     ("tai san co dinh", 220),
-    ("nguyen gia", 221),
-    ("gia tri hao mon luy ke", 222),
+    # "Nguyên giá" and "Giá trị hao mòn luỹ kế" are each printed three
+    # times on B 01-DN - under tangible, under finance-lease and under
+    # intangible assets - so a title alone cannot say which one it is.
+    # This list is scanned first-match-wins, so a bare pattern would
+    # always claim the first block it met and the other two would be
+    # dropped as duplicates. Extracting nothing is better than filing a
+    # number under the wrong code; the printed code disambiguates and
+    # Strategy A reads it.
     ("bat dong san dau tu", 230),
     ("tai san do dang dai han", 240),
     ("chi phi xay dung co ban do dang", 242),
@@ -575,6 +863,8 @@ class BCTCPdfParser:
         self.currency_scale: float = 1.0
         self.period_info: Dict[str, Any] = {}
         self._cached_ocr_pages: Dict[int, List[str]] = {}
+        self.overlay_lines: set = set()
+        self.located_by: Dict[int, str] = {}
         self._inspect_pdf()
 
     def _inspect_pdf(self) -> None:
@@ -595,13 +885,21 @@ class BCTCPdfParser:
             text_rich_pages = 0
             scanned_empty_pages = 0
 
-            for i in range(sample_pages):
-                txt = doc[i].get_text().strip()
+            # Density is measured on each page's own text, with the
+            # document-wide overlay subtracted first. A page holding only
+            # an e-office stamp is an image page however many characters
+            # the stamp runs to, and PVS's stamp runs to 82 - twice the
+            # threshold below.
+            raw_pages = [doc[i].get_text() for i in range(sample_pages)]
+            self.overlay_lines = repeated_overlay_lines(raw_pages)
+
+            for raw in raw_pages:
+                txt = page_own_text(raw, self.overlay_lines).strip()
                 sample_text += " " + txt
                 total_chars += len(txt)
                 if len(txt) > 200:
                     text_rich_pages += 1
-                elif len(txt) < 40:
+                elif len(txt) < NATIVE_MIN_OWN_CHARS:
                     scanned_empty_pages += 1
 
             # Determine doc_type based on interior page text density (cover pages 0-1 often have logo images)
@@ -652,10 +950,21 @@ class BCTCPdfParser:
         if not fitz:
             return locations
 
+        self.located_by = {}
+
         # Pass 1: Native Vector Text
         with fitz.open(self.pdf_path) as doc:
+            structural: Dict[int, str] = {}
+            # Statements a heading placed on a page that is also shaped
+            # like one. A heading match on a page with no table is a
+            # cross-reference, and run 35303194219 showed what it costs:
+            # BSR's Q4 balance sheet was "placed" on page 10, a notes page
+            # keeping a fragment of the form code, and that one spurious
+            # hit blocked the structural pass for the whole statement.
+            placed: set = set()
             for page_idx in range(len(doc)):
-                txt_raw = doc[page_idx].get_text()
+                txt_raw = page_own_text(doc[page_idx].get_text(),
+                                        self.overlay_lines)
                 txt_norm = strip_accents(txt_raw).upper()
 
                 # Filter out Table of Contents (Mục Lục) - especially on early pages
@@ -663,49 +972,85 @@ class BCTCPdfParser:
                 if is_toc and page_idx < 8:
                     continue
 
-                if page_idx <= 25:
-                    if any(k in txt_norm for k in ["BAO CAO CUA CONG TY KIEM TOAN", "BAO CAO KIEM TOAN", "KIEM TOAN VIEN", "AUDITOR"]):
-                        locations["auditor_report"].append(page_idx)
-                    if any(k in txt_norm for k in [
-                        "BANG CAN DOI KE TOAN", "MAU SO B 01", "MAU B 01", "B 01/TCTD", "B 01 - TCTD", "B 01 - CTC",
-                        "FINANCIAL POSITION", "BALANCE SHEET", "TINH HINH TAI CHINH"
-                    ]):
-                        locations["balance_sheet"].append(page_idx)
-                    if any(k in txt_norm for k in [
-                        "KET QUA HOAT DONG KINH DOANH", "MAU SO B 02", "MAU B 02", "B 02/TCTD", "B 02 - TCTD", "B 02 - CTC",
-                        "INCOME STATEMENT", "FINANCIAL PERFORMANCE", "KET QUA KINH DOANH"
-                    ]):
-                        locations["income_statement"].append(page_idx)
-                    if any(k in txt_norm for k in [
-                        "LUU CHUYEN TIEN TE", "MAU SO B 03", "MAU B 03", "B 03/TCTD", "B 03 - TCTD", "B 03 - CTC", "CASH FLOW"
-                    ]):
-                        locations["cash_flow"].append(page_idx)
-                if any(k in txt_norm for k in [
-                    "THUYET MINH BAO CAO TAI CHINH", "THUYET MINH BCTC", "NOTES TO THE FINANCIAL", "THUYET MINH"
-                ]):
+                # Matched with the spaces removed from both sides, exactly
+                # as the OCR pass does. A PDF heading is typeset as
+                # separate text runs, so get_text() returns it broken by
+                # newlines - "LUU CHUYEN\nTIEN TE" for one centred line -
+                # and a keyword carrying a space matches neither that nor
+                # the run-together spelling. It is the OCR spacing bug
+                # arriving through a different mechanism. See squash().
+                page_squashed = squash(txt_raw)
+
+                if page_idx <= NATIVE_STATEMENT_WINDOW:
+                    hit = [k for k in ("auditor_report", "balance_sheet",
+                                       "income_statement", "cash_flow")
+                           if any(squash(w) in page_squashed
+                                  for w in STATEMENT_HEADINGS[k])]
+                    shaped = looks_like_a_statement_table(txt_raw)
+                    if not names_all_the_statements(hit):
+                        for key in hit:
+                            locations[key].append(page_idx)
+                            self.located_by.setdefault(page_idx, "heading")
+                            if shaped:
+                                placed.add(key)
+
+                    # Where no heading was readable, the table still is.
+                    # BSR's embedded font drops accented characters, so
+                    # its headings do not survive get_text() in any
+                    # spelling while its code column and figures come
+                    # through intact. Only pages the headings did not
+                    # already claim are considered, so this can add pages
+                    # but never move one.
+                    if not hit and looks_like_a_statement_table(txt_raw):
+                        key = statement_from_its_rows(txt_raw)
+                        if key:
+                            structural[page_idx] = key
+
+                if any(squash(k) in page_squashed for k in FOOTNOTE_HEADINGS):
                     locations["footnotes"].append(page_idx)
+
+            # Applied only where the headings found that statement
+            # nowhere at all. A document whose heading was read is
+            # located by its heading, and this cannot overrule it.
+            unheaded = {k for k in ("balance_sheet", "income_statement",
+                                    "cash_flow") if k not in placed}
+            for page_idx, key in sorted(structural.items()):
+                if key not in unheaded:
+                    continue
+                locations[key].append(page_idx)
+                self.located_by.setdefault(page_idx, "table")
 
         # Pass 2: If Balance Sheet not found and document is SCANNED, scan candidate pages with RapidOCR
         if not locations["balance_sheet"] and self.doc_type in ("SCANNED_IMAGE", "SCANNED") and _rapid_ocr_engine:
             logger.info(f"Native search empty, engaging RapidOCR on candidate pages of {os.path.basename(self.pdf_path)}")
             with fitz.open(self.pdf_path) as doc:
-                scan_limit = min(14, len(doc))
+                # The same bound the native pass uses. These had drifted:
+                # a heading counted to page 25 if the document carried
+                # vector text and to page 14 if it did not, which now
+                # decides whether PVS is reachable at all - its filings
+                # are 110 and 146 pages and reclassifying them scanned
+                # only helps if the OCR pass looks as far as the native
+                # pass does. The early exit below still stops sooner on
+                # documents that are found sooner.
+                scan_limit = min(NATIVE_STATEMENT_WINDOW + 1, len(doc))
                 for p_idx in range(scan_limit):
                     ocr_lines = self._get_ocr_lines_for_page(doc, p_idx)
-                    page_text = " ".join(ocr_lines).upper()
+                    # Matched with the spaces removed from both sides. OCR
+                    # puts them wherever it likes on these scans - the same
+                    # heading arrives as "BAO CAO TAI CHINH" on one line and
+                    # "BAOCAOTAICHINHRIENG" on the next - so a space-bearing
+                    # keyword list silently matches nothing. See squash().
+                    page_text = squash(" ".join(ocr_lines))
 
-                    if any(k in page_text for k in ["REVIEW REPORT", "AUDITOR", "KIEM TOAN"]):
-                        if p_idx not in locations["auditor_report"]:
-                            locations["auditor_report"].append(p_idx)
-                    if any(k in page_text for k in ["FINANCIAL POSITION", "BALANCE SHEET", "BANG CAN DOI", "CAN DOI KE TOAN"]):
-                        if p_idx not in locations["balance_sheet"]:
-                            locations["balance_sheet"].append(p_idx)
-                    if any(k in page_text for k in ["INCOME STATEMENT", "KET QUA KINH DOANH", "FINANCIAL PERFORMANCE"]):
-                        if p_idx not in locations["income_statement"]:
-                            locations["income_statement"].append(p_idx)
-                    if any(k in page_text for k in ["LUU CHUYEN TIEN TE", "CASH FLOW", "LUU CHUYEN TIEN"]):
-                        if p_idx not in locations["cash_flow"]:
-                            locations["cash_flow"].append(p_idx)
+                    hit = [k for k in ("auditor_report", "balance_sheet",
+                                       "income_statement", "cash_flow")
+                           if any(squash(w) in page_text
+                                  for w in STATEMENT_HEADINGS[k])]
+                    if not names_all_the_statements(hit):
+                        for key in hit:
+                            if p_idx not in locations[key]:
+                                locations[key].append(p_idx)
+                            self.located_by.setdefault(p_idx, "ocr heading")
 
                     # Early exit if core statements are found
                     if locations["balance_sheet"] and locations["auditor_report"] and locations["income_statement"] and (locations["cash_flow"] or p_idx >= 12):
@@ -836,6 +1181,33 @@ class BCTCPdfParser:
                             if not row or len(row) < 2:
                                 continue
                             self._parse_balance_sheet_row(row, items)
+
+        # Route 1b: a total that sits below the ruled block is not one of
+        # the table's rows. BSR's Q4 page 4 ends "(440=300+400) / 440 /
+        # 85.068.637.113.074" and route 1 returned 28 rows without it, so
+        # the statement could not be closed and all three identities came
+        # back n/a - on a page whose figures were all present and correct.
+        # Route 2 could have read it, but route 2 only runs when route 1
+        # found nothing at all, and 28 is not nothing.
+        #
+        # The page's own lines carry what the table lost, in the shape the
+        # line parser already reads. It fills gaps only: a code route 1
+        # bound is left alone.
+        if bs_pages and fitz:
+            try:
+                with fitz.open(self.pdf_path) as doc:
+                    for p_idx in bs_pages:
+                        if p_idx >= len(doc):
+                            continue
+                        own = page_own_text(doc[p_idx].get_text(),
+                                            self.overlay_lines)
+                        lines = [ln.strip() for ln in own.splitlines()
+                                 if ln.strip()]
+                        self._parse_ocr_lines_for_balance_sheet(lines, items)
+            except Exception as exc:
+                logger.warning(
+                    "balance sheet line pass failed on %s: %s: %s",
+                    self.pdf_path, type(exc).__name__, exc)
 
         # Route 2: If Route 1 yielded 0 items and document is Scanned / OCR engine available
         if not items and bs_pages and _rapid_ocr_engine:
@@ -1225,6 +1597,8 @@ class BCTCPdfParser:
                     lines = self._get_ocr_lines_for_page(doc, p_idx)
                     self._parse_ocr_lines_for_cash_flow(lines, items)
 
+        self._repair_opening_cash(items)
+
         cfo = items.get(20, {}).get("current_val")
         capex_raw = items.get(21, {}).get("current_val")
         capex = abs(capex_raw) if capex_raw is not None else None
@@ -1261,6 +1635,80 @@ class BCTCPdfParser:
             "extraction_method": method_used
         }
 
+    @staticmethod
+    def _repair_opening_cash(items: Dict[int, Any]) -> None:
+        """Take the opening cash balance from the prior period's closing.
+
+        Code 60 comes back wrong often enough to be systematic. On FPT's
+        Q4 2025 parent-only filing the extractor bound it to 42,728,190,111
+        against a closing balance of 1,905,249,672,046, and the identity
+        the statement guarantees missed by 1.8 trillion. The same break
+        showed on both consolidated filings in run 35300394193.
+
+        The cause is upstream: a bare one or two digit line is read as a
+        code, so page numbers and note references are picked up as codes
+        and take whatever figure follows. The order the items came back in
+        shows it - 1, 2, 3, 60, 20, 21 - code 60 bound before code 20 on a
+        statement that prints them the other way round. That is a separate
+        bug and this does not pretend to fix it.
+
+        What can be repaired here is one line, on an accounting identity
+        rather than a guess: cash at the start of a period is cash at the
+        end of the one before, which the statement itself prints as code
+        70's comparative column. On FPT's filing that substitution closes
+        60 + 50 + 61 = 70 exactly, to the dong.
+
+        The repair is applied only when it makes the identity close. If
+        the arithmetic still does not work the extracted value stays, and
+        the statement keeps reporting itself as broken - a wrong number is
+        better left visible than replaced with a different wrong number.
+        """
+        closing = items.get(70) or {}
+        prior_close = closing.get("previous_val")
+        end = closing.get("current_val")
+        net = (items.get(50) or {}).get("current_val")
+        if prior_close is None or end is None or net is None:
+            return
+
+        fx = (items.get(61) or {}).get("current_val") or 0.0
+        begin = (items.get(60) or {}).get("current_val")
+
+        tolerance = max(1000.0, abs(end) * 1e-6)
+        if begin is not None and abs((begin + net + fx) - end) <= tolerance:
+            return  # Already consistent; nothing to repair.
+        if abs((prior_close + net + fx) - end) > tolerance:
+            return  # The substitution would not close it either.
+
+        items[60] = {
+            "code": 60,
+            "name": TT200_CASH_FLOW_CODES[60],
+            "current_val": prior_close,
+            "previous_val": (items.get(60) or {}).get("previous_val"),
+            "repaired_from": "code 70 comparative column",
+        }
+
+    @staticmethod
+    def _is_a_code_and_not_a_page_number(lines: List[str], i: int) -> bool:
+        """Whether a bare one or two digit line is a TT200 code.
+
+        It is the same digits either way, so the line alone cannot say.
+        What separates them is what surrounds them: a statement prints
+        "label, code, figure" and a page number stands on its own at the
+        foot of the page with figures above it.
+
+        Run 35220475916 showed the cost of not asking. FPT's cash flow
+        came back in the order 1, 2, 3, 60, 20, 21 - code 60 bound before
+        code 20 on a statement that prints them the other way round - and
+        code 1 had taken the closing cash balance, 1,905,249,672,046,
+        which is code 70's figure. Those rows counted as extracted like
+        any other, and the opening-balance identity missed by 1.8
+        trillion because of them.
+        """
+        if i >= len(lines) - 2:
+            return False  # The foot of the page is where page numbers live.
+        window = lines[max(0, i - 3):i]
+        return any(sum(ch.isalpha() for ch in ln) >= 3 for ln in window)
+
     def _parse_ocr_lines_for_cash_flow(self, lines: List[str], items_dict: Dict[int, Any]) -> None:
         """Parses OCR output lines into TT200 Cash Flow items."""
         for i, line in enumerate(lines):
@@ -1268,6 +1716,8 @@ class BCTCPdfParser:
             if m:
                 code = int(m.group(1))
                 if code not in TT200_CASH_FLOW_CODES:
+                    continue
+                if not self._is_a_code_and_not_a_page_number(lines, i):
                     continue
                 numbers = []
                 for next_line in lines[i + 1:i + 6]:
