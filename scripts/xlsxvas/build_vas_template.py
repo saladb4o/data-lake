@@ -68,8 +68,12 @@ def build_raw_data(w: WorkbookPatch) -> None:
             w.set_value(RD, f"A{line.row}", line.code)
         w.set_value(RD, f"B{line.row}", line.label)
         if line.formula:
+            # A check over a section nobody has filled in must stay
+            # silent rather than report that nothing balances nothing.
+            formula = (V.count_gate(line.formula) if line.kind == "check"
+                       else line.formula)
             for c in HIST:
-                w.set_formula(RD, f"{c}{line.row}", line.formula.format(c=c))
+                w.set_formula(RD, f"{c}{line.row}", formula.format(c=c))
 
     w.set_value(RD, f"B{V.LAST_ROW + 2}", V.EQUITY_SPLIT_UNVERIFIED)
     build_drivers(w)

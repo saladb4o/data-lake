@@ -917,3 +917,45 @@ def test_new_sheet_names_are_legal_excel_names():
         assert not set(new) & set(r":\/?*[]"), f"{new} có ký tự cấm"
         assert new == new.strip("'").strip()
     assert len(set(V.SHEET_NAMES.values())) == len(V.SHEET_NAMES)
+
+
+def test_count_gate_keeps_a_check_silent_when_nothing_is_filled_in():
+    """0 - 0 = 0 reads as "balanced", which is the worst kind of wrong."""
+    gated = V.count_gate("{c}62+{c}70-{c}71")
+    assert gated.startswith("IF(COUNT(")
+    assert gated.endswith('=0,"",{c}62+{c}70-{c}71)')
+
+
+def test_count_gate_sees_a_range_as_a_range():
+    gated = V.count_gate("{c}87-SUM({c}80:{c}86)")
+    assert "COUNT({c}80:{c}86,{c}87)" in gated
+    # the endpoints must not also appear on their own
+    assert "{c}80," not in gated.split("COUNT(")[1].split(")")[0].replace(
+        "{c}80:{c}86", "")
+
+
+def test_every_check_row_is_gated():
+    for line in V.ALL_LINES:
+        if line.kind == "check" and line.formula:
+            assert V.count_gate(line.formula).startswith("IF(COUNT(")
+
+
+def test_count_gate_looks_through_a_subtotal():
+    """A subtotal of nothing is 0, so counting it would find a number.
+
+    Row 70 (code 400) is derived from rows 68 and 69. The gate on the
+    check that reads it must count 68 and 69, not 70, or an empty
+    balance sheet reports that assets equal liabilities plus equity.
+    """
+    gated = V.count_gate("{c}62+{c}70-{c}71")
+    counted = gated.split("COUNT(")[1].split(")=0")[0]
+    assert "{c}70" not in counted.split(",")
+    assert "{c}68" in counted and "{c}69" in counted
+
+
+def test_count_gate_survives_a_reference_loop():
+    # guards the recursion, which would otherwise be a stack overflow
+    # rather than a wrong answer
+    for line in V.ALL_LINES:
+        if line.kind == "check" and line.formula:
+            V.count_gate(line.formula)

@@ -10,6 +10,8 @@ EQUITY_SPLIT below, which the balance sheets read in CI settle directly.
 """
 from __future__ import annotations
 
+import re
+
 from typing import Dict, List, NamedTuple, Optional
 
 FIRST_HIST_COL = "C"   # five historical years, C..G
@@ -178,6 +180,8 @@ MARKET: List[Line] = [
 ALL_LINES: List[Line] = INCOME + BALANCE + CASHFLOW + MARKET
 
 # row lookup by TT200 code, per statement
+_BY_ROW: Dict[int, '_L'] = {}   # filled just below
+
 IS_ROW: Dict[str, int] = {l.code: l.row for l in INCOME if l.code}
 BS_ROW: Dict[str, int] = {l.code: l.row for l in BALANCE if l.code}
 CF_ROW: Dict[str, int] = {l.code: l.row for l in CASHFLOW if l.code}
@@ -235,3 +239,63 @@ SHEET_NAMES = {
     "Consensus": "Khuyến nghị CTCK",
     "Share Price": "Giá cổ phiếu",
 }
+
+
+def references_in(formula: str) -> List[str]:
+    """Every cell and range a per-year formula template refers to.
+
+    Ranges are kept whole so that COUNT sees the range, not its two
+    endpoints.
+    """
+    ranges = re.findall(r"\{c\}\d+:\{c\}\d+", formula)
+    rest = formula
+    for r in ranges:
+        rest = rest.replace(r, " ")
+    singles = re.findall(r"\{c\}\d+", rest)
+    return ranges + singles
+
+
+def _input_refs(formula: str, seen: Optional[set] = None) -> List[str]:
+    """The references a check ultimately rests on.
+
+    A check often reads a subtotal, and a subtotal of nothing is 0, not
+    blank - so counting the cells the check names directly would find a
+    number and let the check through. Following each derived row down to
+    the rows a human actually types into is what makes the count mean
+    "has anybody entered anything here".
+    """
+    seen = set() if seen is None else seen
+    out: List[str] = []
+    for ref in references_in(formula):
+        if ref in seen:
+            continue
+        seen.add(ref)
+        if ":" in ref:
+            out.append(ref)
+            continue
+        row = int(ref[len("{c}"):])
+        line = _BY_ROW.get(row)
+        if line is not None and line.kind == "derived" and line.formula:
+            out.extend(_input_refs(line.formula, seen))
+        else:
+            out.append(ref)
+    # keep the order stable and drop repeats
+    return list(dict.fromkeys(out))
+
+
+def count_gate(formula: str) -> str:
+    """Make a check say nothing when it has nothing to check.
+
+    An identity over an empty section evaluates to 0 - 0 = 0 and reads
+    as "balanced", which is the same blank-becomes-zero mistake the
+    valuation sheets kept making, wearing a reassuring face: a balance
+    sheet with no liabilities side reported that assets equalled equity
+    plus debt. A check with some of its inputs present still fires, so
+    the one line a filing is missing is still named.
+    """
+    refs = _input_refs(formula)
+    if not refs:
+        return formula
+    return 'IF(COUNT(' + ",".join(refs) + ')=0,"",' + formula + ")"
+
+_BY_ROW.update({l.row: l for l in ALL_LINES})
