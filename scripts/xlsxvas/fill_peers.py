@@ -36,7 +36,7 @@ from xlsx_patch import WorkbookPatch            # noqa: E402
 import vas_layout as V                          # noqa: E402
 
 WC = "WACC"
-CM = "Comps"
+CM = V.SHEET_NAMES["Comps"]
 SP = V.SHEET_NAMES["Share Price"]
 PRICE_FIRST_ROW = 11
 PRICE_LAST_ROW = 1374

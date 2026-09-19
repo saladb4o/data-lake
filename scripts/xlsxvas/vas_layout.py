@@ -214,11 +214,14 @@ EQUITY_SPLIT_UNVERIFIED = (
 
 
 # The sheet names the workbook keeps in English, and why: a Vietnamese
-# analyst learns these as DCF, WACC, SOTP and comps, so translating them
-# would make the tab harder to find, not easier to read. Everything else
-# is an ordinary English phrase with an ordinary Vietnamese equivalent.
+# analyst learns DCF, WACC and SOTP as those letters, so translating them
+# would make the tab harder to find, not easier to read. Comps is not in
+# that class - it is a clipped English word, not an acronym anyone looks
+# up - so it reads as "Bảng so sánh". Everything else is an ordinary
+# English phrase with an ordinary Vietnamese equivalent.
 SHEET_NAMES = {
     "Dashboard": "Tổng quan",
+    "Comps": "Bảng so sánh",
     "Implied Value Summary": "Tổng hợp định giá",
     "Outputs": "Kết quả",
     "Control Panel": "Bảng điều khiển",

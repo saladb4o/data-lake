@@ -895,17 +895,18 @@ def test_rename_sheets_repoints_defined_names(tmp_path):
 
 
 def test_the_jargon_sheets_keep_their_english_names():
-    """DCF, WACC, SOTP and Comps are learned in English, so they stay.
+    """DCF, WACC and SOTP are learned as those letters, so they stay.
 
     The rest of the tab names are ordinary English phrases and are
     translated. This pins the distinction so a later pass does not
     quietly translate WACC into something nobody would go looking for.
     """
-    for keep in ("DCF", "WACC", "SOTP", "Comps"):
+    for keep in ("DCF", "WACC", "SOTP"):
         assert keep not in V.SHEET_NAMES
 
     for renamed in ("Financial Statements", "Raw Data", "Control Panel",
-                    "Dashboard", "Share Price", "Implied Value Summary"):
+                    "Dashboard", "Share Price", "Implied Value Summary",
+                    "Comps"):
         assert renamed in V.SHEET_NAMES
         assert re.search(r"[À-ỹ]", V.SHEET_NAMES[renamed])
 
