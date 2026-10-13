@@ -67,7 +67,7 @@ def merge_shards(input_dir: str, output_file: str, base_lake_file: str = "") -> 
     os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
     tmp_out = output_file + ".tmp"
     with open(tmp_out, "w", encoding="utf-8") as f:
-        json.dump(merged_data, f, ensure_ascii=False, indent=2)
+        json.dump(merged_data, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp_out, output_file)
     print(f"💾 Saved merged lake to: {output_file} ({round(os.path.getsize(output_file)/(1024*1024), 2)} MB)")
     return merged_data
@@ -108,7 +108,7 @@ def merge_corporate_shards(input_dir: str, output_file: str, base_lake_file: str
     os.makedirs(os.path.dirname(os.path.abspath(output_file)), exist_ok=True)
     tmp_out = output_file + ".tmp"
     with open(tmp_out, "w", encoding="utf-8") as f:
-        json.dump(merged_data, f, ensure_ascii=False, indent=2)
+        json.dump(merged_data, f, ensure_ascii=False, separators=(",", ":"))
     os.replace(tmp_out, output_file)
     print(f"💾 Saved merged corporate lake to: {output_file} ({round(os.path.getsize(output_file)/(1024*1024), 2)} MB)")
     return merged_data
