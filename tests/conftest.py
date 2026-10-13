@@ -107,6 +107,22 @@ def _isolate_data_dir(tmp_path_factory, monkeypatch, request):
 
 
 @pytest.fixture(scope="session", autouse=True)
+def _isolate_data_dir_for_the_session(tmp_path_factory):
+    """A run-wide fallback for _isolate_data_dir.
+
+    The per-test isolation is undone when each test ends, but work a test
+    starts can outlive it - the server's RRG warm-up thread sleeps, then
+    writes rrg_disk_cache.json - and it then resolved to the checkout's
+    data/. This also covers class- and module-scoped fixtures, which run
+    before the per-test fixture is set up.
+    """
+    mp = pytest.MonkeyPatch()
+    mp.setenv("DATA_LOCAL_DIR", str(tmp_path_factory.mktemp("data_session")))
+    yield
+    mp.undo()
+
+
+@pytest.fixture(scope="session", autouse=True)
 def _fail_on_repo_data_leak():
     """Fails the run if tests wrote lake files into the checkout."""
     import pathlib
