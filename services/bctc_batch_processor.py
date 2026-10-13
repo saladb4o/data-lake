@@ -21,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from services.stock_service import (
     get_company_reports,
+    fetch_cafef_bctc_filings,
     resolve_data_file,
     fetch_single_detail_pdf,
     _fetch_cafef_single_page_raw
@@ -391,18 +392,28 @@ class BCTCBatchProcessor:
         reports = []
 
         # 1. Fetch historical 10-year Audited Annual Reports if requested
+        # CafeF's document index lists the statements themselves; the news feed
+        # behind get_company_reports only lists announcements about them.
+        indexed = fetch_cafef_bctc_filings(symbol)
+        if year != "all":
+            indexed = [r for r in indexed if r["year"] == str(year)]
+
         if fetch_10y_annual:
-            try:
-                annual_reps = self.discover_10y_annual_reports(symbol=symbol, max_pages=70, target_years=10)
-                reports.extend(annual_reps)
-            except Exception as e:
-                logger.warning(f"Error discovering 10y annual reports for {symbol}: {e}")
+            annual_reps = [r for r in indexed if r["quarter"] is None][:10]
+            if not annual_reps:
+                try:
+                    annual_reps = self.discover_10y_annual_reports(symbol=symbol, max_pages=70, target_years=10)
+                except Exception as e:
+                    logger.warning(f"Error discovering 10y annual reports for {symbol}: {e}")
+            reports.extend(annual_reps)
 
         # 2. Fetch standard recent quarterly filings (for latest TTM / quarterly resolution)
-        reports_meta = get_company_reports(symbol=symbol, report_type="bctc", fetch_pdf=True, page=1, page_size=max_reports, year=year)
-        recent_reports = reports_meta.get("reports", []) or reports_meta.get("data", {}).get("reports", [])
-        if not recent_reports and "reports_all" in reports_meta:
-            recent_reports = reports_meta["reports_all"][:max_reports]
+        recent_reports = indexed[:max_reports]
+        if not recent_reports:
+            reports_meta = get_company_reports(symbol=symbol, report_type="bctc", fetch_pdf=True, page=1, page_size=max_reports, year=year)
+            recent_reports = reports_meta.get("reports", []) or reports_meta.get("data", {}).get("reports", [])
+            if not recent_reports and "reports_all" in reports_meta:
+                recent_reports = reports_meta["reports_all"][:max_reports]
 
         reports.extend(recent_reports)
 
@@ -452,8 +463,11 @@ class BCTCBatchProcessor:
                     "symbol": symbol,
                     "title": rep.get("title", ""),
                     "year": p_info.get("year") or rep.get("fiscal_year") or rep.get("year", ""),
-                    "quarter": p_info.get("quarter"),
-                    "period_type": p_info.get("period_type", "unknown"),
+                    "quarter": p_info.get("quarter") or rep.get("quarter"),
+                    # A scan often hides the period from the parser; CafeF's index states it.
+                    "period_type": p_info.get("period_type") if p_info.get("period_type") not in (None, "unknown") else (
+                        "annual" if str(rep.get("date", "")).startswith("CN/")
+                        else ("quarter" if rep.get("quarter") else "unknown")),
                     "period_label": p_info.get("period_label", ""),
                     "filing_date": rep.get("date", ""),
                     "filing_timestamp": rep.get("timestamp", 0),
