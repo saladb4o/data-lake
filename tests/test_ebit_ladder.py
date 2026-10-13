@@ -13,10 +13,18 @@ import pytest
 from services.unified_data_service import normalize_stock_data
 
 
+# Not "TST": that is a real ticker with eleven periods in the committed
+# PDF lake, so the ladder was being fed a real company's figures and the
+# rung under test was pre-empted by one above it wherever the run could
+# reach live data. A symbol no exchange can issue keeps the fixture the
+# only input.
+_NOT_A_TICKER = "__NOT_A_TICKER__"
+
+
 def _rec(**tv):
     base = {"close": 20_000.0, "total_equity_fq": 4.0e11}
     base.update(tv)
-    return normalize_stock_data("TST", tv_data=base)
+    return normalize_stock_data(_NOT_A_TICKER, tv_data=base)
 
 
 class TestTheReportedLineStillWins:
