@@ -126,10 +126,15 @@ def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
     Priority 2: KBSV / DNSE Data Feed
     Priority 3: Yahoo Finance (yfinance)
     """
-    from vnstock import Quote
-    
+    try:
+        from vnstock import Quote
+    except ImportError:
+        # vnstock is quarantined on PyPI and no longer installable; go
+        # straight to the fallback instead of failing the whole symbol.
+        Quote = None
+
     # 1. Try VCI / KBS / DNSE Data Feeds
-    for src in ['vci', 'kbs', 'dnse']:
+    for src in (['vci', 'kbs', 'dnse'] if Quote else []):
         try:
             q = Quote(symbol=symbol, source=src)
             df = q.history(start='2016-01-01', end='2026-03-31', interval='1D')

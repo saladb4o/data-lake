@@ -43,6 +43,12 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Crawler Shard ${{ matrix.worker_id }}/20
+        # The job limit is 6h. One slow shard used to hit it, which cancelled
+        # the job and skipped the merge for all 20. Stop the crawler well
+        # before that; it checkpoints every 5 symbols, so what it finished is
+        # kept, and only the unfinished symbols are missing until next week.
+        timeout-minutes: 300
+        continue-on-error: true
         run: |
           python scripts/bctc_worker_crawler.py \
             --worker-id ${{ matrix.worker_id }} \
@@ -52,8 +58,10 @@ jobs:
             ${{ (github.event.inputs.crawl_10y_annual == 'false') && '' || '--crawl-10y-annual' }}
 
       - name: Upload Shard Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
+          if-no-files-found: warn
           name: bctc_shard_${{ matrix.worker_id }}
           path: |
             ./output/bctc_shard_${{ matrix.worker_id }}.json
@@ -63,6 +71,9 @@ jobs:
   merge_and_publish:
     name: Hợp nhất 20 Shard & Tự động Đổ Dữ Liệu vào Repo
     needs: distributed_crawl
+    # Merge whatever shards exist; one failed worker must not discard the
+    # other nineteen.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
