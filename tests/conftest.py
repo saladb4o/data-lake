@@ -270,9 +270,49 @@ def screener_snapshot(tmp_path, monkeypatch):
 # by name, so the next run that tries names its own culprit. A test that
 # genuinely means to exercise the writer asks for the
 # `allow_real_lake_writes` marker and gets the real function.
+_REAL_SAVE_LAKE_DATA = None
+
+
+def _refuse_lake_write(culprit):
+    def _refuse(*_args, **_kwargs):
+        raise AssertionError(
+            f"{culprit} tried to write the real extracted BCTC "
+            "lake. Point it at tmp_path, or mark it "
+            "allow_real_lake_writes if it truly means to."
+        )
+    return _refuse
+
+
+# The function-scoped guard below is armed only once a test starts, but
+# class- and module-scoped fixtures run before that - and three of them
+# (normalize_stock_data -> process_single_company -> _save_lake_data) cut
+# the real lake from ~2.7M lines to 68. A session-scoped autouse fixture is
+# set up before any narrower one, so this closes that window for the run.
+@pytest.fixture(scope="session", autouse=True)
+def _no_writes_to_the_real_lake_from_shared_fixtures():
+    try:
+        from services import bctc_batch_processor
+    except Exception:
+        yield
+        return
+    global _REAL_SAVE_LAKE_DATA
+    _REAL_SAVE_LAKE_DATA = getattr(bctc_batch_processor, "_save_lake_data", None)
+    mp = pytest.MonkeyPatch()
+    mp.setattr(bctc_batch_processor, "_save_lake_data",
+               _refuse_lake_write("a class/module/session-scoped fixture"),
+               raising=False)
+    yield
+    mp.undo()
+
+
 @pytest.fixture(autouse=True)
 def _no_writes_to_the_real_lake(request, monkeypatch):
     if request.node.get_closest_marker("allow_real_lake_writes"):
+        # Undo the session guard for this test only.
+        if _REAL_SAVE_LAKE_DATA is not None:
+            from services import bctc_batch_processor
+            monkeypatch.setattr(bctc_batch_processor, "_save_lake_data",
+                                _REAL_SAVE_LAKE_DATA)
         yield
         return
     try:
@@ -281,13 +321,7 @@ def _no_writes_to_the_real_lake(request, monkeypatch):
         yield
         return
 
-    def _refuse(*_args, **_kwargs):
-        raise AssertionError(
-            f"{request.node.nodeid} tried to write the real extracted BCTC "
-            "lake. Point it at tmp_path, or mark it "
-            "allow_real_lake_writes if it truly means to."
-        )
-
-    monkeypatch.setattr(bctc_batch_processor, "_save_lake_data", _refuse,
+    monkeypatch.setattr(bctc_batch_processor, "_save_lake_data",
+                        _refuse_lake_write(request.node.nodeid),
                         raising=False)
     yield
