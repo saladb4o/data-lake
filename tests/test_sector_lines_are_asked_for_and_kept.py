@@ -108,7 +108,8 @@ class TestTheAnswerIsKept:
     @pytest.fixture(scope="class")
     def answered():
         return normalize_stock_data(
-            "TEST", tv_data=payload(), vndirect_data=dict(VENDOR_ANSWERED))
+            "TEST", tv_data=payload(), vndirect_data=dict(VENDOR_ANSWERED),
+            enable_source0_fallback=False)
 
     @pytest.mark.parametrize("key,value", sorted(VENDOR_ANSWERED.items()))
     def test_the_line_reaches_the_top_level(self, answered, key, value):
@@ -155,7 +156,8 @@ class TestASilentVendorInventsNothing:
     @staticmethod
     @pytest.fixture(scope="class")
     def silent():
-        return normalize_stock_data("TEST", tv_data=payload(), vndirect_data={})
+        return normalize_stock_data("TEST", tv_data=payload(), vndirect_data={},
+                                    enable_source0_fallback=False)
 
     @pytest.mark.parametrize("key", sorted(VENDOR_ANSWERED))
     def test_the_line_is_absent(self, silent, key):

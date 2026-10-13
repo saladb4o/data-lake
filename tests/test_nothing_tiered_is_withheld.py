@@ -52,6 +52,7 @@ def record():
             "gross_ppe_fq": 25e12,
             "delta_working_capital": 3e12,
         },
+        enable_source0_fallback=False,
     )
 
 
