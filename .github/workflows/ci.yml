@@ -18,7 +18,7 @@ jobs:
   test:
     name: Tests (deterministic tier)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
       - name: Checkout Code
@@ -44,4 +44,4 @@ jobs:
       - name: Run Test Suite
         # Network-marked tests hit live upstreams (vnstock is rate-limited to
         # 60 req/min on the community tier) and cannot gate CI. See tests/conftest.py.
-        run: python -m pytest -m "not network" --durations=10
+        run: python -m pytest -n auto -m "not network" --durations=10
