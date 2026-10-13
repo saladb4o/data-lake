@@ -106,15 +106,29 @@ class TestRecordConstruction:
 
 
 class TestPublicationDatesAreExplicit:
-    def test_estimated_filing_date_is_recorded_and_labelled(self, quarters):
+    """The builder says the date is unknown; it does not invent one.
+
+    An estimate written into filing_date is read as fact downstream:
+    publication_date takes that field and only falls back to its own lag
+    when the field is absent. Freezing the guess there overrides the
+    reader's parameter with a number it cannot see or vary, so asking
+    what the 45-day assumption is worth costs a full rebuild per value.
+    """
+
+    def test_the_estimate_is_not_written_as_a_filing_date(self, quarters):
         q1 = quarters["2021-Q1"]
-        assert q1["filing_date"] == "2021-05-15"  # 31 Mar + 45 days
+        assert "filing_date" not in q1, (
+            "a guess in this field is indistinguishable from a real date")
         assert q1["filing_date_is_estimated"] is True
 
-    def test_lag_is_configurable(self, monkeypatch):
+    def test_the_assumed_lag_travels_with_the_record(self, quarters):
+        assert quarters["2021-Q1"]["assumed_publication_lag_days"] == 45
+
+    def test_the_assumed_lag_follows_the_builders_setting(self, monkeypatch):
         monkeypatch.setattr(build_mod, "_fetch_raw", lambda symbol, size: ROWS)
         built = build_mod.build_symbol("HPG", lag_days=20)
-        assert built["2021-Q1"]["filing_date"] == "2021-04-20"
+        assert built["2021-Q1"]["assumed_publication_lag_days"] == 20
+        assert "filing_date" not in built["2021-Q1"]
 
 
 class TestOutputIsReadableByTheBacktest:
@@ -129,7 +143,33 @@ class TestOutputIsReadableByTheBacktest:
 
         assert _usable_field_count(quarters["2021-Q1"]) >= MIN_REQUIRED_FIELDS
 
-    def test_the_estimated_filing_date_is_honoured_as_a_lag(self, quarters):
+    def test_a_quarter_stays_invisible_until_its_publication_date(self, quarters):
+        """The property that matters is unchanged: no lookahead."""
         pit = PointInTimeFundamentals({"symbols": {"HPG": {"quarters": quarters}}})
         assert pit.get("HPG", "2021-Q1", as_of=date(2021, 3, 31)) is None
         assert pit.get("HPG", "2021-Q1", as_of=date(2021, 5, 15)) is not None
+
+    def test_the_lag_can_now_be_varied_without_rebuilding_the_lake(self, quarters):
+        """One build answers the question at every lag, not one build each.
+
+        This is the whole reason the estimate stays out of filing_date:
+        how much of a backtest's return comes from assuming companies
+        file in 45 days is a question about the reader, and it should
+        cost a parameter rather than a 23-minute fetch of the universe.
+        """
+        lake = {"symbols": {"HPG": {"quarters": quarters}}}
+        early = PointInTimeFundamentals(lake, publication_lag_days=20)
+        late = PointInTimeFundamentals(lake, publication_lag_days=90)
+        on = date(2021, 5, 15)
+        assert early.get("HPG", "2021-Q1", as_of=on) is not None
+        assert late.get("HPG", "2021-Q1", as_of=on) is None
+
+    def test_a_real_filing_date_would_still_override_the_lag(self, quarters):
+        """When the date is known it is fact, and fact beats an assumption."""
+        import copy
+        known = copy.deepcopy(quarters)
+        known["2021-Q1"]["filing_date"] = "2021-04-02"
+        known["2021-Q1"]["filing_date_is_estimated"] = False
+        pit = PointInTimeFundamentals(
+            {"symbols": {"HPG": {"quarters": known}}}, publication_lag_days=90)
+        assert pit.get("HPG", "2021-Q1", as_of=date(2021, 4, 2)) is not None

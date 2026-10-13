@@ -39,12 +39,25 @@ class TestItOnlyMeasures:
         and the workflow uploads as an artifact."""
         src = Path(census.__file__).read_text()
         assert src.count('"w", encoding="utf-8"') == 1
-        assert 'if args.json:' in src
+        # The dump moved into _write() when a second exit path was added
+        # for the focused run; the property is unchanged, so the guard
+        # follows it rather than being dropped. Nothing writes unless a
+        # caller named a path.
+        import inspect
+        writer = inspect.getsource(census._write)
+        assert "if not path:" in writer and "return" in writer
+        assert '"w", encoding="utf-8"' in writer
 
     def test_the_snapshot_is_opened_read_only(self):
-        src = inspect.getsource(census.pick_symbols)
-        assert '"r", encoding="utf-8"' in src
-        assert '"w"' not in src
+        # Every reader of the snapshot, not just the first one written.
+        # The census now opens it three times - two populations and the
+        # lines it already holds - and one of them opening it for writing
+        # would let a measurement overwrite the thing being measured.
+        for func in (census.pick_symbols, census.pick_line_symbols,
+                     census._held_lines):
+            src = inspect.getsource(func)
+            assert '"r", encoding="utf-8"' in src, func.__name__
+            assert '"w"' not in src, func.__name__
 
 
 class TestItDescribesWhatCameBack:
@@ -193,3 +206,96 @@ class TestItPicksTheCompaniesThatAreBlocked:
             for s in ("FFF", "GGG", "HHH")
         ])
         assert census.pick_symbols(2)[0] == ["FFF", "GGG"]
+
+
+def test_a_field_of_zeros_is_distinguishable_from_a_populated_one():
+    """The defect the first census run hid.
+
+    Vietcap answered for 688 of 720 companies and every ratio field was
+    printed as +0.000000, because a margin of 0.12 over a revenue of 1e11
+    is 1e-12 and so is a margin of zero. The two cases must be told apart
+    in the output, or the survey cannot say whether the route that might
+    close the coverage gap sends data or padding.
+    """
+    import collections
+
+    populated = [0.12, 0.09, 0.15, 0.0, 0.11]
+    padded = [0.0] * 5
+
+    for series, expect_nonzero in ((populated, 4), (padded, 0)):
+        raw = sorted(series)
+        assert sum(1 for v in raw if v != 0.0) == expect_nonzero
+        # The ratio against a revenue in dong collapses both to zero at
+        # six decimal places; only the raw median and the non-zero count
+        # separate them.
+        ratios = sorted(v / 1e11 for v in series)
+        assert f"{ratios[len(ratios) // 2]:+.6f}" == "+0.000000"
+
+    assert f"{sorted(populated)[len(populated) // 2]:+.6g}" != "+0"
+
+
+def test_the_catalogue_is_collected_before_the_survey_and_printed_after():
+    """Ordering the output by how much it is worth reading.
+
+    GitHub serves only the tail of a job log. The field catalogue runs to
+    about fourteen hundred lines, so printing it first put the survey, the
+    relations and the coverage headline in a region of the log the API will
+    not return - three separate reads were spent this afternoon discovering
+    that the answer was in a part of the log that could not be fetched. The
+    catalogue is still collected first, because the survey needs its names
+    to label the fields it prints.
+    """
+    import inspect
+
+    src = inspect.getsource(census.main)
+    assert src.index("collect_field_catalogue") < src.index("survey(")
+    assert src.index("survey(") < src.index("print_field_catalogue")
+
+
+def test_a_field_code_is_printed_with_the_vendor_s_name_for_it():
+    """cfa18 means nothing; the vendor has always been willing to say so.
+
+    Guessing which line a number is - by its magnitude, its sign, its ratio
+    to revenue - has been the most expensive mistake in this audit. The
+    catalogue removes the need to guess, so the survey must carry it.
+    """
+    import inspect
+
+    src = inspect.getsource(census.survey)
+    assert "names" in inspect.signature(census.survey).parameters
+    assert "vendor_name" in src, "the JSON drops the name"
+    assert "what the vendor calls it" in src, "the header drops the name"
+
+
+def test_the_catalogue_survives_a_route_that_refuses():
+    """A census that raises on a 500 measures nothing at all."""
+    out = {}
+    names = census.collect_field_catalogue({}, out)
+    assert isinstance(names, dict)
+    assert isinstance(out["vietcap_catalogue"], dict)
+    # Egress is blocked here, so every reference symbol records why rather
+    # than vanishing.
+    for symbol, _form in census.REFERENCE_SYMBOLS:
+        assert symbol in out["vietcap_catalogue"]
+    census.print_field_catalogue(out)
+
+
+def test_the_catalogue_dump_does_not_bury_the_measurement():
+    """A job log can only be read from its tail.
+
+    The catalogue is about fourteen hundred lines. Printed first it hid the
+    survey; moved to last it hid the survey and the coverage headline both.
+    Reordering a wall of text does not help - a dump that size does not add
+    information to a tail-only channel, it removes it. So the full listing
+    lives in the JSON, the names the survey actually used are inline in its
+    table, and stdout gets counts.
+    """
+    import inspect
+
+    src = inspect.getsource(census.print_field_catalogue)
+    assert "row['vi']" not in src and 'row["vi"]' not in src, (
+        "the per-field dump is back in stdout"
+    )
+    assert "fields" in src, "the per-report counts should stay"
+    # The names must still reach the reader through the survey.
+    assert "vendor_name" in inspect.getsource(census.survey)

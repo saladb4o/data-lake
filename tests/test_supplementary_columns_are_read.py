@@ -20,6 +20,8 @@ multiplied by revenue already held in known units and propagates revenue's
 tier, and ROIC is a percentage read as a percentage.
 """
 
+from unittest import mock
+
 import pytest
 
 from services import unified_data_service as uds
@@ -133,3 +135,174 @@ def test_every_supplementary_column_is_actually_read():
             f"{col} is requested from the vendor and never read out of the "
             "payload: the request is paid for and the answer discarded"
         )
+
+
+def test_the_vietcap_margin_probe_can_be_reached_without_tradingview_revenue():
+    """The gate that made a working route unreachable.
+
+    A company with no EBIT rung is, overwhelmingly, a company TradingView
+    carries nothing for - its revenue arrives from VNDIRECT. Selecting the
+    probe's symbols on TradingView's revenue alone therefore excluded
+    exactly the companies the probe exists for, and the census measured the
+    cost: Vietcap reports a non-zero EBIT margin for 615 of the 720
+    companies with no operating line and none was asked.
+
+    This pins the selection expression itself, since the probe's own body
+    needs a network. The rung is sound either way: it multiplies the margin
+    by whatever revenue the triangle resolves, and that resolution already
+    reads the VNDIRECT overlay.
+    """
+    import inspect
+
+    src = inspect.getsource(uds)
+    block = src[src.index("needs_margin = ["):]
+    block = block[:block.index("]")]
+
+    assert "_has_no_ebit_rung" in block
+    assert "vnd_by_symbol" in block and "revenue_ttm" in block, (
+        "the probe still selects on TradingView revenue alone"
+    )
+    assert "total_revenue_ttm" in block, (
+        "TradingView revenue must remain an accepted witness"
+    )
+
+
+def test_the_latest_period_is_the_newest_not_the_first():
+    """The census caught this: rows[0] is not the latest period.
+
+    The function was written to take the first row on the assumption that
+    the vendor serves newest-first. Across 714 companies the median `year`
+    on that first row is 2018, so every margin this route ever returned was
+    a seven-year-old period wearing the name of the current one - the worst
+    kind of wrong, because it is a real number from a real filing and
+    nothing downstream can tell.
+    """
+    payload = {"data": {"quarters": [
+        {"yearReport": 2018, "lengthReport": 4, "ebit": 1.0},
+        {"yearReport": 2025, "lengthReport": 2, "ebit": 9.0},
+        {"yearReport": 2025, "lengthReport": 4, "ebit": 7.0},
+        {"yearReport": 2021, "lengthReport": 1, "ebit": 3.0},
+    ]}}
+    assert uds._vietcap_latest_period(payload)["ebit"] == 7.0
+
+    # A body carrying one flat record still has to come back.
+    assert uds._vietcap_latest_period(
+        {"data": {"yearReport": 2024, "ebit": 5.0}})["ebit"] == 5.0
+    # And rows with no period at all must not be lost.
+    assert uds._vietcap_latest_period({"data": [{"ebit": 2.0}]})["ebit"] == 2.0
+
+
+def test_an_operating_line_is_bounded_but_may_be_negative():
+    """A loss is data; a figure in the wrong unit is not.
+
+    Discarding a negative EBIT would silently turn a real loss into no data
+    at all, which the provenance gate would then fill with a sector median -
+    exactly the fabrication this engine exists to refuse.
+    """
+    assert uds._plausible_operating_line(-8.1e9) == -8.1e9
+    assert uds._plausible_operating_line(8.1e9) == 8.1e9
+    assert uds._plausible_operating_line(0) is None
+    assert uds._plausible_operating_line(12.5) is None        # not dong
+    assert uds._plausible_operating_line(1e16) is None        # > the exchange
+    assert uds._plausible_operating_line(None) is None
+    assert uds._plausible_operating_line("n/a") is None
+
+
+def test_the_reported_line_is_preferred_over_the_margin():
+    """Same request, strictly better provenance.
+
+    A margin must be multiplied by revenue and can be no better than that
+    revenue, so for a company whose revenue is a sector stand-in it is
+    refused. A reported EBIT is the vendor stating the line itself.
+    """
+    import inspect
+
+    src = inspect.getsource(uds)
+    body = src[src.index("def _margin_worker"):]
+    body = body[:body.index("margin_filled = 0")]
+    assert body.index("fetch_vietcap_operating_lines") < body.index(
+        "fetch_vietcap_ebit_margin"
+    ), "the margin is still tried before the reported line"
+
+
+def test_a_row_with_no_cash_flow_is_sent_to_the_overlay():
+    """The gap that left fcf and cfo as the two largest blockers.
+
+    The VNDIRECT payload has carried cfo_ttm and capex_ttm all along, but
+    the overlay only fired when one of six income or balance lines was
+    missing. A company whose TradingView row held all six and no cash flow
+    was never asked: the one vendor that could answer was skipped because
+    the other six questions had already been answered.
+    """
+    complete_except_cash = {
+        "total_revenue_ttm": 1e11, "net_income_ttm": 3e9, "ebit_ttm": 4e9,
+        "total_assets_fq": 9e11, "total_equity_fq": 5e11,
+        "total_debt_fq": 2e11,
+    }
+    assert uds._needs_vndirect_backfill(complete_except_cash)
+
+    # The contrast this test is about is the cash flow pair, so it has to
+    # be measured with the override list empty. With it populated every
+    # row is asked, which is a different fix for a different hole and
+    # would make the assertion above pass no matter what _TV_REQUIRED_LINES
+    # said.
+    fully_complete = dict(complete_except_cash)
+    fully_complete["cash_f_operating_activities_ttm"] = 5e9
+    fully_complete["capital_expenditures_ttm"] = -1e9
+    with mock.patch.object(uds, "_LINES_THE_VENDOR_WINS_OUTRIGHT", ()):
+        assert uds._needs_vndirect_backfill(complete_except_cash)
+        assert not uds._needs_vndirect_backfill(fully_complete)
+
+
+class TestVietcapCashFlowReachesTheLadder:
+    """The thirteenth instance of the same defect shape, pre-empted.
+
+    fetch_vietcap_cash_flow writes cfa18 and cfa19 into the batch under
+    TradingView's own column names. These tests assert the ladder actually
+    reads them there - that the wiring is a wire and not a write to a key
+    nothing looks up.
+    """
+
+    def test_an_operating_cash_flow_is_read_and_trusted(self):
+        tri = _tri(cash_f_operating_activities_ttm=76e9)
+        assert tri["cfo"] == pytest.approx(76e9, rel=1e-6)
+        assert tri["field_provenance"]["cfo"] >= 3
+
+    def test_a_capex_is_read_whatever_its_sign(self):
+        """Vietcap states capex as money spent, so it arrives negative. Every
+        consumer takes abs(), so both signs must land on the same number."""
+        spent = _tri(cash_f_operating_activities_ttm=76e9,
+                     capital_expenditures_ttm=-24e9)
+        gross = _tri(cash_f_operating_activities_ttm=76e9,
+                     capital_expenditures_ttm=24e9)
+        assert spent["fcf_ttm"] == pytest.approx(gross["fcf_ttm"])
+
+    def test_the_pair_produces_a_free_cash_flow(self):
+        tri = _tri(cash_f_operating_activities_ttm=76e9,
+                   capital_expenditures_ttm=-24e9)
+        assert tri["fcf_ttm"] is not None
+        assert tri["field_provenance"]["fcf_ttm"] >= 2
+
+
+class TestVietcapIncomeLinesReachTheLadder:
+    """Revenue is a CORE driver, so unlike the cash-flow pair these move the
+    tier table rather than only the blocking counts."""
+
+    def test_a_reported_eps_is_trusted_outright(self):
+        tri = _tri(earnings_per_share_basic_ttm=1033.0)
+        assert tri["eps"] == pytest.approx(1033.0)
+        assert tri["field_provenance"]["eps"] == 3
+
+    def test_a_reported_eps_beats_the_price_over_pe_reconstruction(self):
+        derived = _tri()["field_provenance"]["eps"]
+        reported = _tri(earnings_per_share_basic_ttm=1033.0)
+        assert reported["field_provenance"]["eps"] > derived
+
+    def test_a_reported_revenue_is_trusted_outright(self):
+        tri = _tri(total_revenue_ttm=1.54e11)
+        assert tri["field_provenance"]["revenue"] == 3
+
+    def test_a_reconstructed_ebit_lands_on_the_ebit_rung(self):
+        tri = _tri(ebit_ttm=7.06e9)
+        assert tri["ebit"] == pytest.approx(7.06e9, rel=1e-6)
+        assert tri["field_provenance"]["ebit"] >= 3

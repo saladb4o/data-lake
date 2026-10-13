@@ -35,6 +35,21 @@ Sections, in order:
      scale factors.
   6. VNDIRECT item-code relations across all three statements, by the
      matching pursuit in unified_data_service.
+  7. The land bank and the loan book, by item code, over the two sectors
+     whose models need them. Presence of the codes the service reads, the
+     count that actually reaches the record, and - for the companies that
+     carry none of them - what their balance sheet does carry, named by
+     the vendor and sized against total assets. Three faults look
+     identical from the blocking table (the vendor has no such line, the
+     item codes are wrong, the number is fetched and never wired) and this
+     is what tells them apart. --only landbank runs it alone.
+  8. The cash flows and the borrowings, by item code, over the companies
+     whose record has neither. fcf blocks more symbols than any other
+     driver, and the debt extractor reads VAS 300 and 310 - total and
+     current liabilities - rather than borrowings, which is a wrong number
+     published rather than a refusal. Neither is guessed at: the codes are
+     ranked by size against revenue and against total assets. --only
+     cashflow runs it alone.
 
 Nothing here is a valuation. Read the output, then change the service.
 """
@@ -53,11 +68,20 @@ from typing import Any, Dict, List, Optional, Tuple
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.unified_data_service import (  # noqa: E402
+    VNDIRECT_ITEM_CODES,
     _request_with_retry,
     _safe_float,
     fetch_vndirect_financials,
     recover_item_code_relations,
 )
+
+#: The two sectors split apart. The service keeps one frozenset because it
+#: only asks "does this symbol need a VNDIRECT call at all"; here the two
+#: halves need different item codes, so they are named separately. A test
+#: asserts their union is still the service's set, because a sector added
+#: there and not here would be censused for the wrong line in silence.
+_LANDBANK_SECTORS = frozenset({"VNREAL", "VNREA", "8600"})
+_LOANBOOK_SECTORS = frozenset({"VNFIN", "VNBNK", "VNINS", "8300", "8500"})
 
 # --------------------------------------------------------------------------
 # Routes. Every URL here is confirmed against a client that uses it, not
@@ -127,25 +151,29 @@ def _shape(payload: Any, depth: int = 0) -> str:
 # --------------------------------------------------------------------------
 # 1. The field catalogue
 # --------------------------------------------------------------------------
-def dump_field_catalogue(cookies: Dict[str, str], out: Dict[str, Any]) -> None:
-    print("\n" + "=" * 74)
-    print(" 1. VIETCAP FIELD CATALOGUE  (/financial-statement/metrics)")
-    print("=" * 74)
-    print("This is the thing that has been missing all along: the vendor")
-    print("naming its own fields. One request per company form.\n")
+def collect_field_catalogue(cookies: Dict[str, str],
+                            out: Dict[str, Any]) -> Dict[str, str]:
+    """Fetch the vendor's own field names. Returns {field: "vi | en"}.
+
+    Collected before the survey because the survey prints field codes -
+    cfa18, bsa2, iss47 - that mean nothing on their own, and the vendor has
+    been willing to name every one of them all along. Printed after the
+    survey, by print_field_catalogue, because it runs to fourteen hundred
+    lines and would push everything worth acting on out of the tail of the
+    log, which is the only part of a job log that can be read back.
+    """
     catalogue: Dict[str, Any] = {}
+    names: Dict[str, str] = {}
     for symbol, form in REFERENCE_SYMBOLS:
         url = f"{VIETCAP_BASE}/{symbol}/financial-statement/metrics"
         status, body = _get_json(url, cookies=cookies)
         if status != 200 or not isinstance(body, dict):
-            print(f"  {symbol} ({form}): HTTP {status}, {_shape(body)}")
+            catalogue[symbol] = {"error": f"HTTP {status}, {_shape(body)}"}
             continue
         data = body.get("data")
         if not isinstance(data, dict):
-            print(f"  {symbol} ({form}): no data block, {_shape(body)}")
+            catalogue[symbol] = {"error": f"no data block, {_shape(body)}"}
             continue
-        total = sum(len(v) for v in data.values() if isinstance(v, list))
-        print(f"  {symbol} ({form}): {total} fields across {len(data)} reports")
         per_symbol: Dict[str, List[Dict[str, str]]] = {}
         for report, fields in data.items():
             if not isinstance(fields, list):
@@ -154,18 +182,56 @@ def dump_field_catalogue(cookies: Dict[str, str], out: Dict[str, Any]) -> None:
             for f in fields:
                 if not isinstance(f, dict):
                     continue
-                rows.append({
+                row = {
                     "field": str(f.get("field") or ""),
                     "vi": str(f.get("titleVi") or f.get("fullTitleVi") or ""),
                     "en": str(f.get("titleEn") or f.get("fullTitleEn") or ""),
-                })
+                }
+                rows.append(row)
+                # First name wins. The four reference symbols are four
+                # charts of accounts and a code can repeat across them; the
+                # non-financial company is asked first and is the form most
+                # of the exchange uses.
+                if row["field"] and row["field"] not in names:
+                    names[row["field"]] = f"{row['vi']} | {row['en']}".strip(" |")
             per_symbol[report] = rows
-            print(f"     {report}: {len(rows)} fields")
-            for row in rows:
-                print(f"       {row['field']:<28} {row['vi'][:38]:<38}"
-                      f" {row['en'][:34]}")
         catalogue[symbol] = per_symbol
     out["vietcap_catalogue"] = catalogue
+    return names
+
+
+def print_field_catalogue(out: Dict[str, Any]) -> None:
+    """The full catalogue, last, because of its size."""
+    catalogue = out.get("vietcap_catalogue") or {}
+    print("\n" + "=" * 74)
+    print(" 7. VIETCAP FIELD CATALOGUE  (/financial-statement/metrics)")
+    print("=" * 74)
+    print("Counts only. The full catalogue - every field, Vietnamese and")
+    print("English - is in the JSON, and every field the survey actually")
+    print("saw is named inline in the table above.\n")
+    print("Dumping all fourteen hundred rows here was the mistake this")
+    print("replaces. A job log can only be read from its tail, so a dump")
+    print("that size does not add information to the log - it removes it,")
+    print("by pushing everything above it out of reach. Printing it first")
+    print("hid the survey; printing it last hid the survey and the coverage")
+    print("headline both. The fix is not to reorder a wall of text but to")
+    print("stop emitting it where it cannot be read.\n")
+    for symbol, form in REFERENCE_SYMBOLS:
+        per_symbol = catalogue.get(symbol)
+        if not isinstance(per_symbol, dict):
+            print(f"  {symbol} ({form}): not collected")
+            continue
+        if "error" in per_symbol:
+            print(f"  {symbol} ({form}): {per_symbol['error']}")
+            continue
+        total = sum(len(v) for v in per_symbol.values()
+                    if isinstance(v, list))
+        print(f"  {symbol} ({form}): {total} fields across "
+              f"{len(per_symbol)} reports")
+        for report, rows in per_symbol.items():
+            if not isinstance(rows, list):
+                continue
+            print(f"     {report}: {len(rows)} fields")
 
 
 # --------------------------------------------------------------------------
@@ -272,13 +338,40 @@ ROUTES = {
     "vietcap income-statement": lambda s, c: _vietcap_statement_rows(
         s, "INCOME_STATEMENT", c),
     "vietcap statistics-financial": lambda s, c: _vietcap_stats_rows(s, c),
+    # The cash-flow statement, because the blockers changed shape. Reading
+    # the operating line Vietcap reports moved ebitda from 632 blocked
+    # symbols to 148 and ebit from 715 to 200; fcf at 306 and cfo at 166
+    # are now the two largest, and no route measured so far serves either.
+    # statistics-financial carries priceToCashFlow for 661 companies, which
+    # with a market cap whose unit is confirmed would imply a cash flow -
+    # but "price to cash flow" does not say which cash flow, and a guess
+    # about which line a ratio refers to is exactly the kind of assumption
+    # this census exists to replace. So ask the statement itself.
+    "vietcap cash-flow": lambda s, c: _vietcap_statement_rows(
+        s, "CASH_FLOW", c),
+    # The balance sheet, measured but not yet acted on. cash blocks 121
+    # symbols and debt 120, and both live here. No code reads this route
+    # yet and none will until this census prints the vendor's own name
+    # beside each bsa code - the income statement is being wired in the
+    # same change precisely because its names were already read, and
+    # guessing which bsa code is debt would undo the reason that worked.
+    "vietcap balance-sheet": lambda s, c: _vietcap_statement_rows(
+        s, "BALANCE_SHEET", c),
     "kbs finance-info KQKD": lambda s, c: _kbs_rows(s),
 }
 
 
+#: Room for the largest statement any route serves. Vietcap's balance
+#: sheet has 122 fields and its securities-form income statement 80; a cap
+#: below those drops real lines from the one table that exists to say which
+#: lines are real.
+_SURVEY_FIELD_CAP = 130
+
+
 def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
            cookies: Dict[str, str], workers: int,
-           out: Dict[str, Any]) -> None:
+           out: Dict[str, Any],
+           names: Optional[Dict[str, str]] = None) -> None:
     print("\n" + "=" * 74)
     print(f" 3-5. PER-ROUTE SURVEY OVER {len(symbols)} SYMBOLS WITH NO"
           " OPERATING LINE")
@@ -288,6 +381,7 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
         answered = 0
         field_counts: "collections.Counter[str]" = collections.Counter()
         ratios: Dict[str, List[float]] = {}
+        raw_values: Dict[str, List[float]] = {}
         raw_first: Dict[str, Any] = {}
 
         def work(sym: str):
@@ -312,6 +406,7 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
                     if num is None:
                         continue
                     field_counts[key] += 1
+                    raw_values.setdefault(key, []).append(num)
                     if known_rev and known_rev > 0:
                         ratios.setdefault(key, []).append(num / known_rev)
 
@@ -322,22 +417,61 @@ def survey(symbols: List[str], revenue_by_symbol: Dict[str, float],
             out.setdefault("routes", {})[route_name] = {"answered": 0}
             continue
         print(f"  first row keys: {sorted(raw_first)[:24]}")
-        print(f"  {'field':<34}{'n':>6}   median x revenue (revenue in dong,")
-        print(f"  {'':<34}{'':>6}   from the snapshot, so the ratio also")
-        print(f"  {'':<34}{'':>6}   states this route's unit)")
+        # Three numbers per field, because the ratio to revenue alone
+        # cannot answer the question this survey exists to answer.
+        #
+        # The first run made that plain. Vietcap answered for 688 of the
+        # 720 companies with no operating line, and every ratio field -
+        # ebitMargin and roic among them, the two blocking drivers - was
+        # printed as +0.000000. That is arithmetic, not data: a margin of
+        # 0.12 divided by a revenue of 1e11 is 1e-12, and so is a margin of
+        # zero. The route that might close most of the coverage gap was
+        # indistinguishable from a route sending nothing but zeros.
+        #
+        # So: the median of the raw value says what the vendor actually
+        # sends and in what unit; the non-zero count separates a field
+        # genuinely populated for n companies from one padded with zeros
+        # for all of them - the bank-only fields came back at the same 688
+        # as the rest, which is exactly that padding; and the ratio to
+        # revenue stays, because it is what locates an absolute line.
+        print(f"  {'field':<30}{'n':>6}{'nonzero':>9}"
+              f"{'median value':>18}{'x revenue':>14}  what the vendor calls it")
         summary = {}
-        for key, count in field_counts.most_common(60):
+        # The cap was 60, and it truncated in silence. Vietcap's balance
+        # sheet carries 122 fields; the survey printed the first 60, the
+        # table simply stopped at bsa58, and nothing said so - which is how
+        # a run that was asked for total equity and long-term borrowings
+        # came back without either, looking complete. A limit that hides
+        # what it dropped is worse than no limit, because it answers a
+        # question it did not answer.
+        #
+        # So: enough room for the largest statement, and a line stating
+        # exactly what was left out whenever anything is.
+        shown = field_counts.most_common(_SURVEY_FIELD_CAP)
+        if len(field_counts) > len(shown):
+            print(f"  ({len(shown)} of {len(field_counts)} fields shown;"
+                  f" the rest are in the JSON)")
+        for key, count in shown:
+            raw = sorted(raw_values.get(key) or [])
+            med_raw = raw[len(raw) // 2] if raw else None
+            nonzero = sum(1 for v in raw if v != 0.0)
             series = sorted(ratios.get(key) or [])
-            if series:
-                med = series[len(series) // 2]
-                # An operating line sits between net margin and gross
-                # margin; a revenue field sits at 1.0 or at a clean power
-                # of ten away from it, which is what names the unit.
-                print(f"  {key:<34}{count:>6}   {med:>+14.6f}")
-                summary[key] = {"n": count, "median_ratio": med}
-            else:
-                print(f"  {key:<34}{count:>6}   (no revenue to compare)")
-                summary[key] = {"n": count, "median_ratio": None}
+            med = series[len(series) // 2] if series else None
+            # The vendor's own name for the field, inline. A table of
+            # cfa18 / bsa2 / iss47 forces the reader to guess which line is
+            # which from its magnitude, and guessing which line a number is
+            # has been the single most expensive mistake in this audit.
+            # Vietcap names every one of these codes and always has.
+            label = (names or {}).get(key, "")
+            print(f"  {key:<30}{count:>6}{nonzero:>9}"
+                  f"{(f'{med_raw:+.6g}' if med_raw is not None else '-'):>18}"
+                  f"{(f'{med:+.6f}' if med is not None else '-'):>14}"
+                  f"  {label[:60]}")
+            summary[key] = {
+                "n": count, "nonzero": nonzero,
+                "median_value": med_raw, "median_ratio": med,
+                "vendor_name": label or None,
+            }
         out.setdefault("routes", {})[route_name] = {
             "answered": answered, "of": len(symbols), "fields": summary,
             # One real row, verbatim. The aggregates say how often a field
@@ -424,6 +558,292 @@ def vndirect_relations(symbols: List[str], workers: int,
 
 
 # --------------------------------------------------------------------------
+# 7. The land bank and the loan book, by item code
+# --------------------------------------------------------------------------
+#: The codes the service reads for the two lines TradingView has no column
+#: for, and the sectors whose models need them. Kept next to the census
+#: rather than imported so that a run says which codes it tested even if
+#: the service has moved on since.
+LINE_CODES = {
+    # 11400/11410 are VAS 140/141, inventory - where a Vietnamese developer
+    # holds its pipeline. The pair read before, 11420 and 12510, were VAS
+    # 142 (a line the standard form does not have) and VAS 251 (long-term
+    # work in progress, zero for all 112 companies censused).
+    "landbank": (11400, 11410),
+    "bank_loans": (112000,),
+}
+
+#: Total assets, tried in order, so a code can be reported as a share of
+#: the balance sheet rather than as a bare magnitude nobody can place.
+_TOTAL_ASSET_CODES = (12700, 10000, 11000, 100000, 130000)
+
+#: How many unmatched codes to name per group. A balance sheet runs to a
+#: hundred-odd lines; the ones worth reading are the large ones.
+_CODE_REPORT_CAP = 40
+
+
+def _cell(entry: Dict[str, Any], code: int) -> Optional[float]:
+    """One balance-sheet figure, whichever way the keys were serialised.
+
+    A payload read back from JSON has string keys and one straight off the
+    fetch has integer keys; a lookup that assumed either would report the
+    line absent for half the runs.
+    """
+    sheet = entry.get("balance_sheet_fq_by_code") or {}
+    value = sheet.get(code)
+    if value is None:
+        value = sheet.get(str(code))
+    return value
+
+
+def pick_line_symbols(limit: Optional[int]) -> Dict[str, List[str]]:
+    """The companies whose valuation needs a land bank or a loan book.
+
+    Picked by sector, not by what is missing, and that distinction is the
+    point. A symbol refused for want of a land bank and a symbol whose land
+    bank arrived are the same question here - "does the vendor carry this
+    line for this kind of company" - and selecting only the refused ones
+    would throw away every case where the answer is yes, leaving no
+    baseline to read the failures against.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        raise SystemExit(
+            f"No snapshot at {path}. Run the universe sync first - the "
+            "population is taken from the snapshot's sector codes."
+        )
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+
+    groups: Dict[str, List[str]] = {"landbank": [], "bank_loans": []}
+    for rec in stocks:
+        if not isinstance(rec, dict):
+            continue
+        sym = str(rec.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        code = str(rec.get("sector_code") or "").strip().upper()
+        if code in _LANDBANK_SECTORS:
+            groups["landbank"].append(sym)
+        elif code in _LOANBOOK_SECTORS:
+            groups["bank_loans"].append(sym)
+    for name in groups:
+        groups[name].sort()
+        if limit:
+            groups[name] = groups[name][:limit]
+    return groups
+
+
+def _print_codes_by_size(freq, shares, raw_values, names,
+                         denominator: str) -> Dict[int, Any]:
+    """One table of item codes, ranked by how big they are.
+
+    Ranked by size and not by how many companies carry the code. An earlier
+    run ranked by frequency, every code was carried by all 41 banks, and the
+    forty that got printed were an arbitrary slice in which the largest
+    asset line - the one that would have been the loan book - did not appear
+    at all. The vendor names none of these codes, so magnitude is the only
+    handle there is, and a table sorted by anything else throws it away.
+
+    The non-zero column is the other half. 12510 was carried by 112 of 112
+    developers and was zero in every one of them; a count of who carries a
+    code cannot tell that apart from a line genuinely populated.
+    """
+    def _median(code):
+        series = sorted(shares.get(code) or [])
+        return series[len(series) // 2] if series else None
+
+    ranked = sorted(freq, key=lambda c: (-abs(_median(c) or 0.0), -freq[c]))
+    shown = ranked[:_CODE_REPORT_CAP]
+    if len(freq) > len(shown):
+        print(f"  ({len(shown)} of {len(freq)} codes shown, largest"
+              f" first; the rest are in the JSON)")
+    print(f"  {'code':<10}{'n':>6}{'nonzero':>9}"
+          f"{('median x ' + denominator):>18}  what the vendor calls it")
+    rows = {}
+    for code in shown:
+        med = _median(code)
+        live = sum(1 for v in (raw_values.get(code) or []) if v != 0.0)
+        print(f"  {code:<10}{freq[code]:>6}{live:>9}"
+              f"{(f'{med:+.4f}' if med is not None else '-'):>18}"
+              f"  {names.get(code, '')[:38]}")
+        rows[code] = {"n": freq[code], "nonzero": live, "median_share": med,
+                      "vendor_name": names.get(code)}
+    print()
+    return rows
+
+
+def _tally(entries, sheet_key: str, denominator_of):
+    """Collect {code: how often, how big, what it is called} over payloads."""
+    freq: "collections.Counter[int]" = collections.Counter()
+    shares: Dict[int, List[float]] = {}
+    raw_values: Dict[int, List[float]] = {}
+    names: Dict[int, str] = {}
+    for entry in entries:
+        rows = entry.get(sheet_key) or {}
+        rows = {int(k): v for k, v in rows.items() if v is not None}
+        labels = entry.get("item_code_names") or {}
+        denom = denominator_of(entry, rows)
+        for code, value in rows.items():
+            freq[code] += 1
+            raw_values.setdefault(code, []).append(value)
+            if denom:
+                shares.setdefault(code, []).append(value / denom)
+            if code not in names:
+                label = labels.get(code) or labels.get(str(code))
+                if label:
+                    names[code] = str(label)
+    return freq, shares, raw_values, names
+
+
+def landbank_and_loanbook(groups: Dict[str, List[str]], workers: int,
+                          out: Dict[str, Any],
+                          held: Optional[Dict[str, Dict[str, Any]]] = None,
+                          ) -> None:
+    """Whether VNDIRECT carries the two lines, and under which codes.
+
+    Two runs have now reported `landbank` blocking 123 symbols and `rwa`
+    blocking 41, unchanged, after the request for them was wired and the
+    sector gate widened to ask. An unchanged count cannot tell a vendor
+    that does not carry the line from a pair of item codes read wrong, and
+    those need opposite fixes: the first is the end of the matter, the
+    second is a one-line change. Nothing short of looking at which codes
+    the payloads actually contain separates them, so that is what this
+    does - presence of the codes asked for, and, for the companies that
+    have none of them, what the balance sheet does carry, named by the
+    vendor and sized against total assets.
+
+    It proposes no code. It prints what is there.
+    """
+    print("\n" + "=" * 74)
+    print(" 7. THE LAND BANK AND THE LOAN BOOK, BY ITEM CODE")
+    print("=" * 74)
+
+    every = sorted({s for syms in groups.values() for s in syms})
+    print(f"  {len(every)} companies in the two sectors "
+          f"({len(groups['landbank'])} real estate, "
+          f"{len(groups['bank_loans'])} banks and insurers)\n")
+
+    fetched: Dict[str, Dict[str, Any]] = {}
+
+    def work(sym: str) -> Tuple[str, Dict[str, Any]]:
+        try:
+            return sym, (fetch_vndirect_financials(sym) or {})
+        except Exception:
+            return sym, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in every]):
+            sym, entry = fut.result()
+            fetched[sym] = entry
+
+    report: Dict[str, Any] = {}
+    for group, symbols in groups.items():
+        codes = LINE_CODES[group]
+        print("-" * 74)
+        print(f"  {group}: codes {', '.join(str(c) for c in codes)}"
+              f", {len(symbols)} companies")
+        print("-" * 74)
+
+        answered = [s for s in symbols if fetched.get(s, {}).get(
+            "balance_sheet_fq_by_code")]
+        print(f"  {len(answered):>5} of {len(symbols)} returned a coded "
+              f"balance sheet at all")
+        if not answered:
+            # No payloads means the route failed for this sector, which is
+            # a different finding from an absent line and must not be
+            # reported as one.
+            print("        so nothing here says anything about the line;"
+                  " the route is what failed")
+            report[group] = {"answered": 0, "of": len(symbols)}
+            continue
+
+        # Present and non-zero, separately, because they answer different
+        # questions and the first run conflated them: 12510 came back
+        # present for 112 of 112 developers and the section reported "the
+        # codes are right", while every value was zero and not one land
+        # bank reached the record. A line item the vendor emits for every
+        # company and populates for none is not the line. The survey in
+        # section 5 already learned this - "the non-zero count separates a
+        # field genuinely populated from one padded with zeros" - and this
+        # section was written without it.
+        per_code = {}
+        for code in codes:
+            have = [s for s in answered if _cell(fetched[s], code) is not None]
+            live = [s for s in have if _cell(fetched[s], code) != 0.0]
+            per_code[code] = {"present": len(have), "nonzero": len(live)}
+            print(f"  {len(have):>5} of {len(answered)} carry {code}, "
+                  f"{len(live)} of those non-zero")
+
+        # Missing means no code carries a usable figure. A zero is not a
+        # land bank, and the service will not publish one either - it
+        # requires `> 0` - so a company whose only answer is zero belongs
+        # in the group whose balance sheet gets examined.
+        missing = [
+            s for s in answered
+            if not any(_cell(fetched[s], c) for c in codes)
+        ]
+        # The count the sync publishes, for the same companies. If the
+        # vendor carries the code and the record still has no line, the
+        # fault is downstream of the fetch and the codes are not the
+        # problem at all - a third possibility neither run could see.
+        if held is not None:
+            key = "landbank_fq" if group == "landbank" else "bank_loans_fq"
+            reached = sum(1 for s in answered
+                          if (held.get(s) or {}).get(key) is not None)
+            print(f"  {reached:>5} of {len(answered)} reach the snapshot "
+                  f"as {key}")
+
+        print(f"  {len(missing):>5} of {len(answered)} carry none of them\n")
+        report[group] = {
+            "answered": len(answered), "of": len(symbols),
+            "per_code": per_code, "missing": len(missing),
+        }
+        if not missing:
+            print("  Every company that answered carries one of the codes"
+                  " with a non-zero value, so the codes are right\n")
+            continue
+
+        # What those companies do have. Frequency says which lines exist
+        # for this company form; the share of total assets says which of
+        # them could be a land bank or a loan book, since a loan book is
+        # most of a bank's balance sheet and a land bank is a large
+        # fraction of a developer's. The vendor's own name settles it.
+        freq: "collections.Counter[int]" = collections.Counter()
+        shares: Dict[int, List[float]] = {}
+        raw_values: Dict[int, List[float]] = {}
+        names: Dict[int, str] = {}
+        for sym in missing:
+            sheet = fetched[sym]["balance_sheet_fq_by_code"]
+            sheet = {int(k): v for k, v in sheet.items()}
+            labels = fetched[sym].get("item_code_names") or {}
+            total = next((sheet[c] for c in _TOTAL_ASSET_CODES
+                          if sheet.get(c)), None)
+            for code, value in sheet.items():
+                if value is None:
+                    continue
+                freq[code] += 1
+                raw_values.setdefault(code, []).append(value)
+                if total:
+                    shares.setdefault(code, []).append(value / total)
+                if code not in names:
+                    label = labels.get(code) or labels.get(str(code))
+                    if label:
+                        names[code] = str(label)
+
+        report[group]["codes_present"] = _print_codes_by_size(
+            freq, shares, raw_values, names, "assets")
+        print()
+
+    out["landbank_and_loanbook"] = report
+
+
+# --------------------------------------------------------------------------
 def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
     """Companies with no trustworthy operating line, and their revenue.
 
@@ -466,6 +886,890 @@ def pick_symbols(limit: Optional[int]) -> Tuple[List[str], Dict[str, float]]:
     return symbols, revenue
 
 
+# --------------------------------------------------------------------------
+# 8. The cash flows and the borrowings, by item code
+# --------------------------------------------------------------------------
+#: What the service reads today for each, so a run states the codes it is
+#: testing rather than leaving the reader to go and look. Taken from the
+#: service's own table rather than retyped: the entire value of printing
+#: them is that they are what the extractor actually reads, and a copy
+#: here would let a run state codes the extractor abandoned - a false
+#: claim in the report, not merely a stale constant. This file was the
+#: third place these codes were written down.
+CASH_FLOW_CODES = {name: VNDIRECT_ITEM_CODES[name][0]
+                   for name in ("cfo", "capex")}
+DEBT_CODES = VNDIRECT_ITEM_CODES["debt"][0]
+
+#: The resolver's gate. Duplicated rather than imported because the census
+#: must not import the valuation engine to ask a question about a vendor;
+#: a test asserts the two have not drifted.
+_TRUSTED = 2
+
+
+#: Relations that hold for every cash flow statement ever written, as
+#: (target, [terms]). They are how a numbering scheme is confirmed when the
+#: vendor names nothing: a label can be guessed wrong and a magnitude can
+#: be a coincidence, but an identity that reproduces on hundreds of
+#: companies is the statement's own arithmetic.
+#:
+#: Read against the scheme this census recovered from three companies -
+#: itemCode is 3 + the two-digit VAS B03 code + 00, so 32000 is VAS 20,
+#: net cash from operations. On that reading 36000 - 35000 - 37000 closed
+#: to four decimals at the median, which is suggestive and nothing more at
+#: n=3. These print the rate at which each holds per company.
+#: An identity is (label, total, terms, absent_is_zero).
+#:
+#: absent_is_zero is the difference between two kinds of question and it
+#: has to be stated per identity rather than assumed once. In "cash at end
+#: = cash at start + net change" a missing term is a missing fact and the
+#: company cannot be tested, which is why absent is not counted as
+#: disagreement anywhere in this file. In a section subtotal it is the
+#: opposite: a cash flow statement omits a line exactly when the company
+#: had none of it, so treating an absent sub-line as nil is reading the
+#: statement rather than guessing at it - and with nine sub-lines,
+#: requiring all nine present would skip almost every company and the
+#: check would measure nothing.
+CASH_FLOW_IDENTITIES = (
+    ("cash at end = cash at start + net change", 37000, (36000, 35000),
+     False),
+    ("net change = operating + investing + financing",
+     35000, (32000, 33000, 34000), False),
+    # The two that test capex. VAS numbers the investing section 21-30 and
+    # the financing section 31-40, so under the recovered scheme the
+    # investing total 33000 is the sum of 32100..32900 and the financing
+    # total 34000 the sum of 33100..33900. capex is read from 32100, VAS
+    # 21 - the first line of the investing section - and the census found
+    # it non-zero for 10 of 148 companies, which is either a population
+    # that bought no fixed assets or a second wrong code.
+    #
+    # These cannot tell those two apart on their own, and are not meant
+    # to. What they establish is whether 32100 sits in the investing
+    # section at all: if the section adds up from those nine codes, the
+    # sub-line numbering is confirmed and a sparse 32100 is the companies,
+    # not the code. If it does not, the sub-lines are numbered some other
+    # way and capex is being read from whatever happens to be at 32100.
+    ("investing total = its own sub-lines", 33000,
+     tuple(range(32100, 33000, 100)), True),
+    ("financing total = its own sub-lines", 34000,
+     tuple(range(33100, 34000, 100)), True),
+)
+
+
+def _check_identities(entries, sheet_key: str, identities,
+                      tolerance: float = 0.02) -> Dict[str, Any]:
+    """How often each identity actually reproduces, per company.
+
+    Per company and not on the medians. A median satisfies an identity
+    whenever one company happens to be the median of every term, which is
+    likely at n=3 and says nothing; requiring it of each company
+    separately cannot be satisfied by coincidence at scale.
+    """
+    print("  Identities, checked per company:")
+    results = {}
+    for label, target, terms, absent_is_zero in identities:
+        held = tested = 0
+        for entry in entries:
+            rows = {int(k): v for k, v in
+                    (entry.get(sheet_key) or {}).items() if v is not None}
+            if target not in rows:
+                continue
+            if not absent_is_zero and any(t not in rows for t in terms):
+                continue
+            if absent_is_zero and not any(t in rows for t in terms):
+                # Every sub-line absent is a payload that does not carry
+                # the section at all, not a section that sums to nil.
+                continue
+            tested += 1
+            expected = sum(rows.get(t, 0.0) for t in terms)
+            scale = max(abs(rows[target]), abs(expected), 1.0)
+            if abs(rows[target] - expected) / scale <= tolerance:
+                held += 1
+        rate = (100.0 * held / tested) if tested else None
+        print(f"    {label:<48}"
+              f"{(f'{rate:5.1f}%' if rate is not None else '    -')}"
+              f"  ({held}/{tested})")
+        results[label] = {"held": held, "tested": tested, "rate": rate}
+    print()
+    return results
+
+
+def pick_cashflow_symbols(limit: Optional[int]) -> List[str]:
+    """Companies whose record has no operating cash flow or no capex.
+
+    fcf blocks more symbols than any other driver and it is the only one
+    left with a plausible route: the 31 companies that are short of nothing
+    cannot be helped by any vendor, and regulated_asset_base is not a line
+    anybody reports.
+
+    Selected by TIER, not by presence, and the difference is the whole
+    population. The first version of this asked `rec.get("cfo") is None`
+    and found three companies out of 1,523, because cfo and capex always
+    carry a value: both ladders end in a fallback, capex at tier 1 from
+    D&A and then at tier 0, so the record is never empty. What blocks fcf
+    is the resolver refusing a figure below the gate, and a value that is
+    present but untrustworthy is invisible to a presence test. That is the
+    same mistake as counting an item code as carried when every value of
+    it is zero - present is not usable - and it turned a census of 149
+    companies into a census of three.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        raise SystemExit(f"No snapshot at {path}. Run the universe sync first.")
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+
+    symbols = []
+    for rec in stocks:
+        if not isinstance(rec, dict):
+            continue
+        sym = str(rec.get("symbol") or "").upper().strip()
+        if not sym:
+            continue
+        tiers = rec.get("field_provenance") or {}
+        if any(int(tiers.get(name, 0) or 0) < _TRUSTED
+               for name in ("cfo", "capex")):
+            symbols.append(sym)
+    symbols.sort()
+    return symbols[:limit] if limit else symbols
+
+
+def cash_flows_and_borrowings(symbols: List[str], workers: int,
+                              out: Dict[str, Any]) -> None:
+    """Where operating cash flow, capex and borrowings actually are.
+
+    Two questions in one population because they are answered by the same
+    payloads. Neither is guessed at here.
+
+      cfo and capex   fcf blocks 149 symbols. The extractor reads 31000 /
+                      31100 and 32100 / 32110 / 32010, and an earlier
+                      measurement concluded the vendor carries neither -
+                      on the same kind of evidence that concluded the land
+                      bank was absent, and that was wrong. The codes were.
+
+      borrowings      Under the numbering this census recovered - itemCode
+                      is 1 + the three-digit VAS code + 0 - the debt
+                      extractor reads 13000 and 13100, which are VAS 300
+                      NO PHAI TRA and VAS 310 no ngan han: total
+                      liabilities and current liabilities, not borrowings.
+                      That is a wrong number being published, not a
+                      refusal: it inflates net_de_ratio across the whole
+                      screener for every company TradingView leaves out.
+                      VAS puts borrowings at 320 and 338, so 13200 and
+                      13380 - but neither appeared among the forty largest
+                      liability codes of 112 developers, so they are not
+                      assumed to exist. This says whether they do.
+
+    Cash flow is sized against revenue and the balance sheet against total
+    assets, because that is what makes each legible.
+    """
+    print("\n" + "=" * 74)
+    print(" 8. THE CASH FLOWS AND THE BORROWINGS, BY ITEM CODE")
+    print("=" * 74)
+    print(f"  {len(symbols)} companies whose record has no cfo or no capex\n")
+
+    fetched: List[Dict[str, Any]] = []
+
+    def work(sym: str) -> Dict[str, Any]:
+        try:
+            entry = fetch_vndirect_financials(sym) or {}
+        except Exception:
+            return {}
+        if entry:
+            entry.setdefault("symbol", sym)
+        return entry
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in symbols]):
+            entry = fut.result()
+            if entry:
+                fetched.append(entry)
+
+    report: Dict[str, Any] = {"population": len(symbols),
+                              "answered": len(fetched)}
+
+    with_cf = [e for e in fetched if e.get("cash_flow_ttm_by_code")]
+    print("-" * 74)
+    print(f"  cash flow: cfo reads {CASH_FLOW_CODES['cfo']},"
+          f" capex reads {CASH_FLOW_CODES['capex']}")
+    print("-" * 74)
+    print(f"  {len(fetched):>5} of {len(symbols)} returned any payload")
+    print(f"  {len(with_cf):>5} of {len(fetched)} returned a coded"
+          f" cash flow statement")
+    for name, codes in CASH_FLOW_CODES.items():
+        live = sum(1 for e in with_cf
+                   if any(_cell_of(e, "cash_flow_ttm_by_code", c)
+                          for c in codes))
+        print(f"  {live:>5} of {len(with_cf)} carry a non-zero {name}")
+        report.setdefault("per_line", {})[name] = live
+    print()
+
+    if with_cf:
+        # Against revenue: operating cash flow runs at a few per cent to a
+        # few tens of per cent of sales, and capex likewise, so a code at
+        # 1.0 is revenue itself and one at 0.0001 is a rounding line.
+        freq, shares, raws, names = _tally(
+            with_cf, "cash_flow_ttm_by_code",
+            lambda entry, rows: _safe_float(entry.get("revenue_ttm")),
+        )
+        report["cash_flow_codes"] = _print_codes_by_size(
+            freq, shares, raws, names, "revenue")
+        report["identities"] = _check_identities(
+            with_cf, "cash_flow_ttm_by_code", CASH_FLOW_IDENTITIES)
+    else:
+        print("  No coded cash flow statement anywhere in the population;"
+              " the vendor does not serve one for these companies\n")
+
+    print("-" * 74)
+    # This line described the codes debt used to read, and went stale the
+    # moment the extractor changed - printing "which are not borrowings"
+    # underneath the pair that had just been adopted for being borrowings.
+    # A header that names a constant has to read that constant.
+    print(f"  borrowings: debt reads {DEBT_CODES}, scored below against a"
+          f" total debt this extractor did not supply")
+    print("-" * 74)
+    with_bs = [e for e in fetched if e.get("balance_sheet_fq_by_code")]
+    print(f"  {len(with_bs):>5} of {len(fetched)} returned a coded"
+          f" balance sheet")
+    if with_bs:
+        freq, shares, raws, names = _tally(
+            with_bs, "balance_sheet_fq_by_code",
+            lambda entry, rows: next(
+                (rows[c] for c in _TOTAL_ASSET_CODES if rows.get(c)), None),
+        )
+        liabilities = collections.Counter(
+            {c: n for c, n in freq.items() if 13000 <= c < 14000})
+        print(f"  {len(liabilities)} distinct liability codes (13xxx)")
+        report["liability_codes"] = _print_codes_by_size(
+            liabilities, shares, raws, names, "assets")
+        report["borrowing_candidates"] = _score_debt_candidates(with_bs)
+
+    out["cash_flows_and_borrowings"] = report
+
+
+#: Combinations of liability codes that could be borrowings, each scored
+#: against a figure that already exists. Under the recovered numbering,
+#: 13110/13120 are VAS 311/312 and 13200/13340 are VAS 320/334 - and which
+#: of those is short-term borrowings depends on which chart of accounts
+#: the vendor follows, QD15 or TT200, because the two swap 311 and 312.
+#:
+#: That question is NOT settled by picking the chart of accounts that
+#: sounds right. It is settled against TradingView, which reports total
+#: debt for most of the universe: the right combination is the one whose
+#: sum matches a figure the record already holds at tier 3, on company
+#: after company. Reasoning from the standard rather than from the payload
+#: is how 11420 got into the extractor in the first place.
+_DEBT_CANDIDATES = (
+    ("13110 + 13340   (QD15: vay ngan han + vay dai han)", (13110, 13340)),
+    ("13200 + 13340   (TT200: vay ngan han + vay dai han)", (13200, 13340)),
+    ("13110 alone", (13110,)),
+    ("13120 alone", (13120,)),
+    ("13000 + 13100   (what the extractor reads today)", (13000, 13100)),
+)
+
+
+def _score_debt_candidates(entries) -> Dict[str, Any]:
+    """Which liability codes add up to the total debt already on record.
+
+    Only tier-3-or-better total_debt is compared against, because a
+    triangulated or stood-in figure was derived by this project and
+    matching it would only prove the census agrees with an earlier guess.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    known: Dict[str, float] = {}
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+        if isinstance(stocks, dict):
+            stocks = list(stocks.values())
+        for rec in stocks or []:
+            if not isinstance(rec, dict) or not rec.get("symbol"):
+                continue
+            tiers = rec.get("field_provenance") or {}
+            # The value is published as "debt" and tiered as
+            # "total_debt". Reading rec["total_debt"] found nothing for
+            # all 1,522 symbols, so this scoring silently had no yardstick
+            # and reported "cannot be decided from the snapshot" - a
+            # missing instrument dressed as a finding about the vendor.
+            value = rec.get("debt")
+            if int(tiers.get("total_debt", 0) or 0) >= 3 and value:
+                known[str(rec["symbol"]).upper().strip()] = float(value)
+
+    print("\n  Which codes add up to a total debt already on record"
+          f" ({len(known)} symbols carry one at tier 3):")
+    if not known:
+        print("    none do, so this cannot be decided from the snapshot.")
+        return {}
+
+    # A yardstick the extractor itself produced measures nothing. Once
+    # debt reads 13110 + 13340, every record whose figure came from
+    # VNDIRECT IS that sum, so scoring it against these candidates scores
+    # the extractor against itself and the winning combination is
+    # whichever one is already in force. That is what happened on run
+    # 34496051364: this table read 93.9% for 13110 + 13340 the run after
+    # the extractor was changed to read exactly those two codes, against
+    # 16.4% the run before, and the jump measured nothing but the change.
+    #
+    # A record identical to the vendor's own total_debt_fq is that copy,
+    # by the same rule section 9 applies: identical is not corroboration.
+    # Dropping them leaves only yardsticks TradingView supplied, which is
+    # the independent evidence this table needs to be worth printing.
+    copies = 0
+    for entry in entries:
+        sym = str(entry.get("symbol") or "").upper().strip()
+        if sym in known and _agreement(
+                known[sym], entry.get("total_debt_fq")) == "identical":
+            del known[sym]
+            copies += 1
+    if copies:
+        print(f"    ({copies} dropped: the record there is a copy of this"
+              " vendor's own figure, so it cannot judge between codes)")
+    if not known:
+        print("    every yardstick was a copy; this cannot be decided.")
+        return {}
+
+    print("    candidate                                        matched  of")
+    results = {}
+    for label, codes in _DEBT_CANDIDATES:
+        matched = compared = 0
+        for entry in entries:
+            sym = str(entry.get("symbol") or "").upper().strip()
+            target = known.get(sym)
+            if target is None:
+                continue
+            rows = entry.get("balance_sheet_fq_by_code") or {}
+            values = [rows.get(c, rows.get(str(c))) for c in codes]
+            if all(v is None for v in values):
+                continue
+            compared += 1
+            total = sum(float(v) for v in values if v is not None)
+            for scale in (1.0, 1e9, 1e-9):
+                base = max(abs(target), abs(total * scale), 1.0)
+                if abs(target - total * scale) / base <= 0.05:
+                    matched += 1
+                    break
+        rate = (100.0 * matched / compared) if compared else None
+        print(f"    {label:<48}"
+              f"{(f'{rate:5.1f}%' if rate is not None else '    -')}"
+              f"  ({matched}/{compared})")
+        results[label] = {"matched": matched, "compared": compared,
+                          "rate": rate}
+    print("    The combination that matches is the one debt should read.")
+    return results
+
+
+# --------------------------------------------------------------------------
+# 9. Where the two vendors disagree
+# --------------------------------------------------------------------------
+#: The overlay in unified_data_service maps a VNDIRECT key onto a
+#: TradingView one, and each of those ends up in a record field under a
+#: third name. Kept here so a run states which pairs it compared.
+#:
+#: The overlay is a cascade, not a union: `if not tv.get(x) and vnd.get(x)`.
+#: When TradingView answers, VNDIRECT is never consulted, so two vendors
+#: never meet and a disagreement between them cannot be noticed. Whether
+#: that matters is a measurement nobody has taken - it is assumed to be
+#: harmless because the two are assumed to agree - and this section takes
+#: it.
+#:
+#: Note what a union would and would not buy. It cannot raise a tier: a
+#: figure two vendors both report is still tier 3, the same as one vendor
+#: reporting it, so this is not a coverage lever and no amount of agreement
+#: makes it one. What it buys is the chance to notice that the published
+#: number is wrong. That makes the disagreement rate the whole decision: if
+#: the vendors agree everywhere, the cascade is fine as it stands and the
+#: work is not worth doing.
+#: record value key -> (provenance key, VNDIRECT key).
+#:
+#: The value key and the provenance key are NOT the same name. The service
+#: publishes equity under "equity" while tiering it as "total_equity", and
+#: the same for debt, because _absolute_lines maps one to the other. The
+#: first version of this section assumed they matched. It was right for
+#: eight pairs of ten and wrong for exactly the two that mattered: the
+#: comparison read rec["total_equity"], found nothing, and printed "0
+#: compared" - which reads as agreement, not as a broken instrument, and
+#: the debt question the run was dispatched to answer went unanswered.
+#:
+#: A field that compares zero symbols is now called out rather than
+#: printed as a quiet row of noughts.
+OVERLAY_PAIRS = {
+    "revenue":       ("revenue", "revenue_ttm"),
+    "net_income":    ("net_income", "net_income_ttm"),
+    "ebit":          ("ebit", "ebit_ttm"),
+    "total_assets":  ("total_assets", "total_assets_fq"),
+    "equity":        ("total_equity", "total_equity_fq"),
+    "debt":          ("total_debt", "total_debt_fq"),
+    "cash":          ("cash", "cash_fq"),
+    "cfo":           ("cfo", "cfo_ttm"),
+    "capex":         ("capex", "capex_ttm"),
+    "da":            ("da", "da_ttm"),
+}
+
+#: How far apart two figures may sit and still count as the same number.
+#: Vendors round, restate and cut a TTM window a quarter differently, so an
+#: exact match is not the question; an order of magnitude is.
+_AGREE = 0.02
+
+#: A record field the engine keeps in billions while the vendor sends raw
+#: dong. A comparison that did not separate this would report every such
+#: field as a total disagreement and send the next run chasing a unit.
+_BILLION = 1e9
+
+
+def _agreement(held: Optional[float],
+               vendor: Optional[float],
+               quarters: Optional[int] = None) -> Optional[str]:
+    """How one pair of figures relates.
+
+    Six verdicts, not three, and the first one is the reason the first
+    version of this table could not be read at all.
+
+    identical   The two are the same float. That is not two vendors
+                agreeing - it is the overlay having copied this vendor's
+                number into the record because the other vendor had none,
+                so the comparison is the vendor against itself and carries
+                no information. da scored 464 of 464 "agree" on the first
+                run, which read as perfect corroboration and in fact meant
+                TradingView has no D&A column at all. Counting a copy as
+                agreement inflates exactly the fields nobody can check.
+
+    agree       Within tolerance but not the same number: two sources that
+                measured separately and concur. This is the only bucket
+                that is evidence of anything.
+
+    scaled      Apart by a factor of a billion. A unit, not a dispute.
+
+    sign        Same magnitude, opposite sign. A convention, not a
+                dispute, and it is fixed by negating rather than by
+                choosing a vendor.
+
+    annualised  The vendor figure is the record's times 4/n for the n
+                quarters it was built from. _sum_ttm extrapolates a short
+                history to an annual rate; a full twelve months elsewhere
+                will not match it, and that is this pipeline's doing
+                rather than a vendor's.
+
+    differ      None of the above. A genuine contradiction.
+    """
+    if held is None or vendor is None:
+        return None
+    try:
+        held, vendor = float(held), float(vendor)
+    except (TypeError, ValueError):
+        return None
+    if held == vendor:
+        return "identical"
+    if held == 0.0 or vendor == 0.0:
+        return "differ"
+
+    def _close(a: float, b: float) -> bool:
+        base = max(abs(a), abs(b))
+        return bool(base) and abs(a - b) / base <= _AGREE
+
+    if _close(held, vendor):
+        return "agree"
+    if _close(held, vendor * _BILLION) or _close(held, vendor / _BILLION):
+        return "scaled"
+    if _close(held, -vendor):
+        return "sign"
+    # Checked against the quarter count the payload reports rather than
+    # against every ratio that might look like one: 4/2 is 2.0, and a
+    # company that genuinely earned twice as much would otherwise be
+    # explained away as an artefact of this pipeline.
+    if quarters and 1 <= quarters < 4:
+        if _close(vendor, held * (4.0 / quarters)):
+            return "annualised"
+    return "differ"
+
+
+_VERDICTS = ("identical", "agree", "scaled", "sign", "annualised", "differ")
+
+
+def vendor_disagreement(symbols: List[str], workers: int,
+                        out: Dict[str, Any]) -> None:
+    """How often the two vendors give different answers, and why.
+
+    The first version of this counted three outcomes and could not be
+    read. It scored da at 464 agreements out of 464 - which looked like
+    perfect corroboration and meant the opposite: TradingView has no D&A
+    column, so the overlay had copied VNDIRECT's own number into the
+    record and the census was comparing a vendor with itself. A copy and
+    a corroboration are not the same evidence, and lumping them together
+    inflates confidence in exactly the fields nothing can check.
+
+    So the verdicts are split, and the ones that are artefacts of this
+    pipeline - a unit, a sign convention, a short history extrapolated to
+    an annual rate - are separated from a real contradiction. What is
+    left in DIFFER is the part that needs a third witness, and section 10
+    goes and gets one.
+    """
+    print("\n" + "=" * 74)
+    print(" 9. WHERE THE TWO VENDORS DISAGREE, AND WHY")
+    print("=" * 74)
+    print(f"  {len(symbols)} companies whose record holds a vendor-reported"
+          f" figure\n")
+
+    held = _held_overlay_fields()
+
+    fetched: Dict[str, Dict[str, Any]] = {}
+
+    def work(sym: str):
+        try:
+            return sym, fetch_vndirect_financials(sym) or {}
+        except Exception:
+            return sym, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in symbols]):
+            sym, entry = fut.result()
+            if entry:
+                fetched[sym] = entry
+
+    print(f"  {len(fetched)} of {len(symbols)} returned a payload\n")
+    print("  identical = the overlay copied this vendor's number, so the")
+    print("  comparison is the vendor against itself and says nothing.")
+    print("  Only 'agree' is corroboration.\n")
+    print("  field           compared  ident  agree scaled   sign  annl"
+          "  DIFFER   worst")
+    print("  " + "-" * 72)
+
+    report: Dict[str, Any] = {"population": len(symbols),
+                              "answered": len(fetched), "fields": {}}
+
+    for field, (_prov, vnd_key) in OVERLAY_PAIRS.items():
+        tally = {name: 0 for name in _VERDICTS}
+        worst = (0.0, "")
+        for sym, entry in fetched.items():
+            record = held.get(sym) or {}
+            verdict = _agreement(record.get(field), entry.get(vnd_key),
+                                 entry.get("ttm_quarter_count"))
+            if verdict is None:
+                continue
+            tally[verdict] += 1
+            if verdict == "differ":
+                a, b = float(record[field]), float(entry[vnd_key])
+                gap = abs(a - b) / max(abs(a), abs(b), 1.0)
+                if gap > worst[0]:
+                    worst = (gap, sym)
+        compared = sum(tally.values())
+        share = (100.0 * tally["differ"] / compared) if compared else 0.0
+        # A row of noughts reads as agreement. It means the opposite:
+        # nothing was compared, and the reason is either that the field is
+        # never vendor-reported or that this table names it wrongly.
+        note = "  NOTHING COMPARED" if not compared else ""
+        print(f"  {field:<15} {compared:>8} {tally['identical']:>6}"
+              f" {tally['agree']:>6} {tally['scaled']:>6}"
+              f" {tally['sign']:>6} {tally['annualised']:>5}"
+              f" {tally['differ']:>7}   {share:>5.1f}% {worst[1]}{note}")
+        report["fields"][field] = dict(tally, compared=compared)
+
+    out["vendor_disagreement"] = report
+
+
+# --------------------------------------------------------------------------
+# 10. A third witness, where one exists
+# --------------------------------------------------------------------------
+#: Cash at the end of the period, on the cash flow statement, and cash on
+#: the balance sheet. Two statements filed separately that have to meet at
+#: this number.
+_CASH_AT_END = 37000
+_BALANCE_SHEET_CASH = 11100
+
+#: The three section totals whose sum is the net change in cash. The
+#: vendor's own triple closed for 150 of 150 companies, so substituting a
+#: figure from elsewhere into it is a test of whether that figure is the
+#: same quantity the statement is talking about.
+_NET_CHANGE, _CFO, _CFI, _CFF = 35000, 32000, 33000, 34000
+
+
+def third_witness(symbols: List[str], workers: int,
+                  out: Dict[str, Any]) -> None:
+    """Which vendor is right, where anything independent can say.
+
+    Section 9 says how often the two disagree. It cannot say who is
+    wrong, and neither can a bigger sample of the same two opinions - the
+    census has been going in that circle for several runs. What breaks it
+    is evidence neither vendor controls:
+
+      cash    The cash flow statement ends at a closing balance and the
+              balance sheet carries the same figure. They are filed
+              separately, so a vendor whose two statements meet at that
+              number is internally coherent, and whichever of the two
+              published figures matches the balance sheet is the one
+              describing this company's cash.
+
+      cfo     The three section totals sum to the net change in cash, and
+              the vendor's own three did so for 150 of 150 companies.
+              Substituting the record's operating cash flow into that sum
+              asks whether it is even the same quantity. A figure that
+              breaks an identity the rest of the statement keeps is not a
+              second opinion about the same number - it is a different
+              number.
+
+    This decides nothing on its own about which vendor to believe in
+    general. It decides it per field, on evidence, which is the only way
+    that question has ever been answerable here.
+    """
+    print("\n" + "=" * 74)
+    print(" 10. A THIRD WITNESS")
+    print("=" * 74)
+
+    held = _held_overlay_fields()
+    fetched: Dict[str, Dict[str, Any]] = {}
+
+    def work(sym: str):
+        try:
+            return sym, fetch_vndirect_financials(sym) or {}
+        except Exception:
+            return sym, {}
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for fut in as_completed([pool.submit(work, s) for s in symbols]):
+            sym, entry = fut.result()
+            if entry:
+                fetched[sym] = entry
+
+    report: Dict[str, Any] = {"answered": len(fetched)}
+
+    # ---- cash -----------------------------------------------------------
+    coherent = pair = record_wins = vendor_wins = neither = 0
+    for sym, entry in fetched.items():
+        sheet_cash = _cell_of(entry, "balance_sheet_fq_by_code",
+                              _BALANCE_SHEET_CASH)
+        flow_cash = _cell_of(entry, "cash_flow_fq_by_code", _CASH_AT_END)
+        if sheet_cash is None or flow_cash is None:
+            continue
+        pair += 1
+        if _agreement(flow_cash, sheet_cash) in ("identical", "agree"):
+            coherent += 1
+        record_cash = (held.get(sym) or {}).get("cash")
+        if record_cash is None:
+            continue
+        # The witness is the CASH FLOW statement's closing balance, not
+        # the balance sheet line.
+        #
+        # The first version of this used the balance sheet, and the vendor
+        # won 644 to nil with nothing undecided - a suspiciously perfect
+        # score, and it was: cash_fq is _latest([11100]), the very code
+        # being used as the witness, so vendor_ok was true by
+        # construction. The measurement asked whether the vendor agreed
+        # with itself and answered yes.
+        #
+        # 37000 comes from the other statement. The two are filed
+        # separately, they meet for 99.2% of companies, and neither is
+        # where cash_fq is read from - so a candidate that matches it has
+        # been corroborated rather than merely echoed.
+        record_ok = _agreement(record_cash, flow_cash) in ("identical",
+                                                           "agree")
+        vendor_ok = _agreement(entry.get("cash_fq"), flow_cash) in (
+            "identical", "agree")
+        if record_ok and not vendor_ok:
+            record_wins += 1
+        elif vendor_ok and not record_ok:
+            vendor_wins += 1
+        elif not record_ok and not vendor_ok:
+            neither += 1
+
+    print("\n  cash: judged against the OTHER statement's closing balance")
+    print("  " + "-" * 70)
+    if pair:
+        print(f"  {coherent} of {pair} companies - the vendor's cash flow"
+              f" statement ends at the")
+        print(f"  same number its own balance sheet carries"
+              f" ({100.0 * coherent / pair:.1f}%).")
+        decided = record_wins + vendor_wins
+        print(f"  Where the record and the vendor disagree, the balance"
+              f" sheet backs:")
+        print(f"    the record   {record_wins:>5}")
+        print(f"    the vendor   {vendor_wins:>5}")
+        print(f"    neither      {neither:>5}"
+              f"   (both wrong, or the line is something else)")
+        if decided:
+            print(f"  Of the {decided} it can decide, the vendor is right"
+                  f" {100.0 * vendor_wins / decided:.1f}% of the time.")
+    else:
+        print("  NOTHING COMPARED - neither statement carried both lines.")
+    report["cash"] = {"pairs": pair, "coherent": coherent,
+                      "record_wins": record_wins,
+                      "vendor_wins": vendor_wins, "neither": neither}
+
+    # ---- cfo ------------------------------------------------------------
+    tested = vendor_closes = record_closes = 0
+    for sym, entry in fetched.items():
+        parts = [_cell_of(entry, "cash_flow_ttm_by_code", c)
+                 for c in (_NET_CHANGE, _CFO, _CFI, _CFF)]
+        if any(p is None for p in parts):
+            continue
+        net, cfo, cfi, cff = (float(p) for p in parts)
+        record_cfo = (held.get(sym) or {}).get("cfo")
+        if record_cfo is None:
+            continue
+        tested += 1
+        scale = max(abs(net), 1.0)
+        if abs(net - (cfo + cfi + cff)) / scale <= _AGREE:
+            vendor_closes += 1
+        if abs(net - (float(record_cfo) + cfi + cff)) / scale <= _AGREE:
+            record_closes += 1
+
+    print("\n  cfo: does the figure fit the statement it claims to come"
+          " from?")
+    print("  " + "-" * 70)
+    if tested:
+        print(f"  net change = operating + investing + financing, over"
+              f" {tested} companies:")
+        print(f"    with the vendor's operating cash flow  "
+              f"{vendor_closes:>5}"
+              f"  ({100.0 * vendor_closes / tested:.1f}%)")
+        print(f"    with the record's                      "
+              f"{record_closes:>5}"
+              f"  ({100.0 * record_closes / tested:.1f}%)")
+        print("  A figure that breaks an identity the rest of the"
+              " statement keeps is")
+        print("  not a second opinion about the same number. It is a"
+              " different number.")
+    else:
+        print("  NOTHING COMPARED - no company carried all four lines"
+              " and a record cfo.")
+    report["cfo"] = {"tested": tested, "vendor_closes": vendor_closes,
+                     "record_closes": record_closes}
+
+    out["third_witness"] = report
+
+
+def _held_overlay_fields() -> Dict[str, Dict[str, Any]]:
+    """The overlay fields as the snapshot holds them, for vendor-fed rows.
+
+    Only tier 3 is taken. A tier-4 figure came from a filing and outranks
+    both vendors, a tier-2 one was triangulated rather than reported, and
+    tier 1 is a stand-in; comparing any of those against a vendor measures
+    something other than whether the two vendors agree.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        raise SystemExit(f"No snapshot at {path}. Run the universe sync first.")
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for rec in stocks:
+        if not isinstance(rec, dict) or not rec.get("symbol"):
+            continue
+        tiers = rec.get("field_provenance") or {}
+        row = {}
+        for field, (prov_key, _vnd) in OVERLAY_PAIRS.items():
+            if int(tiers.get(prov_key, 0) or 0) == 3:
+                row[field] = rec.get(field)
+        if row:
+            out[str(rec["symbol"]).upper().strip()] = row
+    return out
+
+
+def pick_overlay_symbols(limit: Optional[int]) -> List[str]:
+    """Companies carrying at least one vendor-reported overlay field."""
+    symbols = sorted(_held_overlay_fields())
+    return symbols[:limit] if limit else symbols
+
+
+def _cell_of(entry: Dict[str, Any], sheet_key: str, code: int):
+    """One figure from one of the by-code exports, either key type."""
+    rows = entry.get(sheet_key) or {}
+    value = rows.get(code)
+    if value is None:
+        value = rows.get(str(code))
+    return value
+
+
+def _held_lines() -> Dict[str, Dict[str, Any]]:
+    """The two lines as the snapshot currently holds them, per symbol.
+
+    Read so the census can distinguish a third case from the two it was
+    written for: the vendor carries the code, and the number still does not
+    reach the record. That is a wiring fault, not a vendor one, and it
+    looks identical from the blocking table.
+    """
+    from services.unified_data_service import screener_snapshot_file
+
+    path = screener_snapshot_file()
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    stocks = payload.get("stocks") if isinstance(payload, dict) else payload
+    if isinstance(stocks, dict):
+        stocks = list(stocks.values())
+    held = {}
+    for rec in stocks:
+        if isinstance(rec, dict) and rec.get("symbol"):
+            held[str(rec["symbol"]).upper().strip()] = {
+                "landbank_fq": rec.get("landbank_fq"),
+                "bank_loans_fq": rec.get("bank_loans_fq"),
+            }
+    return held
+
+
+def _write(out: Dict[str, Any], path: Optional[str]) -> None:
+    if not path:
+        return
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(out, handle, ensure_ascii=False, indent=2, default=str)
+    print(f"\nwrote {path}")
+
+
+#: The sections a run can ask for by name, and the only place they are
+#: declared. The workflow forwards whatever it was given straight to
+#: --only rather than keeping its own list, because when it kept one the
+#: two fell out of step and a census dispatched as "cashflow" was silently
+#: skipped while the job still reported success.
+FOCUSED_SECTIONS = {
+    "landbank": lambda args, out: landbank_and_loanbook(
+        pick_line_symbols(args.limit or None), args.workers, out,
+        held=_held_lines()),
+    "cashflow": lambda args, out: cash_flows_and_borrowings(
+        pick_cashflow_symbols(args.limit or None), args.workers, out),
+    "overlay": lambda args, out: vendor_disagreement(
+        pick_overlay_symbols(args.limit or None), args.workers, out),
+    "witness": lambda args, out: third_witness(
+        pick_overlay_symbols(args.limit or None), args.workers, out),
+}
+
+
+def _sections(value: str) -> Tuple[str, ...]:
+    """Parse --only, rejecting a name that does not exist.
+
+    Rejecting rather than ignoring, because the failure this guards
+    against is a section that silently did not run: the job still
+    succeeds, the log still looks like a measurement, and nothing says
+    the question was never asked.
+    """
+    names = tuple(n.strip() for n in value.split(",") if n.strip())
+    if not names:
+        raise argparse.ArgumentTypeError("--only was given nothing to run")
+    if names == ("all",):
+        return names
+    unknown = [n for n in names if n not in FOCUSED_SECTIONS]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"no such section: {', '.join(unknown)}."
+            f" Known: all, {', '.join(FOCUSED_SECTIONS)}")
+    if "all" in names:
+        raise argparse.ArgumentTypeError(
+            "'all' runs every section and cannot be combined with one")
+    return names
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--limit", type=int, default=250,
@@ -474,27 +1778,64 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--json", help="write the whole census to this path")
     parser.add_argument("--skip-survey", action="store_true",
                         help="catalogue and reachability only, no sampling")
+    # The full census prints well over a thousand lines and a job log can
+    # only be read from its tail, so a run that asks one question should
+    # print one answer. "landbank" runs section 7 alone: two sectors, a few
+    # hundred requests, and a table short enough to survive the tail.
+    # A comma-separated list, not one name. A run of the workflow costs
+    # about twenty minutes, and asking two questions in one run costs
+    # nothing beyond the requests each section makes - so the sections a
+    # run can answer together should not be split across two runs by the
+    # shape of an argument.
+    parser.add_argument("--only", default="all", type=_sections,
+                        help="comma-separated sections, or 'all'"
+                             f" ({', '.join(FOCUSED_SECTIONS)})")
     args = parser.parse_args(argv)
 
     out: Dict[str, Any] = {}
+
+    if args.only != ("all",):
+        for name in args.only:
+            FOCUSED_SECTIONS[name](args, out)
+        _write(out, args.json)
+        return 0
+
     cookies = _handshake_cookies()
     print(f"handshake returned {len(cookies)} cookies")
 
-    dump_field_catalogue(cookies, out)
+    # The catalogue is collected first because the survey needs its names,
+    # but printed last because it is 1400 lines long. GitHub serves only the
+    # tail of a job log, so anything upstream of a dump that size cannot be
+    # read at all - three separate reads were spent this afternoon
+    # discovering that the answer was in a part of the log the API will not
+    # return. Ordering the output by how much it is worth reading is not
+    # cosmetic; it decides whether a measurement can be acted on.
+    names = collect_field_catalogue(cookies, out)
     probe_routes(cookies, out)
 
     if not args.skip_survey:
         symbols, revenue = pick_symbols(args.limit or None)
         print(f"\n{len(symbols)} symbols have no trustworthy operating line;"
               f" revenue known for {len(revenue)} of them")
-        survey(symbols, revenue, cookies, args.workers, out)
+        survey(symbols, revenue, cookies, args.workers, out, names)
         vndirect_relations(symbols, args.workers, out)
 
-    if args.json:
-        os.makedirs(os.path.dirname(os.path.abspath(args.json)), exist_ok=True)
-        with open(args.json, "w", encoding="utf-8") as handle:
-            json.dump(out, handle, ensure_ascii=False, indent=2)
-        print(f"\nwrote {args.json}")
+    print_field_catalogue(out)
+
+    # After the catalogue, deliberately. The catalogue is 1400 lines and
+    # whatever follows it is the only part of the log guaranteed to be
+    # readable; this section is the one that answers a question a run is
+    # currently waiting on.
+    groups = pick_line_symbols(args.limit or None)
+    landbank_and_loanbook(groups, args.workers, out, held=_held_lines())
+    cash_flows_and_borrowings(
+        pick_cashflow_symbols(args.limit or None), args.workers, out)
+    vendor_disagreement(pick_overlay_symbols(args.limit or None),
+                        args.workers, out)
+    third_witness(pick_overlay_symbols(args.limit or None),
+                  args.workers, out)
+
+    _write(out, args.json)
     return 0
 
 

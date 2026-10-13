@@ -106,6 +106,33 @@ def worst_tier(record: Dict[str, Any]) -> Optional[int]:
     return min(numeric) if numeric else None
 
 
+#: The tier the resolver insists on. Kept here as a name rather than a bare
+#: 2 so that a report and the engine cannot drift apart silently.
+TRUSTED = 2
+
+
+def starved_core(record: Dict[str, Any]) -> List[str]:
+    """Which CORE drivers sit below the gate, named.
+
+    worst_tier answers "how bad is the weakest one" and that is what the
+    histogram needs. It cannot answer "what would a new vendor have to
+    supply", because a minimum names no driver: a universe reported as
+    tier 1 says nothing about whether the missing thing is revenue for
+    everybody or debt for everybody, and those are different projects.
+    """
+    tiers = record.get("field_provenance")
+    if not isinstance(tiers, dict):
+        return []
+    out = []
+    for key in CORE_DRIVERS:
+        value = tiers.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            continue
+        if int(value) < TRUSTED:
+            out.append(key)
+    return out
+
+
 def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
     from services.valuation_engine import ValuationEngine
 
@@ -114,6 +141,7 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
     row: Dict[str, Any] = {
         "symbol": symbol,
         "worst_tier": worst_tier(record),
+        "starved_core": starved_core(record),
         "active_models": 0,
         "fair_value": 0.0,
         "blocked_by": [],
@@ -162,7 +190,31 @@ def evaluate(record: Dict[str, Any]) -> Dict[str, Any]:
                 continue
             for driver in (model.diagnostics or {}).get("imputed_drivers", []):
                 blocked[driver] += 1
+        # Two lists, because they answer two different questions.
+        #
+        # blocked_by is capped at five for the per-symbol rows, where a
+        # twelve-item list would be unreadable. blocked_all is every driver
+        # the applicable models complained about, and it is what the
+        # aggregate table counts.
+        #
+        # Counting the capped list is what the aggregate did, and it made the
+        # table lie by omission whenever a driver was fixed. Wiring cash
+        # removed it from 150 symbols' complaints, and affo rose 117 -> 124,
+        # landbank 113 -> 117, invested_capital 28 -> 30, with roe appearing
+        # at 28 where it had not been listed - not because anything new
+        # blocked them, but because each symbol's sixth reason was promoted
+        # into a top-five that had just lost a member. The table moved in
+        # response to a fix elsewhere, which is the one thing a measurement
+        # must never do.
+        #
+        # This table is what the whole prioritisation reads: it is where
+        # "wire cash next, it blocks 150" comes from. A ranking that reshuffles
+        # itself every time something is fixed cannot be used to decide what
+        # to fix. Same defect as the hardcoded REFUSED label - a reporting
+        # artefact steering decisions - and found the same way, by a number
+        # moving when nothing behind it had.
         row["blocked_by"] = [d for d, _ in blocked.most_common(5)]
+        row["blocked_all"] = [d for d, _ in blocked.most_common()]
         # Which sector this symbol was valued as, and whether that sector is
         # one SECTOR_MODEL_MAP knows. A sector it does not know falls through
         # to all 22 models, so the symbol is judged against bank, REIT and
@@ -210,12 +262,31 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
     print("(core = shares, market cap, equity, debt, cash, revenue, net income,")
     print(" ebit. Sector-specific drivers such as affo/rwa/landbank are excluded:")
     print(" they are absent for almost every company by design.)")
+    # The outcome column is counted, not asserted.
+    #
+    # It used to print a flat "valued"/"REFUSED" derived from the tier alone,
+    # which is not a measurement but a restatement of TRUSTED_TIER - and it
+    # was wrong. The gate runs per driver per model, so a company whose
+    # weakest CORE driver is a tier-1 stand-in is still valued by any model
+    # that never asks for that driver. While refusals outnumbered the tier-1
+    # count the claim passed unnoticed; at 158 tier-1 symbols against 92
+    # refusals in total it became arithmetically impossible, which is the
+    # only reason it was caught.
+    #
+    # Printing the real split matters beyond tidiness: a jump in coverage
+    # has exactly two explanations, better data or a looser gate, and this
+    # column is where the difference shows. A hardcoded label cannot tell
+    # them apart; counted outcomes can.
+    by_tier_outcome = collections.defaultdict(lambda: [0, 0])
+    for r in rows:
+        by_tier_outcome[r["worst_tier"]][0 if r["active_models"] > 0 else 1] += 1
     for tier in (4, 3, 2, 1, 0):
         count = tiers.get(tier, 0)
         if not count:
             continue
-        gate = "valued" if tier >= TRUSTED_TIER else "REFUSED"
-        print(f"  tier {tier} {TIER_LABELS[tier]:<16} {count:>6}  {pct(count)}   {gate}")
+        ok, no = by_tier_outcome[tier]
+        outcome = f"{ok} valued, {no} refused" if no else "all valued"
+        print(f"  tier {tier} {TIER_LABELS[tier]:<16} {count:>6}  {pct(count)}   {outcome}")
     if tiers.get(None):
         print(f"  no provenance metadata     {tiers[None]:>6}  {pct(tiers[None])}   valued (nothing says otherwise)")
 
@@ -227,7 +298,7 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
 
     drivers = collections.Counter()
     for row in rows:
-        for driver in row["blocked_by"]:
+        for driver in row.get("blocked_all") or row["blocked_by"]:
             drivers[driver] += 1
     if drivers:
         print("\nMost common blocking drivers:")
@@ -267,6 +338,50 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
             print(f"  {sector or '(none)':<16} {'yes' if known else 'NO':<7}"
                   f" {offered:>14}  {count:>7}")
 
+    # The other half of the refusals, and the half that decides whether the
+    # data work is finished. gated_out above is the group whose drivers ARE
+    # trusted and are turned away anyway: a model-map problem. This is the
+    # complement - the companies refused because a driver the gate needs is
+    # a stand-in or a fabrication - and it is the only group any new vendor
+    # or any extractor fix can ever move.
+    #
+    # Reported by driver, not by count, because the count alone has been
+    # read as a work queue twice and is not one. "89 refused" says nothing
+    # about whether there is anything left to do; "89 refused, all of them
+    # short of nothing, or all of them short of revenue" are opposite
+    # answers, and only the second is a task.
+    starved = [
+        r for r in refused
+        if r["worst_tier"] is not None and r["worst_tier"] < 2
+    ]
+    print(f"\nRefused for want of trustworthy data: {len(starved)}"
+          f" of {len(refused)} refusals")
+    if starved:
+        missing = collections.Counter()
+        for row in starved:
+            for driver in row.get("starved_core") or []:
+                missing[driver] += 1
+        print("  CORE driver below the gate    symbols   share of the group")
+        for driver, count in missing.most_common():
+            share = 100.0 * count / len(starved)
+            print(f"  {driver:<28} {count:>7}   {share:>16.1f}%")
+        # A company short of every core driver at once is one the vendor
+        # returned nothing for. A company short of one is a company one
+        # extractor away from being valued, and those are worth naming.
+        narrow = [r for r in starved if len(r.get("starved_core") or []) == 1]
+        if narrow:
+            by_driver = collections.Counter(
+                (r["starved_core"] or ["?"])[0] for r in narrow)
+            print(f"  {len(narrow)} of the {len(starved)} are short of exactly"
+                  f" one driver: "
+                  + ", ".join(f"{d} x{n}" for d, n in by_driver.most_common()))
+            print("  Those are the ones a single extractor fix can reach.")
+        blank = [r for r in starved
+                 if len(r.get("starved_core") or []) >= len(CORE_DRIVERS) - 1]
+        if blank:
+            print(f"  {len(blank)} are short of every core driver at once -"
+                  f" no vendor on this route returned anything for them.")
+
     if refused and show_blocked:
         print(f"\nFirst {min(show_blocked, len(refused))} refused symbols:")
         for row in refused[:show_blocked]:
@@ -297,9 +412,11 @@ def report(rows: List[Dict[str, Any]], show_blocked: int) -> None:
             "     the feed, not the engine.\n"
             "\n"
             "Note: scripts/build_historical_fundamentals.py fills the\n"
-            "point-in-time lake used by the backtest and the sector-weight\n"
-            "calibration. It is NOT read by the live screener path, so it\n"
-            "will not move the numbers in this report.\n"
+            "quarterly lake. The live path now reads it, but only to fill\n"
+            "lines this request's VNDIRECT fetch did not return - same\n"
+            "vendor, same endpoint, same item codes. So a rebuild helps a\n"
+            "company whose fetch failed and changes nothing for a company\n"
+            "whose fetch succeeded and simply has no such line filed.\n"
         )
 
 

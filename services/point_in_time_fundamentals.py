@@ -39,7 +39,7 @@ import logging
 import os
 import threading
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,28 @@ def _parse_date(raw: Any) -> Optional[date]:
         except ValueError:
             continue
     return None
+
+
+
+def _quarter_order(quarter_code: str) -> Optional[Tuple[int, int]]:
+    """Sortable (year, quarter); None when the code is not one."""
+    try:
+        year_text, quarter_text = str(quarter_code).split("-Q")
+        return int(year_text), int(quarter_text)
+    except (ValueError, AttributeError):
+        return None
+
+
+def _quarter_end_from_code(quarter_code: str) -> Optional[date]:
+    """The last day of the quarter a code names."""
+    order = _quarter_order(quarter_code)
+    if order is None:
+        return None
+    year, quarter = order
+    if not 1 <= quarter <= 4:
+        return None
+    month = quarter * 3
+    return date(year, month, {3: 31, 6: 30, 9: 30, 12: 31}[month])
 
 
 def _usable_field_count(record: Dict[str, Any]) -> int:
@@ -166,13 +188,81 @@ class PointInTimeFundamentals:
             )
 
     def publication_date(self, record: Dict[str, Any], quarter_end: Optional[date]) -> Optional[date]:
-        """When the filing became public: its filing_date, else quarter end + lag."""
+        """When the filing became public: its filing_date, else quarter end + lag.
+
+        ``quarter_end`` is the caller's, but its absence must not silently
+        disable the gate. Returning None here means "publication date
+        unknown", and get() reads an unknown date as no restriction - so a
+        caller who simply forgot the argument would get every filing at
+        every simulated date, which is lookahead that looks like skill.
+        The record knows its own fiscal date, so fall back to that before
+        giving up.
+        """
         filed = _parse_date(record.get("filing_date"))
         if filed is not None:
             return filed
         if quarter_end is None:
+            quarter_end = _parse_date(record.get("fiscal_date"))
+        if quarter_end is None:
             return None
         return date.fromordinal(quarter_end.toordinal() + self._lag_days)
+
+    def quarters_for(self, symbol: str) -> Dict[str, Dict[str, Any]]:
+        """Every quarter the lake holds for ``symbol``, newest last.
+
+        Deliberately free of any as-of restriction: the backtest needs
+        point-in-time and uses ``latest_as_of`` for it, but a live quote
+        is being asked about today and wants whatever was filed most
+        recently. A caller that wanted point-in-time and reached for
+        this would be asking the wrong question, so the name says which
+        one it answers.
+        """
+        payload = self._symbols.get(str(symbol).upper())
+        if not isinstance(payload, dict):
+            return {}
+        quarters = payload.get("quarters")
+        return dict(quarters) if isinstance(quarters, dict) else {}
+
+    def latest_as_of(
+        self,
+        symbol: str,
+        as_of: date,
+    ) -> Optional[Tuple[str, Dict[str, Any]]]:
+        """The newest filing this symbol had published by ``as_of``.
+
+        Standing at 31 March 2021, the market has last year's Q4 report;
+        it does not have Q1, which ends that same day. Asking for the
+        quarter that is ending is asking for a filing that cannot exist
+        yet, and the honest answer is always None - at every lag, which
+        is what makes the mistake hard to see: the result looks like a
+        gate working rather than a question that can never be answered.
+
+        Returns (quarter_code, record), or None when nothing this symbol
+        filed was public by that date.
+        """
+        with self._lock:
+            payload = self._symbols.get(str(symbol).upper())
+        if not payload:
+            return None
+
+        best: Optional[Tuple[Tuple[int, int], str, Dict[str, Any]]] = None
+        for quarter_code, record in (payload.get("quarters") or {}).items():
+            if not isinstance(record, dict):
+                continue
+            if _usable_field_count(record) < MIN_REQUIRED_FIELDS:
+                continue
+            published = self.publication_date(
+                record, _quarter_end_from_code(quarter_code))
+            if published is None or published > as_of:
+                continue
+            order = _quarter_order(quarter_code)
+            if order is None:
+                continue
+            if best is None or order > best[0]:
+                best = (order, quarter_code, dict(record))
+        if best is None:
+            return None
+        return best[1], best[2]
 
     def get(
         self,

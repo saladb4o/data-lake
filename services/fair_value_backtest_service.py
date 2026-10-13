@@ -23,7 +23,7 @@ import time
 import logging
 from datetime import date, datetime
 from dataclasses import dataclass, field, asdict
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Dict, List, Any, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -41,6 +41,7 @@ from services.stock_service import (
 )
 from services.market_calendar import default_backtest_end_year
 from services.point_in_time_fundamentals import (
+    DEFAULT_PUBLICATION_LAG_DAYS,
     FUNDAMENTALS_LAKE_FILE,
     PointInTimeFundamentals,
 )
@@ -92,6 +93,14 @@ def _parse_iso_date(raw: Any) -> Optional[date]:
         return datetime.strptime(raw.strip()[:10], "%Y-%m-%d").date()
     except (ValueError, AttributeError):
         return None
+
+
+def _quarters_between(earlier: str, later: str) -> Optional[int]:
+    """How many quarters older than ``later`` the ``earlier`` code is."""
+    a, b = _quarter_ordinal(earlier), _quarter_ordinal(later)
+    if a is None or b is None:
+        return None
+    return b - a
 
 
 def _quarter_ordinal(quarter_code: str) -> Optional[int]:
@@ -149,6 +158,9 @@ def _fundamentals_diagnostics(
     used: int,
     skipped: int,
     unmatched_custom_symbols: Sequence[str],
+    publication_lag_days: Optional[int] = None,
+    filing_age: Optional[Dict[int, int]] = None,
+    funnel: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """States plainly where this run's fundamentals came from.
 
@@ -161,6 +173,11 @@ def _fundamentals_diagnostics(
         "symbol_quarters_valued": used,
         "symbol_quarters_skipped_no_filing": skipped,
     }
+    # Reported in every mode. snapshot_projected walks the identical loop,
+    # so its funnel is the control that says which stage the point-in-time
+    # shortfall belongs to.
+    if funnel:
+        info["funnel"] = dict(funnel)
     if unmatched_custom_symbols:
         info["unmatched_custom_symbols"] = list(unmatched_custom_symbols)
         info["notes"] = [
@@ -176,6 +193,13 @@ def _fundamentals_diagnostics(
 
     info["is_evidence_of_skill"] = True
     info["lake_file"] = FUNDAMENTALS_LAKE_FILE
+    if filing_age:
+        info["filing_age_in_quarters"] = dict(sorted(filing_age.items()))
+    # The assumption travels with the result. Two runs at different lags
+    # render identically otherwise, and only one of them answers the
+    # question that was asked.
+    if publication_lag_days is not None:
+        info["publication_lag_days_assumed"] = publication_lag_days
     info["symbols_in_lake"] = provider.symbol_count if provider else 0
     if provider is not None and provider.is_empty:
         info["is_evidence_of_skill"] = False
@@ -653,6 +677,7 @@ class FairValueBacktestService:
         omnibus_metric: str = "smape",
         custom_symbols: Optional[List[str]] = None,
         fundamentals_mode: str = FundamentalsMode.POINT_IN_TIME,
+        publication_lag_days: int = DEFAULT_PUBLICATION_LAG_DAYS,
     ) -> BacktestResultPayload:
         """
         Executes a deterministic, institutional-grade 3-Mode Backtest simulation using Real Data Lake.
@@ -663,6 +688,12 @@ class FairValueBacktestService:
             Real quarterly filings from the fundamentals lake, only those
             published by the rebalance date. Symbols without a filing for a
             quarter are skipped.
+
+        ``publication_lag_days`` is how long after quarter end a filing is
+        assumed to be public, for records whose real filing date is unknown.
+        It is an assumption, and how much of a result rests on it is a
+        question worth asking - so it is a parameter here rather than a
+        constant, and it is part of the cache key.
 
         ``snapshot_projected``
             The legacy path: today's P/E and P/B applied to the historical
@@ -678,7 +709,12 @@ class FairValueBacktestService:
             f"{margin_of_safety_pct}_{exit_premium_pct}_{use_dynamic_beta_mos}_"
             f"{filter_z_score_safe}_{filter_rkv_value_trap}_{exchange}_{top_k}_{rebalance_cadence}_"
             f"{fill_mode}_{survival_filter}_{tsmom_filter}_{forensic_filter}_{holding_period_months}_{initial_capital}_{start_year}_{end_year}_"
-            f"{composite_mode}_{omnibus_metric}_{str(custom_symbols)}_{fundamentals_mode}"
+            # publication_lag_days belongs here. Without it a sweep over
+            # lags returns the first lag's result for every value tried,
+            # four identical rows, and reads as "the assumption does not
+            # matter" - a confident finding produced by a cache.
+            f"{composite_mode}_{omnibus_metric}_{str(custom_symbols)}_{fundamentals_mode}_"
+            f"lag{publication_lag_days}"
         )
         cached = _fv_backtest_cache.get(cache_key)
         if cached:
@@ -773,9 +809,25 @@ class FairValueBacktestService:
 
         # --- Point-in-time fundamentals -------------------------------------
         use_point_in_time = (fundamentals_mode == FundamentalsMode.POINT_IN_TIME)
-        pit_fundamentals = PointInTimeFundamentals.from_lake() if use_point_in_time else None
+        pit_fundamentals = (
+            PointInTimeFundamentals.from_lake(
+                publication_lag_days=publication_lag_days)
+            if use_point_in_time else None)
         pit_used = 0
         pit_skipped = 0
+        # The funnel, counted in symbol-quarters. "valued 131 of 1,381 in
+        # lake" invited the reading that the lake covered 131 companies,
+        # which it does not: the valuation loop only ever sees what the
+        # screening strategy passed, and that runs on today's snapshot.
+        # Without these four numbers the shortfall has four possible
+        # causes and the table cannot tell them apart.
+        funnel_stage1 = 0
+        funnel_no_price = 0
+        # How stale the filing used actually was, in quarters. A run whose
+        # filings are all one quarter old is using last quarter's report,
+        # which is what standing at quarter end means; a tail of older ones
+        # is companies that stopped filing.
+        pit_filing_age: "Counter[int]" = Counter()
         quarter_price_index: Dict[str, Dict[str, float]] = defaultdict(dict)
 
         # 3. Simulate Iterative Rebalance Rounds Across Real Timeline
@@ -837,6 +889,7 @@ class FairValueBacktestService:
                 sym = item.get("symbol")
                 if not sym:
                     continue
+                funnel_stage1 += 1
 
                 sym_quarters = price_db.get(sym, {}).get("quarters", {}) if isinstance(price_db.get(sym), dict) else {}
                 q_price_data = sym_quarters.get(q_code, {})
@@ -845,6 +898,7 @@ class FairValueBacktestService:
                 p_in = float(q_price_data.get("start_price") or q_price_data.get("open") or q_price_data.get("close_price") or q_price_data.get("close") or 0.0)
                 if p_in <= 0:
                     # Stock did not trade or was not listed in this quarter: strictly skip, NO fallback to synthetic prices
+                    funnel_no_price += 1
                     continue
                 # Observed prices accumulate as the simulation walks forward, so
                 # forward-horizon error scoring can only ever see the past.
@@ -852,9 +906,21 @@ class FairValueBacktestService:
 
                 # Format fundamental data for Valuation Engine
                 if use_point_in_time:
-                    filing = pit_fundamentals.get(
-                        sym, q_code, as_of=rebalance_date, quarter_end=quarter_end_date
-                    )
+                    # The newest filing public by this date, NOT this
+                    # quarter's. Standing at 31 March 2021 the market has
+                    # last year's Q4; Q1 ends that same day and is filed
+                    # weeks later. Asking for q_code here made the answer
+                    # None for every symbol at every lag - which reads as
+                    # a strict gate working rather than as a question that
+                    # could never be answered, and left the mode unable to
+                    # value anything at all.
+                    found = pit_fundamentals.latest_as_of(sym, rebalance_date)
+                    filing = None
+                    if found is not None:
+                        filing_quarter, filing = found
+                        age = _quarters_between(filing_quarter, q_code)
+                        if age is not None:
+                            pit_filing_age[age] += 1
                     if filing is None:
                         # No filing published by this date. Skipping is the
                         # only honest option: the alternative is to invent one.
@@ -1357,6 +1423,17 @@ class FairValueBacktestService:
                     used=pit_used,
                     skipped=pit_skipped,
                     unmatched_custom_symbols=unmatched_custom_symbols,
+                    publication_lag_days=(
+                        publication_lag_days if use_point_in_time else None),
+                    filing_age=dict(pit_filing_age) if use_point_in_time else None,
+                    funnel={
+                        "universe": len(quant_universe),
+                        "strategy_passed": funnel_stage1,
+                        "no_price_that_quarter": funnel_no_price,
+                        "no_filing": pit_skipped if use_point_in_time else 0,
+                        "valued": pit_used if use_point_in_time else (
+                            funnel_stage1 - funnel_no_price),
+                    },
                 ),
             }
         )

@@ -35,6 +35,12 @@ GOLDEN_KEYS = {
     # Provenance at the top level, where InputResolver and the coverage
     # audit read it. Copies remain under "_metadata".
     "field_provenance", "is_imputed",
+    # Which statement lines came from the quarterly lake instead of this
+    # request's VNDIRECT fetch, and the quarter they were filed for.
+    # Always present - an empty list and a None - so that counting how
+    # much of a universe the lake is carrying never has to tell "nothing
+    # was filled" apart from "this build does not report it".
+    "lake_filled_fields", "lake_quarter",
     # Always present: derived from market_cap, which always resolves.
     "market_cap_vnd",
 }
@@ -52,6 +58,16 @@ GOLDEN_KEYS = {
 OPTIONAL_LINE_KEYS = {
     "total_assets", "total_liabilities", "equity", "debt", "cash",
     "revenue", "net_income", "ebit", "ebitda", "cfo", "capex", "shares_out",
+    # Lines that are reconstructed and tiered upstream and published only
+    # when the evidence for them exists, so they come and go with the
+    # payload. Each was silently withheld from the record at some point in
+    # this repository's history despite being computed and tiered, which is
+    # why this guard lists them explicitly rather than allowing any new key
+    # through: the point of the guard is that a key appearing here is a
+    # decision somebody made, not a drift nobody noticed.
+    "da", "tangible_equity", "dividend_per_share",
+    "current_assets", "current_liabilities", "working_capital",
+    "retained_earnings", "prev_revenue",
 }
 
 # Identity / classification keys that are NOT fundamental scalars and thus
@@ -60,6 +76,8 @@ OPTIONAL_LINE_KEYS = {
 NON_SCALAR_KEYS = {
     "symbol", "name", "exchange", "price", "change_pct", "sector_code",
     "sector_name", "industry", "is_cyclical", "size_category", "size_damper",
+    # Provenance about where a line came from, not a line itself.
+    "lake_filled_fields", "lake_quarter",
     "_metadata",
     # Provenance maps, not scalars: they describe the other keys.
     "field_provenance", "is_imputed",

@@ -2657,7 +2657,34 @@ class ValuationEngine:
                                   lambda: cfo - abs(total_capex)),
                           impute=lambda: cfo * 0.7)
         fcf_per_share = safe_div(fcf, shares, 0.0)
-        affo = res.resolve("affo", ("affo",), impute=lambda: net_income * 0.9)
+        # AFFO had no derivation at all: every company in the universe fell
+        # to the impute, so it was marked imputed for all of them and both
+        # models that declare it - p_affo and reit_affo_dcf - have been
+        # suppressed for every symbol since they were written. Nothing in
+        # this repository writes the key "affo" either, so the ask has never
+        # once been answered. That is the same shape as dividend_per_share
+        # and utilities_3stage_ddm: a consumer asking by a name no producer
+        # emits, read downstream as a data gap.
+        #
+        # CFO - capex, and not net income + D&A. NI + D&A is FFO, and AFFO
+        # is FFO less the capex needed to keep the portfolio earning;
+        # publishing FFO under the name AFFO overstates it by exactly the
+        # figure the name exists to subtract. Cash from operations less
+        # capital spending is the recognised cash-basis proxy and errs the
+        # other way: total capex includes development spending, not only
+        # maintenance, so for a developer mid-build this understates AFFO.
+        # Understating a valuation input is the side to be wrong on here.
+        #
+        # Derived from cfo and capex directly rather than from fcf, which
+        # carries its own impute (cfo * 0.7): a derivation whose input was
+        # invented is an assumption wearing a formula, and the resolver
+        # would still record it as DERIVED. A company without both lines
+        # keeps the impute, stays marked imputed, and its models stay
+        # refused - unchanged from today.
+        affo = res.resolve("affo", ("affo",),
+                           derive=(("cfo", "capex"),
+                                   lambda: cfo - abs(total_capex)),
+                           impute=lambda: net_income * 0.9)
         dividend_per_share = res.resolve("dividend_per_share", ("dividend_per_share",),
                                          impute=lambda: eps * 0.3)
         roe = _as_rate(res.resolve("roe", ("roe",), impute=lambda: 15.0))
@@ -2856,7 +2883,7 @@ class ValuationEngine:
             current_price=price,
         )
         add_model("rule_of_40_growth", "Rule of 40 / Rule of X Valuation", "absolute", m13,
-                  drivers=('sps', 'revenue', 'fcf', 'debt', 'cash'))
+                  drivers=('sps', 'revenue', 'fcf', 'debt', 'cash', 'shares'))
 
         m14 = self.models_suite.model_14_acquirers_multiple(
             ebit=ebit, revenue=revenue, net_debt=net_debt, shares_out=shares,
@@ -2887,7 +2914,7 @@ class ValuationEngine:
             current_price=price,
         )
         add_model("buffett_owners_earnings", "Warren Buffett Owner's Earnings DCF", "absolute", m15,
-                  drivers=('net_income', 'ebitda', 'ebit', 'cfo', 'revenue'))
+                  drivers=('net_income', 'ebitda', 'ebit', 'cfo', 'revenue', 'shares'))
 
         # --- 7 SECTOR-SPECIFIC MODELS ---
         m16 = self.models_suite.model_16_pharma_rnpv(
@@ -2902,7 +2929,7 @@ class ValuationEngine:
             book_equity=bvps * shares, roe=roe, ke=wacc_res.cost_of_equity, shares_out=shares, current_price=price
         )
         add_model("bank_equity_cash_flow", "Banking Equity Cash Flow & Basel II CAR", "sector", m17,
-                  drivers=('net_income', 'bvps', 'roe', 'rwa'))
+                  drivers=('net_income', 'bvps', 'roe', 'rwa', 'shares'))
 
         landbank_clean = res.resolve("landbank", ("landbank_fq",), impute=lambda: mcap * 0.2)
         m18 = self.models_suite.model_18_reit_affo_dcf(
@@ -2910,7 +2937,7 @@ class ValuationEngine:
             total_debt=debt, shares_out=shares, current_price=price
         )
         add_model("reit_affo_dcf", "REIT / Real Estate AFFO & RNAV", "sector", m18,
-                  drivers=('ebit', 'cash', 'debt', 'landbank'))
+                  drivers=('ebit', 'cash', 'debt', 'landbank', 'shares'))
 
         regulated_asset_base = res.resolve(
             "regulated_asset_base", ("regulated_asset_base", "rab"),
@@ -2921,7 +2948,7 @@ class ValuationEngine:
             wacc=wacc_res.wacc, g_terminal=DEFAULT_TERMINAL_G
         )
         add_model("telecom_unbundled_sotp", "Unbundled SOTP & Regulated Asset Base", "sector", m19,
-                  drivers=('regulated_asset_base', 'ebitda', 'debt', 'cash'))
+                  drivers=('regulated_asset_base', 'ebitda', 'debt', 'cash', 'shares'))
 
         m20 = self.models_suite.model_20_industrial_apv(
             ebit=ebit, total_debt=debt, cash_and_equiv=cash, shares_out=shares,
@@ -2929,7 +2956,7 @@ class ValuationEngine:
             z_score=risk_res.altman_z_score, current_price=price
         )
         add_model("industrial_apv", "Adjusted Present Value (APV)", "sector", m20,
-                  drivers=('ebit', 'debt', 'cash'))
+                  drivers=('ebit', 'debt', 'cash', 'shares'))
 
         invested_capital = res.resolve(
             "invested_capital", ("invested_capital", "capital_employed"),
@@ -2940,7 +2967,7 @@ class ValuationEngine:
             net_debt=net_debt, shares_out=shares, current_price=price
         )
         add_model("consumer_eva_mva", "Economic Value Added (EVA & MVA)", "sector", m21,
-                  drivers=('ebit', 'invested_capital'))
+                  drivers=('ebit', 'invested_capital', 'shares'))
 
         m22 = self.models_suite.model_22_utilities_3stage_ddm(
             dividend_per_share=dividend_per_share, ke=wacc_res.cost_of_equity, current_price=price

@@ -1,0 +1,296 @@
+"""The identity checker, tested on the numbers a real filing produced.
+
+Every fixture here is taken from run 35220475916's log - FPT's Q4 2025
+parent-only cash flow - rather than invented, so a change that breaks the
+checker breaks against a document that exists.
+"""
+
+import pytest
+
+from scripts.reconcile_bctc_against_vendor import (
+    CASH_FLOW_IDENTITIES,
+    check_identities,
+    classify_period,
+    classify_scope,
+    compare_to_vendor,
+    vendor_value,
+    _words,
+)
+
+
+def _items(codes):
+    """Code -> row, in the shape the parser returns.
+
+    Taken as a dict rather than keyword arguments: these keys are the VAS
+    codes themselves, and integers cannot be keywords.
+    """
+    return {c: {"code": c, "current_val": float(v)} for c, v in codes.items()}
+
+
+# FPT, Q4 2025, parent-only. Codes 1 and 60 are the misbound ones.
+FPT_Q4 = {
+    1: 1905249672046, 20: -31728959134, 21: -122709404582, 22: 141133774,
+    23: -14679809390009, 24: 13514811170009, 25: -2200000000000,
+    27: 5801417334255, 30: 2313850843447, 31: 102609390000,
+    33: 14269573627370, 34: -13444286187170, 36: -3182563528913,
+    40: -2254666698713, 50: 27455185600, 60: 42728190111, 61: 2694503,
+    70: 1905249672046,
+}
+
+
+def _by_label(items):
+    return {c["label"]: c for c in check_identities(items, CASH_FLOW_IDENTITIES)}
+
+
+class TestIdentitiesOnARealFiling:
+    def test_the_three_sections_sum_to_net_cash_flow(self):
+        r = _by_label(_items(FPT_Q4))["CFO+CFI+CFF = NCF"]
+        assert r["status"] == "ok"
+        assert r["diff"] == 0
+
+    def test_the_investing_block_closes_even_though_code_26_is_absent(self):
+        # The result that matters: whatever sits at code 21 is a component
+        # of a section that sums exactly without it left over.
+        r = _by_label(_items(FPT_Q4))["investing lines sum to CFI"]
+        assert r["status"] == "ok"
+        assert r["absent"] == [26]
+
+    def test_the_opening_balance_identity_is_reported_broken(self):
+        # 60 is misbound, every code in the identity is present, so this is
+        # the definitive case - not "unclear".
+        r = _by_label(_items(FPT_Q4))["opening+NCF+FX = closing"]
+        assert r["status"] == "BROKEN"
+        assert r["absent"] == []
+
+
+class TestTheThreeStatesAreDistinguished:
+    def test_a_gap_with_an_absent_line_is_unclear_not_broken(self):
+        items = _items({21: -100.0, 22: 5.0, 30: -200.0})
+        r = _by_label(items)["investing lines sum to CFI"]
+        assert r["status"] == "unclear"
+        assert 26 in r["absent"]
+
+    def test_a_gap_with_every_line_present_is_broken(self):
+        items = _items({20: 1.0, 30: 1.0, 40: 1.0, 50: 99.0})
+        assert _by_label(items)["CFO+CFI+CFF = NCF"]["status"] == "BROKEN"
+
+    def test_no_target_code_means_no_check_rather_than_a_failure(self):
+        items = _items({20: 1.0, 30: 1.0, 40: 1.0})
+        r = _by_label(items)["CFO+CFI+CFF = NCF"]
+        assert r["status"] == "n/a"
+        assert r["missing"] == [50]
+
+    def test_rounding_of_a_dong_does_not_count_as_broken(self):
+        items = _items({20: 1.0, 30: 1.0, 40: 1.0, 50: 3.000001})
+        assert _by_label(items)["CFO+CFI+CFF = NCF"]["status"] == "ok"
+
+
+class TestScopeIsReadFromCafefsOwnFileNames:
+    @pytest.mark.parametrize("name,scope,period", [
+        ("20260126_-_FPT_-_BCTC_hop_nhat_Quy_4_2025.pdf", "consolidated", "Q4"),
+        ("20260126_-_FPT_-_BCTC_cong_ty_me_Quy_4_2025.pdf", "separate", "Q4"),
+        ("20260319_-_FPT_-_BCTC_rieng_nam_2025_da_kiem_toan.pdf", "separate", "FY"),
+        ("FPT_Baocaotaichinh_Q3_2025_Hopnhat_27102025.pdf", "consolidated", "Q3"),
+        ("20250820_-_FPT_-_BCTC_hop_nhat_ban_nien_da_soat_xet.pdf",
+         "consolidated", "H1"),
+    ])
+    def test_real_file_names_classify(self, name, scope, period):
+        assert classify_scope(name) == scope
+        assert classify_period(name) == period
+
+    def test_underscores_do_not_hide_the_words(self):
+        # The bug this guards: CafeF joins words with underscores, so a
+        # hint list written with spaces matched nothing and every filing
+        # came back "unknown".
+        assert "hop nhat" in _words("BCTC_hop_nhat_Quy_4_2025.pdf")
+        assert "cong ty me" in _words("BCTC_cong_ty_me_Quy_4.pdf")
+
+
+class TestTheVendorComparisonRefusesWhatItCannotAttribute:
+    def test_a_broken_control_withholds_the_capex_verdict(self, monkeypatch):
+        # CFO disagrees, so scope/period/unit is wrong and nothing can be
+        # concluded about 32100 - the point of having a control at all.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            lambda s, r: [
+                {"itemCode": 32000, "numericValue": 999.0, "fiscalDate": "2025-12-31"},
+                {"itemCode": 32100, "numericValue": -122709404582.0,
+                 "fiscalDate": "2025-12-31"},
+            ])
+        out = compare_to_vendor("FPT", 2025, _items(FPT_Q4))
+        assert out["control_ok"] is False
+        assert "withheld" in out["verdict"]
+        assert "capex_match" not in out
+
+    def test_a_good_control_lets_a_capex_match_be_reported(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            lambda s, r: [
+                {"itemCode": 32000, "numericValue": -31728959134.0,
+                 "fiscalDate": "2025-12-31"},
+                {"itemCode": 32100, "numericValue": 122709404582.0,
+                 "fiscalDate": "2025-12-31"},
+            ])
+        out = compare_to_vendor("FPT", 2025, _items(FPT_Q4))
+        assert out["control_ok"] is True
+        # Sign conventions differ between a filing and a vendor feed, so
+        # the magnitudes are what is compared.
+        assert out["capex_match"] is True
+        assert out["verdict"] == "32100 IS VAS 21"
+
+    def test_a_good_control_can_also_refute_the_mapping(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            lambda s, r: [
+                {"itemCode": 32000, "numericValue": -31728959134.0,
+                 "fiscalDate": "2025-12-31"},
+                {"itemCode": 32100, "numericValue": 7.0,
+                 "fiscalDate": "2025-12-31"},
+            ])
+        out = compare_to_vendor("FPT", 2025, _items(FPT_Q4))
+        assert out["verdict"] == "32100 is NOT VAS 21"
+
+
+# FPT's consolidated Q4 2025 against VNDIRECT ANNUAL, exactly as run
+# 35222930322 measured it. These four numbers are the whole reason the
+# comparison criterion changed.
+FPT_CONSOLIDATED = {20: 10189002966546, 21: -5150805120441}
+VENDOR_CFO = 10136043915911.0
+VENDOR_CAPEX = -5097919349856.0
+
+
+def _vendor(cfo, capex):
+    return lambda s, r: [
+        {"itemCode": 32000, "numericValue": cfo, "fiscalDate": "2025-12-31"},
+        {"itemCode": 32100, "numericValue": capex, "fiscalDate": "2025-12-31"},
+    ]
+
+
+class TestCapexIsJudgedAgainstTheControlNotAFixedPercentage:
+    """The bug: a flat 1% each side called FPT's capex a mismatch.
+
+    The control was 0.522% apart and capex 1.037%, so the threshold passed
+    one and failed the other - while the absolute residuals were 52.959bn
+    and 52.886bn, the same amount twice.
+    """
+
+    def test_the_real_numbers_now_support_the_mapping(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, VENDOR_CAPEX))
+        out = compare_to_vendor("FPT", 2025, _items(FPT_CONSOLIDATED))
+        assert out["control_ok"] is True
+        assert out["verdict"] == "32100 IS VAS 21"
+
+    def test_the_two_residuals_are_the_same_amount(self, monkeypatch):
+        # This is the evidence, not the verdict: one reconciling item
+        # showing up in both lines rather than two different quantities.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, VENDOR_CAPEX))
+        out = compare_to_vendor("FPT", 2025, _items(FPT_CONSOLIDATED))
+        assert out["residual_ratio"] == pytest.approx(1.0, abs=0.01)
+        assert abs(out["capex_residual"] - out["control_residual"]) < 1e8
+
+    def test_capex_relative_error_alone_would_still_have_failed_it(self):
+        # Guards against quietly widening the old threshold instead of
+        # changing what is compared: 1.037% is still over 1%.
+        rel = abs(abs(-5150805120441) - abs(VENDOR_CAPEX)) / abs(VENDOR_CAPEX)
+        assert rel > 0.01
+
+    def test_an_order_of_magnitude_apart_is_still_refuted(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, -25748320476719.0))
+        out = compare_to_vendor("FPT", 2025, _items(FPT_CONSOLIDATED))
+        assert out["verdict"] == "32100 is NOT VAS 21"
+
+    def test_a_middling_gap_is_left_unclear_rather_than_decided(self, monkeypatch):
+        # Too close to be a different line, too far for the control to
+        # vouch for. Calling it either way would be inventing a result.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(VENDOR_CFO, VENDOR_CAPEX))
+        out = compare_to_vendor("FPT", 2025, _items({20: 10189002966546,
+                                                     21: -5900000000000}))
+        assert out["verdict"].startswith("32100 vs VAS 21 unclear")
+        assert out["capex_match"] is False
+
+    def test_a_broken_control_still_withholds_everything(self, monkeypatch):
+        # The control keeps precedence over the new criterion: VCB read its
+        # CFO as -117,752 against a vendor figure of 116 trillion, and
+        # without this that garbage would have been scored as a verdict.
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            _vendor(116230551000000.0, -1453488000000.0))
+        out = compare_to_vendor("VCB", 2025, _items({20: -117752, 21: -641807}))
+        assert out["control_ok"] is False
+        assert "withheld" in out["verdict"]
+        assert "residual_ratio" not in out
+
+    def test_a_silent_vendor_is_said_rather_than_guessed(self, monkeypatch):
+        monkeypatch.setattr(
+            "scripts.reconcile_bctc_against_vendor.vendor_rows",
+            lambda s, r: [])
+        assert compare_to_vendor("FPT", 2025, _items(FPT_Q4))["verdict"] \
+            == "vendor silent"
+
+
+class TestVendorValue:
+    ROWS = [
+        {"itemCode": 32100, "numericValue": 5.0, "fiscalDate": "2024-12-31"},
+        {"itemCode": 32100, "numericValue": 9.0, "fiscalDate": "2025-12-31"},
+        {"itemCode": "32000", "numericValue": 3.0, "fiscalDate": "2025-12-31"},
+    ]
+
+    def test_the_right_year_is_picked(self):
+        assert vendor_value(self.ROWS, 32100, 2025) == 9.0
+        assert vendor_value(self.ROWS, 32100, 2024) == 5.0
+
+    def test_a_string_item_code_still_matches(self):
+        assert vendor_value(self.ROWS, 32000, 2025) == 3.0
+
+    def test_an_absent_code_is_none_not_zero(self):
+        # Zero and "the vendor does not carry it" are different findings.
+        assert vendor_value(self.ROWS, 99999, 2025) is None
+
+
+class TestWhichFilingsARunCanReach:
+    """The ordering can put a document out of reach entirely.
+
+    The misbound cash flow rows were documented on FPT's parent-only Q4
+    filing, and CafeF lists six consolidated FPT filings ahead of it. With
+    consolidated always first, no limit short of parsing everything
+    reaches the one document that shows the defect - which is why run
+    35304662213 came back byte-identical to the run before it.
+    """
+
+    PDFS = [
+        {"title": "20260319_-_FPT_-_BCTC_hop_nhat_nam_2025_da_kiem_toan.pdf"},
+        {"title": "20260126_-_FPT_-_BCTC_hop_nhat_Quy_4_2025.pdf"},
+        {"title": "20260126_-_FPT_-_BCTC_cong_ty_me_Quy_4_2025.pdf"},
+        {"title": "FPT_Baocaotaichinh_Q3_2025_Hopnhat.pdf"},
+    ]
+
+    @staticmethod
+    def _ordered(pdfs, scope_first):
+        return sorted(pdfs, key=lambda p: 0 if classify_scope(
+            p.get("title", "")) == scope_first else 1)
+
+    def test_consolidated_first_is_still_the_default_ordering(self):
+        first = self._ordered(self.PDFS, "consolidated")[0]["title"]
+        assert classify_scope(first) == "consolidated"
+
+    def test_the_parent_only_filing_is_unreachable_at_a_limit_of_two(self):
+        # The bug, stated as a fact about the old ordering.
+        reached = self._ordered(self.PDFS, "consolidated")[:2]
+        assert all(classify_scope(p["title"]) == "consolidated"
+                   for p in reached)
+
+    def test_asking_for_separate_reaches_it_first(self):
+        first = self._ordered(self.PDFS, "separate")[0]["title"]
+        assert "cong_ty_me" in first
+
+    def test_no_filing_is_dropped_by_either_ordering(self):
+        for scope in ("consolidated", "separate"):
+            assert len(self._ordered(self.PDFS, scope)) == len(self.PDFS)

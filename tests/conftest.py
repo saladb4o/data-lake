@@ -271,3 +271,73 @@ def screener_snapshot(tmp_path, monkeypatch):
     cache.invalidate("quant_percentile_universe_v2")
 
     return path
+
+
+# The suite is not allowed to write into the real data directory.
+#
+# Found the hard way: a pytest run modified data/pdf_lake/
+# extracted_bctc_lake.json - 104 MB of extracted filings - and left a
+# 50 MB .tmp_<pid> orphan behind when the run was killed mid-write. The
+# lake is not in git (the repo is public), so a test that corrupts it
+# destroys work no commit can restore, and nothing in the run said it had
+# happened. The test passed.
+#
+# This does not try to guess which test does it. It makes the write fail
+# by name, so the next run that tries names its own culprit. A test that
+# genuinely means to exercise the writer asks for the
+# `allow_real_lake_writes` marker and gets the real function.
+_REAL_SAVE_LAKE_DATA = None
+
+
+def _refuse_lake_write(culprit):
+    def _refuse(*_args, **_kwargs):
+        raise AssertionError(
+            f"{culprit} tried to write the real extracted BCTC "
+            "lake. Point it at tmp_path, or mark it "
+            "allow_real_lake_writes if it truly means to."
+        )
+    return _refuse
+
+
+# The function-scoped guard below is armed only once a test starts, but
+# class- and module-scoped fixtures run before that - and three of them
+# (normalize_stock_data -> process_single_company -> _save_lake_data) cut
+# the real lake from ~2.7M lines to 68. A session-scoped autouse fixture is
+# set up before any narrower one, so this closes that window for the run.
+@pytest.fixture(scope="session", autouse=True)
+def _no_writes_to_the_real_lake_from_shared_fixtures():
+    try:
+        from services import bctc_batch_processor
+    except Exception:
+        yield
+        return
+    global _REAL_SAVE_LAKE_DATA
+    _REAL_SAVE_LAKE_DATA = getattr(bctc_batch_processor, "_save_lake_data", None)
+    mp = pytest.MonkeyPatch()
+    mp.setattr(bctc_batch_processor, "_save_lake_data",
+               _refuse_lake_write("a class/module/session-scoped fixture"),
+               raising=False)
+    yield
+    mp.undo()
+
+
+@pytest.fixture(autouse=True)
+def _no_writes_to_the_real_lake(request, monkeypatch):
+    if request.node.get_closest_marker("allow_real_lake_writes"):
+        # Undo the session guard for this test only.
+        if _REAL_SAVE_LAKE_DATA is not None:
+            from services import bctc_batch_processor
+            monkeypatch.setattr(bctc_batch_processor, "_save_lake_data",
+                                _REAL_SAVE_LAKE_DATA)
+        yield
+        return
+    try:
+        from services import bctc_batch_processor
+    except Exception:  # the module is optional to the rest of the suite
+        yield
+        return
+
+    monkeypatch.setattr(bctc_batch_processor, "_save_lake_data",
+                        _refuse_lake_write(request.node.nodeid),
+                        raising=False)
+    yield

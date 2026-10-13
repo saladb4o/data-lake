@@ -180,3 +180,79 @@ class TestItIsAMeasurementOnly:
         for forbidden in ("unified_stocks[", "field_provenance", "print(",
                           "ebit_ttm", "_absolute_lines"):
             assert forbidden not in src
+
+
+def test_a_negligible_column_is_not_fitted_as_a_relation():
+    """The defect the first real census run exposed.
+
+    23001 is a fraction of a millionth of the statement's scale for every
+    company that carries it, and least squares gave it coefficients in the
+    hundreds of thousands across five separate targets - a free parameter
+    absorbing whatever the true terms left behind. This builds the same
+    situation: an exact two-term relation, plus a column that is real, is
+    present for every company, and is far too small to be a statement line.
+    The search must return the two true terms and never the small one.
+    """
+    import random
+
+    rng = random.Random(7)
+    rows = []
+    for _ in range(400):
+        rev = rng.uniform(1e11, 9e12)
+        cogs = rev * rng.uniform(0.6, 0.9)
+        rows.append({
+            21001: rev,
+            22100: cogs,
+            23100: rev - cogs,
+            # Present for everyone, and a millionth of the scale.
+            23001: rev * 1e-7 * rng.uniform(0.5, 1.5),
+            22200: rev * rng.uniform(0.02, 0.1),
+        })
+
+    found = {
+        t: (sorted(c for c, _b in terms), rate)
+        for t, terms, rate, _n in recover_item_code_relations(
+            rows, [21001, 22100, 23100, 23001, 22200], min_companies=100,
+        )
+    }
+
+    codes, rate = found[23100]
+    assert codes == [21001, 22100]
+    assert rate == 100.0
+    for target, (codes, _rate) in found.items():
+        assert 23001 not in codes, f"{target} was fitted against 23001"
+
+
+def test_a_median_zero_column_is_kept():
+    """Median-zero is ordinary; scale-zero is not.
+
+    Most companies report nothing for other profit, so a real statement
+    line can sit at a median of exactly zero and still be a true term for
+    the minority that report it. The guard above must discriminate on how
+    large a column ever gets, not on where its centre is - otherwise it
+    would throw away the very codes the pair search already proved exact.
+    """
+    import random
+
+    rng = random.Random(11)
+    rows = []
+    for i in range(400):
+        base = rng.uniform(1e11, 9e12)
+        other = base * 0.3 if i % 4 == 0 else 0.0
+        rows.append({
+            22900: base,
+            23900: other,
+            21900: base + other,
+            22100: base * rng.uniform(0.5, 0.9),
+            23100: base * rng.uniform(0.1, 0.3),
+        })
+
+    found = {
+        t: (sorted(c for c, _b in terms), rate)
+        for t, terms, rate, _n in recover_item_code_relations(
+            rows, [21900, 22900, 23900, 22100, 23100], min_companies=100,
+        )
+    }
+    codes, rate = found[21900]
+    assert codes == [22900, 23900]
+    assert rate == 100.0

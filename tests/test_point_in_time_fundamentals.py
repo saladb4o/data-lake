@@ -128,3 +128,54 @@ class TestModes:
 
         sig = inspect.signature(FairValueBacktestService.run_backtest)
         assert sig.parameters["fundamentals_mode"].default == FundamentalsMode.POINT_IN_TIME
+
+
+class TestTheGateCannotBeSwitchedOffByOmission:
+    """A missing quarter_end must not become "no restriction".
+
+    get() reads an unknown publication date as no restriction, so a caller
+    who omits quarter_end would see every filing at every simulated date.
+    While the builder froze an estimated filing_date into every record that
+    could not happen; once the estimate stays out of the file, the only
+    thing standing between the lake and lookahead is the caller
+    remembering an optional argument.
+    """
+
+    LAKE = {
+        "symbols": {
+            "HPG": {
+                "quarters": {
+                    "2021-Q1": {
+                        "revenue": 3.1e13, "net_income": 4.2e12,
+                        "equity": 9.0e13, "total_assets": 1.7e14,
+                        "fiscal_date": "2021-03-31",
+                        "filing_date_is_estimated": True,
+                    }
+                }
+            }
+        }
+    }
+
+    def test_a_caller_who_omits_quarter_end_still_gets_the_lag(self):
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+        import datetime
+
+        pit = PointInTimeFundamentals(self.LAKE, publication_lag_days=45)
+        assert pit.get("HPG", "2021-Q1",
+                       as_of=datetime.date(2021, 3, 31)) is None
+        assert pit.get("HPG", "2021-Q1",
+                       as_of=datetime.date(2021, 5, 15)) is not None
+
+    def test_the_fallback_reads_the_records_own_fiscal_date(self):
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+        import datetime
+
+        pit = PointInTimeFundamentals(self.LAKE, publication_lag_days=45)
+        record = self.LAKE["symbols"]["HPG"]["quarters"]["2021-Q1"]
+        assert pit.publication_date(record, None) == datetime.date(2021, 5, 15)
+
+    def test_a_record_with_no_date_at_all_is_still_unrestricted(self):
+        """Unchanged, and it has to be: there is nothing to compute from."""
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+
+        assert PointInTimeFundamentals().publication_date({}, None) is None

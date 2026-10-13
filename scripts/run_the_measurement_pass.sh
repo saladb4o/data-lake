@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# One pass that answers every open question about the data at once.
+#
+# Written as a script rather than as workflow steps because two workflows
+# need it: the real one (fundamentals_lake.yml) and the bootstrap that
+# borrows the screener's dispatch registration until that one reaches the
+# default branch. A 150-line job copied into both is the same defect this
+# codebase spent a day removing.
+#
+# The order is forced by dependencies, not by preference:
+#
+#   listing + screener snapshot   everything downstream needs the universe
+#   historical prices             the backtest cannot run without them
+#   fundamentals lake + probe     one fetch, two outputs
+#   candidate scoring             reads the probe, fetches nothing
+#   lake fill                     reads the lake and the snapshot
+#   backtest sweep                reads all three lakes
+#   coverage audit                reads the snapshot
+#
+# Stages that only measure are allowed to fail without taking the pass
+# down: losing the backtest to a missing price lake must not also lose the
+# lake that was already built. Stages that produce inputs are not.
+#
+# Every piped stage sets pipefail inside its own shell. Without it the
+# exit status is tee's, which is always zero - the measurement dies, the
+# summary reports that every stage completed, and the run is green.
+#
+# Stages can be named as arguments; with none, all of them run. That
+# exists for visibility, not flexibility: a job log cannot be read until
+# the job ends, so six stages inside one workflow step means an hour with
+# no way to tell work from a hang. One workflow step per stage restores
+# the timings GitHub shows live, while the logic still has one home here.
+set -uo pipefail
+
+DATA="${DATA_LOCAL_DIR:?DATA_LOCAL_DIR must be set}"
+SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/stdout}"
+LIMIT="${LAKE_LIMIT:-0}"
+# The simulation stands at quarter end and treats a filing as public at
+# quarter end + lag, so a lag shorter than a quarter always selects the
+# same filing - the previous quarter's - whatever its value. 20/30/45/60/90
+# are all shorter than the 90-92 days a quarter lasts, which is why five
+# rows came back identical to two decimal places for run after run. That
+# was read as "the assumption does not matter"; it means the sweep never
+# reached the assumption. These straddle the boundary instead: 20 is the
+# statutory quarterly deadline, 90 the annual one and the last value that
+# still lands inside the quarter, and 100/135/190 push the filing one, two
+# and three quarters late. If the rows still agree, the result genuinely
+# does not rest on the lag.
+LAGS="${BACKTEST_LAGS:-20 90 100 135 190}"
+mkdir -p "$DATA"
+
+FAILED=()
+WANTED=("$@")
+
+# True when this stage was asked for, or when nothing was asked for.
+wanted() {
+  [ ${#WANTED[@]} -eq 0 ] && return 0
+  local key
+  for key in "${WANTED[@]}"; do [ "$key" = "$1" ] && return 0; done
+  return 1
+}
+
+stage() {
+  local key="$1"; shift
+  wanted "$key" || return 0
+  local name="$1"; shift
+  echo "::group::$name"
+  local started=$SECONDS
+  if "$@"; then
+    echo "  ✅ $name ($((SECONDS - started))s)"
+  else
+    local code=$?
+    echo "  ❌ $name failed with $code after $((SECONDS - started))s"
+    FAILED+=("$name")
+  fi
+  echo "::endgroup::"
+}
+
+# --- inputs ---------------------------------------------------------------
+# The universe. Refuses rather than publishing a thin snapshot, so a
+# failure here is fatal to everything after it and the pass says so.
+stage universe "screener universe" \
+  python scripts/sync_unified_market_data.py
+
+# Never run on a runner before, and it takes no limit, so its cost is the
+# one unknown in this pass. It is measured, not trusted.
+# The stage prints thousands of lines and one table. Only the table is
+# appended to the summary: teeing the whole stage would drown it, and
+# leaving it in the log alone is what made it unreadable last pass.
+stage prices "historical prices" \
+  bash -c "python scripts/sync_historical_prices.py; rc=\$?; \
+    for t in price_universe price_sources; do \
+      [ -f '$DATA'/\$t.md ] && cat '$DATA'/\$t.md | tee -a '$SUMMARY'; \
+    done; exit \$rc"
+
+# --- the lake, and the probe that judges two of its fields ----------------
+LAKE_ARGS=(--universe --out "$DATA/historical_fundamentals.json"
+           --diagnostics-out "$DATA/code_candidates_probe.json")
+if [ "$LIMIT" != "0" ]; then LAKE_ARGS+=(--limit "$LIMIT"); fi
+stage lake "fundamentals lake" \
+  python scripts/build_historical_fundamentals.py "${LAKE_ARGS[@]}"
+
+# --- measurements ---------------------------------------------------------
+# Everything below only reads. Each appends to the step summary, which is
+# the one channel that does not depend on reading a job log from its tail.
+
+if [ -f "$DATA/code_candidates_probe.json" ]; then
+  stage codes "score capex and depreciation codes" \
+    bash -c "set -o pipefail; python scripts/score_code_candidates.py \
+      '$DATA/code_candidates_probe.json' \
+      --json '$DATA/code_candidates.json' | tee -a '$SUMMARY'"
+fi
+
+# Reads the lake and the snapshot, fetches nothing, and answers whether
+# the lake-to-payload route wired in this branch carries anything at all.
+stage lakefill "what the lake could fill" \
+  bash -c "set -o pipefail; python scripts/measure_the_lake_fill.py \
+    --json '$DATA/lake_fill.json' | tee -a '$SUMMARY'"
+
+stage backtest "backtest sweep" \
+  bash -c "set -o pipefail; python scripts/measure_the_backtest.py \
+    --lags $LAGS --json '$DATA/backtest_sweep.json' | tee -a '$SUMMARY'"
+
+# The one stage here that does reach the network, and it is two requests
+# per symbol against a vendor that names its lines. VNDIRECT sends eight
+# keys per statement row and none is a label, so capex is read from 32100
+# on the VAS numbering convention alone and has scored 0.3% against its
+# anchor for three runs. capex below the gate blocks fcf, which is the
+# third most common blocking driver in the universe at 141 symbols.
+stage capexmatch "which code is capex" \
+  bash -c "set -o pipefail; python scripts/match_capex_to_vietcap.py \
+    --probe '$DATA/code_candidates_probe.json' \
+    --json '$DATA/capex_match.json' | tee -a '$SUMMARY'"
+
+# Reads the snapshot and the price lake, fetches nothing, and answers
+# four questions that have each been guessed at least once: the price
+# scale, split adjustment, what really blocks fcf, and which symbols are
+# one driver short.
+stage probe "four questions, no fetches" \
+  bash -c "set -o pipefail; python scripts/probe_the_open_questions.py \
+    | tee -a '$SUMMARY'"
+
+# Last, deliberately. Whatever is printed last is the only thing
+# guaranteed to be readable from a log tail, and the coverage headline is
+# the number the exercise is measured by.
+stage audit "coverage audit" \
+  bash -c "set -o pipefail; python scripts/audit_valuation_coverage.py \
+    --show-blocked 60 --json '$DATA/coverage.json' | tee -a '$SUMMARY'"
+
+# --- what happened --------------------------------------------------------
+# Once per pass, not once per stage: with one workflow step per stage the
+# inventory would otherwise print six times and say nothing new.
+if [ ${#WANTED[@]} -eq 0 ] || wanted audit; then
+{
+  echo
+  echo "## Measurement pass"
+  echo
+  for f in "${FAILED[@]:-}"; do
+    [ -n "$f" ] && echo "- ❌ **$f** did not complete"
+  done
+  if [ ${#FAILED[@]} -eq 0 ]; then echo "- every stage completed"; fi
+  echo
+  echo "| file | bytes |"
+  echo "|---|---:|"
+  for f in historical_fundamentals screener_snapshot historical_prices \
+           coverage backtest_sweep code_candidates code_candidates_probe \
+           lake_fill; do
+    if [ -f "$DATA/$f.json" ]; then
+      echo "| $f.json | $(wc -c < "$DATA/$f.json") |"
+    else
+      echo "| $f.json | **missing** |"
+    fi
+  done
+} | tee -a "$SUMMARY"
+fi
+
+# A pass whose inputs failed produced no measurement, and should not
+# report success. A pass that only lost a measurement still delivered the
+# lakes, and should.
+for f in "${FAILED[@]:-}"; do
+  case "$f" in
+    "screener universe"|"historical prices"|"fundamentals lake") exit 1 ;;
+  esac
+done
+exit 0

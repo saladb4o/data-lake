@@ -1,10 +1,27 @@
-"""
-=============================================================================
-HISTORICAL PRICE LAKE SYNCHRONIZER (TRADINGVIEW & VCI DATA FEEDS)
-=============================================================================
-Fetches and caches 100% real historical close prices and quarterly returns
-for all major Vietnamese stocks across HOSE, HNX, and UPCOM.
-Saves to data/historical_prices.json for sub-millisecond real-price backtesting.
+"""Daily prices for the whole universe, quarterised into the price lake.
+
+One source: DNSE's chart endpoint. Each symbol is counted against the
+source that actually answered for it, and the tally is printed - because
+this header used to say "TRADINGVIEW & VCI DATA FEEDS" and the saved
+payload used to say "TradingView & Yahoo Finance Live Data Feeds" while
+the code reached for neither TradingView nor VCI. A label nobody can
+check is worse than no label: it was read for months as evidence that
+TradingView was already carrying the lake.
+
+TradingView was then made the source for real, on run 34627185323, and
+measured: 187 of 1,400 symbols in 1,800 seconds before its batch hit the
+timeout and was killed, with 1,192 symbols timing out. DNSE took the
+remaining 1,213 and answered for 1,177 of them in 140 seconds. Thirteen
+percent of the universe for thirteen times the wall clock, so it is
+removed on the same rule that removed SSI and TCBS.
+
+That run was not wasted. TradingView quotes in dong and DNSE in
+thousands, so for the first time the lake held two scales at once - 199
+dong against 1,228 thousands - and normalise_to_dong split them
+correctly, per symbol, from the data. A fix that multiplied a named
+vendor by a constant would have doubled those 199.
+
+Output: data/historical_prices.json, keyed by symbol then quarter.
 """
 
 import os
@@ -95,36 +112,11 @@ QUARTER_MILESTONES = [
     {"code": "2026-Q1", "start": "2026-01-01", "end": "2026-03-31", "year": 2026, "quarter": 1}
 ]
 
-def fetch_from_yfinance(symbol: str) -> Optional[pd.DataFrame]:
-    """Fallback fetcher using Yahoo Finance (yfinance) for Vietnamese stocks."""
-    try:
-        import yfinance as yf
-        ticker_str = f"{symbol}.VN"
-        df = yf.download(ticker_str, start="2016-01-01", end="2026-03-31", progress=False)
-        if df is not None and not df.empty and len(df) >= 10:
-            df = df.reset_index()
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = [c[0].lower() if isinstance(c, tuple) else str(c).lower() for c in df.columns]
-            else:
-                df.columns = [str(c).lower() for c in df.columns]
-            
-            if 'date' in df.columns:
-                df['time'] = pd.to_datetime(df['date']).dt.strftime('%Y-%m-%d')
-            elif 'datetime' in df.columns:
-                df['time'] = pd.to_datetime(df['datetime']).dt.strftime('%Y-%m-%d')
-            
-            if 'close' in df.columns and 'time' in df.columns:
-                return df[['time', 'open', 'high', 'low', 'close', 'volume']]
-    except Exception:
-        logger.debug("fetch_from_yfinance: swallowed Exception", exc_info=True)
-    return None
-
 def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
     """
     Multi-source raw candle fetcher with graceful fallbacks:
     Priority 1: Vietcap (VCI) Data Feed
     Priority 2: KBSV / DNSE Data Feed
-    Priority 3: Yahoo Finance (yfinance)
     """
     try:
         from vnstock import Quote
@@ -143,15 +135,88 @@ def fetch_stock_raw_candles(symbol: str) -> Optional[pd.DataFrame]:
         except Exception:
             continue
 
-    # 2. Try yfinance Fallback
-    yf_df = fetch_from_yfinance(symbol)
-    if yf_df is not None and not yf_df.empty:
-        return yf_df
-
     return None
 
+#: A listed Vietnamese share trades in dong, and the exchanges enforce a
+#: floor: nothing stays listed below 1,000 VND. So a daily series whose
+#: typical close sits under this is not a penny stock, it is a series
+#: quoted in thousands.
+DONG_FLOOR = 1000.0
+
+#: What such a series has to be multiplied by to become dong.
+THOUSANDS_TO_DONG = 1000.0
+
+#: Stamped on every record this file writes. The sync keeps symbols it
+#: already has rather than refetching them, so without a stamp there is
+#: no way to tell a record written after the normalisation from one
+#: written before it, and a rerun on a lake built in thousands would
+#: carry the old scale forward under the new code.
+PRICE_UNIT = "dong"
+
+
+def normalise_to_dong(symbol: str, df: pd.DataFrame) -> Optional[str]:
+    """Put one symbol's candles into dong, in place. Returns what it did.
+
+    Run 34605559771 compared every symbol in the lake against the
+    screener's own price and found the screener higher by a factor of
+    ~941 for **all 1,367 of them** - EVS at 4,800 against a lake close
+    of 5.10. DNSE quotes in thousands of dong, and so did the yfinance
+    and vnstock path before it, which is why switching vendors moved the
+    backtest by 0.01 and looked like confirmation that the scale was
+    fine. Two sources wrong the same way cannot check each other.
+
+    It is not a cosmetic difference. `fair_value_backtest_service`
+    compares this price *absolutely* against a fair value built from
+    dong fundamentals, so a close of 5.10 reads as a ~100% discount on
+    every symbol, and the eps/bvps floors at the top of that comparison
+    (50 and 500) win against every real figure. That is the reason the
+    lag sweep has never moved: the filings were never reaching the
+    arithmetic.
+
+    Decided per symbol from the data rather than by multiplying every
+    source by a constant. A constant is a claim about a vendor that
+    nothing re-checks - the exact shape of the "TradingView" label this
+    file used to carry - and it would silently double the prices the day
+    a source starts sending dong.
+
+    Run 34627185323 tested exactly that. TradingView answered for 199
+    symbols in dong while DNSE answered for 1,228 in thousands, in one
+    pass, into one file - and this function split them correctly per
+    symbol without being told which vendor sent what. A constant keyed
+    to a vendor name would have multiplied those 199 by a thousand.
+    """
+    if df is None or df.empty or "close" not in df.columns:
+        return None
+    closes = pd.to_numeric(df["close"], errors="coerce").dropna()
+    closes = closes[closes > 0]
+    if closes.empty:
+        return None
+    # The median, not the mean or the last bar: a decade of history can
+    # contain one bad print, and one bad print must not decide the unit
+    # for the whole series.
+    if float(closes.median()) >= DONG_FLOOR:
+        return "dong"
+    for column in ("open", "high", "low", "close"):
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce") \
+                * THOUSANDS_TO_DONG
+    return "thousands"
+
+
 def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, Any]:
-    """Computes exact quarterly close prices and percentage returns from daily real candles with VND scale normalization."""
+    """Quarterly open/high/low/close/volume and returns from daily candles.
+
+    Whatever unit the source sent, in the same unit out. This docstring used to
+    promise that the values were rescaled into VND; the function has
+    never rescaled anything, and nothing downstream checks. That matters because
+    `fair_value_backtest_service` compares the price here *absolutely*
+    against a fair value built from VND fundamentals, so a source quoting
+    thousands would silently make every stock look 99.9% undervalued. The
+    promise is removed rather than kept, because a scale check belongs
+    where the sources are compared, not buried per symbol - and a label
+    nobody can check is what put yfinance behind a TradingView banner for
+    a year.
+    """
     df['time_dt'] = pd.to_datetime(df['time'])
     df = df.sort_values('time_dt').reset_index(drop=True)
 
@@ -200,16 +265,74 @@ def compute_stock_quarterly_returns(symbol: str, df: pd.DataFrame) -> Dict[str, 
 
     return {
         "symbol": symbol,
+        # What scale these numbers are on, written down rather than
+        # assumed. The sync carries records forward between runs without
+        # refetching, so a lake built before normalise_to_dong existed
+        # would otherwise sit in thousands forever, mixed symbol by
+        # symbol with dong records and invisible to every table
+        # downstream. A record that does not carry this stamp is not
+        # trusted to be in dong - see PRICE_UNIT below.
+        "price_unit": PRICE_UNIT,
         "total_quarters": len(quarters_data),
         "earliest_quarter": list(quarters_data.keys())[0] if quarters_data else None,
         "latest_quarter": list(quarters_data.keys())[-1] if quarters_data else None,
         "quarters": quarters_data
     }
 
-def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str, Any]:
-    """Syncs real prices for all provided symbols concurrently and saves to JSON."""
+#: Broker endpoints, in the order they are asked. SSI and TCBS were tried
+#: here and removed: run 34570149277 measured both at zero symbols out of
+#: their first forty while DNSE answered on the same pass and the same
+#: universe. See services/broker_prices.py for why they are deleted
+#: rather than kept behind a flag.
+BROKER_SOURCES = ("dnse",)
+
+#: How many symbols a broker may fail on before the stage stops asking it.
+#: Large enough that a handful of delisted tickers cannot trip it, small
+#: enough that a dead endpoint costs a minute rather than half an hour.
+PROBE_BEFORE_GIVING_UP = 40
+
+
+def _fetch_from_broker(source: str, symbol: str) -> Optional[pd.DataFrame]:
+    """Daily candles from one broker, shaped like every other fetcher here."""
+    from services import broker_prices
+    fetch = {"dnse": broker_prices.fetch_dnse}[source]
+    rows = fetch(symbol)
+    if not rows:
+        return None
+    return pd.DataFrame(rows)
+
+
+def sync_all_symbols(symbols_list: List[str], max_workers: int = 10,
+                     exchanges: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
+    """Syncs real prices for all provided symbols concurrently and saves to JSON.
+
+    Two sources, tried in order, and counted. This used to lead with a
+    yfinance batch download and fall back to vnstock per symbol, while
+    the file header and the saved payload both claimed "TradingView" -
+    which nothing in here touched. The tally at the end says which
+    source answered for how many symbols, so the claim can be checked
+    rather than asserted; it is what retired SSI, TCBS and yfinance.
+    """
     os.makedirs(DATA_DIR, exist_ok=True)
-    import yfinance as yf
+
+    # vnstock's transitive dependencies log per-request noise of their
+    # own. Kept from when yfinance was in this path and buried the one
+    # table the stage exists to produce.
+    for noisy in ("peewee", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.CRITICAL)
+
+    # exchanges is accepted and unused by the broker sources - both key on
+    # the bare ticker - but the master list knows it and a future source
+    # that needs a venue would otherwise have to re-derive it.
+    exchanges = exchanges or {}
+    by_source: Dict[str, int] = {}
+    # Which scale each symbol's candles arrived on, counted the same way
+    # the sources are. A source that changes units is then a number that
+    # moves rather than a backtest that quietly stops using its filings.
+    by_unit: Dict[str, int] = {}
+
+    def record(source: str) -> None:
+        by_source[source] = by_source.get(source, 0) + 1
 
     existing_store = {}
     if os.path.exists(OUTPUT_FILE):
@@ -221,43 +344,89 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
 
     print(f"🚀 Starting Real Price Lake Sync for {len(symbols_list)} stocks...")
     start_time = time.time()
-    symbols_to_fetch = [s for s in symbols_list if s not in existing_store or len(existing_store[s].get("quarters", {})) < 8]
+    # A carried-over record is only usable if it is deep enough AND says
+    # what scale it is on. The second half is the one that was missing:
+    # every lake built before the normalisation is in thousands, and
+    # reusing it would produce a file half in dong and half not, with
+    # nothing downstream able to see the seam.
+    def _is_usable(record: Any) -> bool:
+        if not isinstance(record, dict):
+            return False
+        if len(record.get("quarters", {})) < 8:
+            return False
+        return record.get("price_unit") == PRICE_UNIT
+
+    stale_scale = sum(
+        1 for sym in symbols_list
+        if isinstance(existing_store.get(sym), dict)
+        and len(existing_store[sym].get("quarters", {})) >= 8
+        and existing_store[sym].get("price_unit") != PRICE_UNIT)
+    symbols_to_fetch = [s for s in symbols_list if not _is_usable(existing_store.get(s))]
 
     print(f"📦 Cached stocks: {len(existing_store)} | Stocks to fetch: {len(symbols_to_fetch)}")
+    if stale_scale:
+        print(f"♻️  {stale_scale} cached symbols carry no '{PRICE_UNIT}' stamp "
+              "and are refetched rather than trusted: they predate the scale "
+              "normalisation and are in thousands.")
 
-    # Fast batch fetch using yfinance (50 tickers per batch)
+    # --- sources 1 and 2: the brokers' own chart endpoints ----------------
+    # Concurrent because each symbol is an independent HTTPS request. A
+    # source that answers for nobody is dropped after PROBE_BEFORE_GIVING_UP
+    # symbols rather than being asked 1,500 times: neither endpoint has
+    # ever been reached from a machine that could test it, and a dead one
+    # would otherwise cost the stage half an hour of timeouts.
+    for source in BROKER_SOURCES:
+        if not symbols_to_fetch:
+            break
+        print(f"🌐 {source}: asking for {len(symbols_to_fetch)} symbols...")
+        started_source = time.time()
+        answered = 0
+        attempted = 0
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {pool.submit(_fetch_from_broker, source, sym): sym
+                       for sym in symbols_to_fetch}
+            for future in as_completed(futures):
+                sym = futures[future]
+                attempted += 1
+                if answered == 0 and attempted > PROBE_BEFORE_GIVING_UP:
+                    for pending in futures:
+                        pending.cancel()
+                    print(f"  ⚠️ {source} answered for none of the first "
+                          f"{PROBE_BEFORE_GIVING_UP}; not asking it for the "
+                          f"rest. Read this as the endpoint being wrong, "
+                          f"not as the universe having no prices.")
+                    break
+                try:
+                    df = future.result()
+                except Exception:
+                    logger.debug("%s fetch failed for %s", source, sym, exc_info=True)
+                    continue
+                if df is None or len(df) < 10:
+                    continue
+                unit = normalise_to_dong(sym, df)
+                if unit:
+                    by_unit[unit] = by_unit.get(unit, 0) + 1
+                res = compute_stock_quarterly_returns(sym, df)
+                if res and res.get("total_quarters", 0) >= 4:
+                    existing_store[sym] = res
+                    record(source)
+                    answered += 1
+        print(f"🌐 {source} answered for {answered} of {len(symbols_to_fetch)} "
+              f"in {round(time.time() - started_source, 1)}s")
+        symbols_to_fetch = [s for s in symbols_to_fetch if s not in existing_store]
+        print(f"📦 Still to fetch after {source}: {len(symbols_to_fetch)}")
+
+    # DNSE answered for 1,364 of the 1,400 symbols on run 34586582908.
+    # yfinance was asked for the 36 it missed and answered for none of
+    # them, while printing one "possibly delisted" block per ticker; it
+    # has never been measured carrying a single symbol of this lake. A
+    # source that costs noise and returns nothing is removed, not
+    # silenced. vnstock stays as the last resort: it answered for 3.
     BATCH_SIZE = 50
     success_count = 0
 
     for i in range(0, len(symbols_to_fetch), BATCH_SIZE):
         chunk = symbols_to_fetch[i:i + BATCH_SIZE]
-        tickers_str = " ".join([f"{s}.VN" for s in chunk])
-        
-        try:
-            yf_data = yf.download(tickers_str, start="2016-01-01", end="2026-03-31", group_by="ticker", progress=False, threads=True)
-            for sym in chunk:
-                ticker_key = f"{sym}.VN"
-                try:
-                    if len(chunk) == 1:
-                        df = yf_data
-                    else:
-                        if hasattr(yf_data.columns, 'levels') and ticker_key in yf_data.columns.levels[0]:
-                            df = yf_data[ticker_key].dropna(how="all")
-                        else:
-                            df = None
-                    if df is not None and not df.empty and len(df) >= 10:
-                        df = df.reset_index()
-                        df.columns = [c.lower() for c in df.columns]
-                        res = compute_stock_quarterly_returns(sym, df)
-                        if res and res.get("total_quarters", 0) >= 4:
-                            existing_store[sym] = res
-                            success_count += 1
-                            if success_count % 15 == 0 or success_count <= 5:
-                                print(f"  ✓ [{success_count}] {sym}: {res['total_quarters']} Quarters ({res['earliest_quarter']} -> {res['latest_quarter']})")
-                except Exception:
-                    logger.debug("sync_all_symbols: swallowed Exception", exc_info=True)
-        except Exception as e:
-            print(f"  ⚠️ Batch download error: {e}")
 
         # Fallback individual fetch for remaining missed symbols in chunk
         for sym in chunk:
@@ -265,9 +434,13 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                 try:
                     df = fetch_stock_raw_candles(sym)
                     if df is not None and len(df) >= 10:
+                        unit = normalise_to_dong(sym, df)
+                        if unit:
+                            by_unit[unit] = by_unit.get(unit, 0) + 1
                         res = compute_stock_quarterly_returns(sym, df)
                         if res and res.get("total_quarters", 0) >= 4:
                             existing_store[sym] = res
+                            record("vnstock")
                             success_count += 1
                 except Exception:
                     logger.debug("sync_all_symbols: swallowed Exception", exc_info=True)
@@ -278,7 +451,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
                 "version": "3.5-unified-expanded",
                 "last_updated": datetime.datetime.now().isoformat(),
                 "total_symbols": len(existing_store),
-                "source": "TradingView & Yahoo Finance Live Data Feeds",
+                "source": ", ".join(f"{k}:{v}" for k, v in sorted(by_source.items())) or "none",
                 "symbols": existing_store
             }
             with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
@@ -289,7 +462,7 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
         "version": "3.5-unified-expanded",
         "last_updated": datetime.datetime.now().isoformat(),
         "total_symbols": len(existing_store),
-        "source": "TradingView & Yahoo Finance Live Data Feeds",
+        "source": ", ".join(f"{k}:{v}" for k, v in sorted(by_source.items())) or "none",
         "symbols": existing_store
     }
 
@@ -298,6 +471,55 @@ def sync_all_symbols(symbols_list: List[str], max_workers: int = 10) -> Dict[str
 
     elapsed = round(time.time() - start_time, 2)
     print(f"✨ Successfully synced {len(existing_store)} stocks in {elapsed}s to {OUTPUT_FILE}")
+    # The tally is the point of this pass. Whether vnstock can be dropped
+    # is decided by the number next to it, not by preference: a source
+    # that answered for nobody costs nothing to remove, and one that
+    # answered for hundreds is carrying the backtest.
+    # Written to a file as well as printed. The job log is not readable
+    # from where these results get read - the artifact host is refused and
+    # the log API only serves the tail - so a table buried thirty minutes
+    # deep in a stage is a table nobody sees. The pass appends this file
+    # to the step summary, which is the one channel that always arrives.
+    tally: List[str] = []
+    tally.append("### Where the prices came from")
+    tally.append("")
+    tally.append("| price source | symbols it answered for |")
+    tally.append("|---|---:|")
+    for source, count in sorted(by_source.items(), key=lambda kv: -kv[1]):
+        tally.append(f"| {source} | {count:,} |")
+    tally.append("")
+    tally.append("| scale the candles arrived on | symbols |")
+    tally.append("|---|---:|")
+    for unit, count in sorted(by_unit.items(), key=lambda kv: -kv[1]):
+        tally.append(f"| {unit} | {count:,} |")
+    if by_unit.get("thousands"):
+        tally.append("")
+        tally.append(f"**{by_unit['thousands']:,}** symbols were quoted in "
+                     "thousands of dong and multiplied by 1,000 on the way "
+                     "in. The backtest compares this price absolutely "
+                     "against a fair value built from dong fundamentals, "
+                     "so a series left in thousands reads as a ~100% "
+                     "discount on every symbol.")
+    print()
+    for line in tally:
+        print(line)
+    quiet = [s for s in BROKER_SOURCES if not by_source.get(s)]
+    if quiet:
+        print()
+        print(f"- **{', '.join(quiet)} answered for nobody.** Read a zero "
+              "as the endpoint or its parameters being wrong, not as the "
+              "universe having no prices: the other rows say whether the "
+              "prices exist. A source that stays at zero for a whole pass "
+              "should be deleted, not left to spend its forty probe "
+              "requests again next time.")
+    print()
+
+    summary_path = os.path.join(DATA_DIR, "price_sources.md")
+    try:
+        with open(summary_path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(tally) + "\n")
+    except OSError:
+        logger.warning("could not write %s", summary_path, exc_info=True)
     return payload
 
 if __name__ == "__main__":
@@ -307,6 +529,18 @@ if __name__ == "__main__":
     symbols_file = os.path.join(DATA_DIR, "all_symbols.json")
     valid_stocks = []
     seen = set()
+    # Why each symbol the master list carries was not asked for a price.
+    # The universe the valuation engine scores is 1,524 symbols; this
+    # filter has been handing the price sync 1,400 of them, and the 124
+    # that never get asked have been reported as "no price" ever since -
+    # indistinguishable, from every table downstream, from a symbol the
+    # sources refused. A rejection nobody can see is a rejection nobody
+    # can argue with, so each one is counted under the rule that made it.
+    rejected: Dict[str, List[str]] = {}
+
+    def reject(reason: str, sym: str) -> None:
+        rejected.setdefault(reason, []).append(sym)
+
     if os.path.exists(symbols_file):
         with open(symbols_file, "r", encoding="utf-8") as f:
             raw = json.load(f)
@@ -314,14 +548,48 @@ if __name__ == "__main__":
                 sym = r.get("symbol", "").upper().strip()
                 ex = r.get("exchange", "").upper().strip()
                 stype = (r.get("type") or "STOCK").upper()
-                if len(sym) == 3 and sym.isalpha() and ex in ["HOSE", "HNX", "UPCOM"] and stype in ["STOCK", "CP", "CO_PHIEU", ""]:
-                    if sym not in seen:
-                        seen.add(sym)
-                        valid_stocks.append((sym, ex))
+                if sym in seen:
+                    continue
+                if not (len(sym) == 3 and sym.isalpha()):
+                    reject("not a 3-letter alphabetic ticker", sym or "(blank)")
+                    continue
+                if ex not in ("HOSE", "HNX", "UPCOM"):
+                    reject(f"exchange {ex or '(blank)'}", sym)
+                    continue
+                if stype not in ("STOCK", "CP", "CO_PHIEU", ""):
+                    reject(f"type {stype}", sym)
+                    continue
+                seen.add(sym)
+                valid_stocks.append((sym, ex))
 
     order = {"HOSE": 1, "HNX": 2, "UPCOM": 3}
     valid_stocks.sort(key=lambda x: order.get(x[1], 99))
     syms = [x[0] for x in valid_stocks]
-    
-    print(f"📋 Loaded {len(syms)} clean 3-letter stock symbols across HOSE, HNX, UPCOM.")
-    sync_all_symbols(syms, max_workers=10)
+
+    total = len(syms) + sum(len(v) for v in rejected.values())
+    lines = ["## Which symbols the price sync is allowed to ask for", "",
+             f"- master list: **{total}**",
+             f"- asked for a price: **{len(syms)}**",
+             f"- filtered out before any fetch: **{total - len(syms)}**", ""]
+    if rejected:
+        lines += ["| filtered out by | symbols | which |", "|---|---:|---|"]
+        for reason, syms_out in sorted(rejected.items(),
+                                       key=lambda kv: -len(kv[1])):
+            shown = ", ".join(sorted(syms_out)[:40])
+            if len(syms_out) > 40:
+                shown += f", ... (+{len(syms_out) - 40})"
+            lines.append(f"| {reason} | {len(syms_out)} | {shown} |")
+        lines.append("")
+    print("\n".join(lines))
+    try:
+        with open(os.path.join(DATA_DIR, "price_universe.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+    except OSError:
+        logger.warning("could not write price_universe.md", exc_info=True)
+
+    # The exchange is known here and no current source needs it. Kept
+    # because the master list knows it and a source that wants a venue
+    # would otherwise re-derive it - TradingView did, on run 34627185323.
+    sync_all_symbols(syms, max_workers=10,
+                     exchanges={sym: ex for sym, ex in valid_stocks})

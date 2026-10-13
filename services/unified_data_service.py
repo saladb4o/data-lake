@@ -34,6 +34,7 @@ from services.quant_scoring import score_universe
 from services.tls_config import TLS_VERIFY, configure_urllib_warnings
 from services.stock_service import resolve_data_file
 from services.rate_limiter import limit
+from services.accounting_identities import solve as solve_accounting_identities
 
 configure_urllib_warnings()
 
@@ -318,6 +319,103 @@ def fetch_tradingview_batch_by_tickers(
 # 1.5. VNDIRECT FINFO DEEP FINANCIAL STATEMENTS (TIER 2 WITNESS)
 # =============================================================================
 
+#: itemCode -> the VNDIRECT lines a field is read from, and how the codes
+#: combine. Module level and public because it is read from two places:
+#: this service, which publishes the live screener, and
+#: scripts/build_historical_fundamentals.py, which builds the quarterly
+#: lake the point-in-time backtest values symbols against.
+#:
+#: That script used to carry its own copy of these codes, and the copy is
+#: what makes this a table rather than a set of literals inline. Both
+#: cfo and debt were corrected here on measured evidence - cfo from the
+#: adjustment lines to the section total, debt from total liabilities to
+#: borrowings - and the copy went on reading the old codes, so the lake
+#: and the screener would have disagreed about the same company on the
+#: same quarter with nothing to say which was right.
+#:
+#: The rule travels with the codes, and it has to. "first" is a fallback
+#: chain: one line the vendor may file under either code, so the first
+#: that answers wins and the rest are alternatives. "sum" is a figure
+#: that IS two separate lines added, and reading it as a chain publishes
+#: the first half as the whole - a smaller number than the truth, in a
+#: ratio the screener displays, with nothing downstream able to notice.
+#: Sharing the codes without the rule would hand that bug straight to the
+#: second reader.
+#:
+#: Time aggregation is NOT here and is each caller's own business: the
+#: screener wants a trailing twelve months, the lake wants each quarter
+#: as filed. Both ask the same question about which code to read.
+VNDIRECT_ITEM_CODES: Dict[str, Tuple[Tuple[int, ...], str]] = {
+    # Income statement, in entity-form order: non-finance, bank,
+    # securities, insurance.
+    "revenue":      ((21001, 421900, 21000, 21010), "first"),
+    "net_income":   ((23000, 23800, 23001), "first"),
+    "ebit":         ((21020, 22000), "first"),
+
+    # Cash flow. itemCode is 3 + the two-digit VAS B03 code + 00, which
+    # the statement's own arithmetic established rather than a chart of
+    # accounts: over 153 companies, checked one at a time, net change =
+    # operating + investing + financing held 153 of 153, and cash at end
+    # = cash at start + net change held 149 of 153. So 32000 is VAS 20,
+    # the operating section total.
+    #
+    # 31000 and 31100 are adjustment lines inside that section, non-zero
+    # for 25 of 155 companies where 32000 was non-zero for 153 of 153.
+    # They stay behind the total rather than being dropped: a payload
+    # carrying the adjustments and not the total is worth reading rather
+    # than refusing.
+    "cfo":          ((32000, 31000, 31100), "first"),
+    "da":           ((31110, 31010), "first"),
+    # capex reads VAS 21 and the decoding says 32100 is VAS 21, so this
+    # is unchanged - but it is not confirmed either, and the census gives
+    # reason to doubt it: 32100 was non-zero for 8 of 152 companies in
+    # one run and 0 of 144 in the next. That is either a population that
+    # bought no fixed assets or a second wrong code, and nothing measured
+    # so far tells those apart.
+    "capex":        ((32100, 32110, 32010), "first"),
+
+    # Balance sheet. itemCode is 1 + the three-digit VAS code + 0,
+    # confirmed by median share of total assets: 12700 = 1.0000 (VAS 270
+    # total assets), 11000 = 0.6349 (VAS 100), 12000 = 0.3929 (VAS 200),
+    # 11300 = 0.1341 (VAS 130), 11100 = 0.0195 (VAS 110).
+    "total_assets": ((12700, 10000, 11000), "first"),
+    "equity":       ((14000, 14100), "first"),
+    "cash":         ((11100,), "first"),
+    "gross_ppe":    ((12110, 12100), "first"),
+
+    # Borrowings, not liabilities, and a sum rather than a chain.
+    #
+    # This read 13000 and 13100 - VAS 300 total liabilities and VAS 310
+    # current liabilities. Trade payables, customer deposits and accrued
+    # expenses are none of them borrowings, and the figure went straight
+    # into net_de_ratio across the screener. Scored against the total
+    # debt TradingView carries at tier 3, while that yardstick was still
+    # independent of this extractor:
+    #
+    #   13110 + 13340  (QD15 vay ngan han + vay dai han)   16.4%  25/152
+    #   13110 alone                                        10.6%  16/151
+    #   13000 + 13100  (what this used to read)             1.3%   2/152
+    #   13200 + 13340  (TT200 numbering)                    0.0%   0/152
+    #
+    # 16.4% is weak and is not claimed otherwise. It is twelve times the
+    # alternative, and the alternative is certainly wrong rather than
+    # merely unconfirmed, so this trades a certain error for an uncertain
+    # one.
+    "debt":         ((13110, 13340), "sum"),
+
+    # Total liabilities is a real figure and stays available under its own
+    # name. What it is not is debt, and assigning it to debt is the error
+    # the entry above records. The quarterly lake publishes it because a
+    # record needs a minimum number of statement fields to count as
+    # usable, and because assets - liabilities - equity is an identity
+    # something downstream may want to check.
+    "total_liabilities": ((13000, 13100), "first"),
+}
+
+#: How VNDIRECT_ITEM_CODES entries are allowed to combine.
+VNDIRECT_COMBINE_RULES = ("first", "sum")
+
+
 def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: int = 4000) -> Dict[str, Any]:
     """
     Tier 2 Reported Witness: Fetches deep historical statements from VNDIRECT Finfo API with L1/L2 Disk Lake caching.
@@ -402,35 +500,108 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
                     return s * (4.0 / len(vals)) if report_type == "QUARTER" else vals[0]
         return None
 
+    def _latest_sum(code_list):
+        """The latest value of every code in the list, added together.
+
+        _latest takes the FIRST code that answers and stops - it is a
+        fallback chain, for one line the vendor might file under either
+        of two codes. A figure that is genuinely the sum of two separate
+        lines, such as short-term plus long-term borrowings, needs this
+        instead: passing such a pair to _latest silently publishes the
+        short-term half as the whole.
+        """
+        values = [val_lookup[c].get(latest_d) for c in code_list
+                  if c in val_lookup
+                  and val_lookup[c].get(latest_d) is not None]
+        return sum(values) if values else None
+
     def _latest(code_list):
         for c in code_list:
             if c in val_lookup and val_lookup[c].get(latest_d) is not None:
                 return val_lookup[c].get(latest_d)
         return None
 
-    # Extraction across standard & financial sector item codes
-    rev_ttm = _sum_ttm([21001, 421900, 21000, 21010]) # Non-finance, Bank, Sec, Ins
-    ni_ttm = _sum_ttm([23000, 23800, 23001])
-    ebit_ttm = _sum_ttm([21020, 22000])
-    da_ttm = _sum_ttm([31110, 31010]) # Depreciation and Amortization from Cash Flow
-    capex_ttm = _sum_ttm([32100, 32110, 32010]) # Purchase of Fixed Assets / CapEx (32100 is primary VAS line)
-    cfo_ttm = _sum_ttm([31000, 31100]) # Net Cash Flows from Operating Activities
-    
+    def _flow_ttm(field):
+        """A trailing-twelve-month flow, by the shared table's rule."""
+        codes, how = VNDIRECT_ITEM_CODES[field]
+        if how != "first":
+            # _sum_ttm walks the codes as alternatives and stops at the
+            # first that answers, so it cannot honour "sum". Marking a
+            # flow field "sum" and leaving this out would publish one
+            # code where two were meant, silently. Refusing is the only
+            # safe answer until _sum_ttm learns to add.
+            raise ValueError(
+                f"{field!r} is {how!r}, which _sum_ttm cannot do")
+        return _sum_ttm(codes)
+
+    def _stock_latest(field):
+        """A balance-sheet figure at the latest date, by the same rule."""
+        codes, how = VNDIRECT_ITEM_CODES[field]
+        return _latest_sum(codes) if how == "sum" else _latest(codes)
+
+    # Extraction across standard & financial sector item codes. Which
+    # codes, and whether they chain or add, is VNDIRECT_ITEM_CODES above -
+    # shared with scripts/build_historical_fundamentals.py so the lake and
+    # the screener cannot read the same company differently.
+    rev_ttm = _flow_ttm("revenue")
+    ni_ttm = _flow_ttm("net_income")
+    ebit_ttm = _flow_ttm("ebit")
+    da_ttm = _flow_ttm("da")
+    capex_ttm = _flow_ttm("capex")
+    cfo_ttm = _flow_ttm("cfo")
+
     # Granular Working Capital & Industry Items
     delta_ar = _sum_ttm([31130]) # Delta Receivables
     delta_inv = _sum_ttm([31140]) # Delta Inventory
     delta_ap = _sum_ttm([31150]) # Delta Payables
     delta_wc = (delta_ar or 0.0) + (delta_inv or 0.0) - (delta_ap or 0.0)
-    
-    assets = _latest([12700, 10000, 11000])
-    equity = _latest([14000, 14100])
-    debt = _latest([13000, 13100])
+
+    assets = _stock_latest("total_assets")
+    equity = _stock_latest("equity")
+    debt = _stock_latest("debt")
+    cash = _stock_latest("cash")
+    gross_ppe = _stock_latest("gross_ppe")
+    # Lines below are read here only - nothing else carries a copy of
+    # them, so there is no second list to drift and they stay inline.
     curr_assets = _latest([11000])
     curr_liab = _latest([13100])
-    cash = _latest([11100])
-    gross_ppe = _latest([12110, 12100])
     accum_deprec = _latest([12120])
-    landbank = _latest([11420, 12510]) # WIP Real Estate Inventory + Investment Properties
+    # The land bank is inventory, and the numbering is not the vendor's own.
+    #
+    # A census of all 112 developers that return a coded balance sheet
+    # settled both halves of this. 11420 appears in NONE of them and 12510
+    # appears in ALL of them with a value of zero in every single case, so
+    # the previous pair could never publish anything - which is exactly
+    # what the record showed: landbank_fq reached the snapshot for 0 of
+    # 112, and the `> 0` guard downstream was right to refuse a zero.
+    #
+    # The reason is legible once the scheme is: itemCode is 1 + the
+    # three-digit VAS balance-sheet code + 0. Confirmed on five independent
+    # lines by their median share of total assets -
+    #
+    #   12700 = 1.0000  VAS 270  TONG CONG TAI SAN
+    #   11000 = 0.6349  VAS 100  TAI SAN NGAN HAN
+    #   12000 = 0.3929  VAS 200  TAI SAN DAI HAN
+    #   11300 = 0.1341  VAS 130  Phai thu ngan han
+    #   11100 = 0.0195  VAS 110  Tien
+    #
+    # - which makes 11420 VAS 142, a line the standard form does not have,
+    # and 12510 VAS 251, long-term work in progress. A Vietnamese developer
+    # does not hold its pipeline there. It holds it in INVENTORY:
+    #
+    #   11400 = 0.2045  VAS 140  HANG TON KHO      106 of 112 non-zero
+    #   11410 = 0.2046  VAS 141  Hang ton kho      106 of 112 non-zero
+    #
+    # 11400 first because it is net of the obsolescence provision (VAS 149)
+    # and 11410 is gross; the net figure is the conservative one and the
+    # two differ by well under a percent of assets at the median.
+    #
+    # What this is not: inventory is the property pipeline at BOOK COST,
+    # including finished units, not a market appraisal of raw land. That is
+    # the right direction to be wrong in for model_18, whose rnav adds
+    # landbank_pipeline_val to cash and subtracts debt - a cost basis
+    # understates the RNAV rather than flattering it.
+    landbank = _latest([11400, 11410])
     unearned_revenue = _latest([13130]) # Short-term Customer Prepayments
     bank_loans = _latest([112000]) # Bank Gross Loans
     bank_loan_loss = _latest([112900]) # Bank Loan Loss Reserves
@@ -480,6 +651,15 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         "bank_loans_fq": bank_loans,
         "bank_loan_loss_fq": bank_loan_loss,
         "latest_fiscal_date": latest_d,
+        # How many quarters the TTM figures were built from, and which.
+        # _sum_ttm annualises by 4/len when the vendor sent fewer than
+        # four, so a figure here can be an annual RATE extrapolated from a
+        # single quarter rather than a year of trading. Without the count
+        # there is no way to tell those apart downstream, and a comparison
+        # against another vendor's true twelve months cannot say whether a
+        # gap is a disagreement or a different window.
+        "ttm_quarter_count": len(ttm_dates),
+        "ttm_dates": list(ttm_dates),
         "company_form": detected_form,
         # The itemCodes this payload actually carries. Kept so the sync can
         # census them without a second round of requests: the EBIT extractor
@@ -497,6 +677,53 @@ def fetch_vndirect_financials(symbol: str, report_type: str = "QUARTER", size: i
         # anything that publishes.
         "income_statement_ttm_by_code": {
             c: _sum_ttm([c]) for c in val_lookup if 20000 <= c < 30000
+        },
+        # {itemCode: its value at the latest fiscal date} for the balance
+        # sheet. The income statement got this treatment because its codes
+        # were wrong; the balance sheet never did, and the land bank
+        # (11420/12510) and the loan book (112000) are balance-sheet codes.
+        # So when those come back empty there is no way to tell a vendor
+        # that carries neither line from a pair of codes read wrong - which
+        # is exactly the question a run has now failed to answer twice.
+        # Diagnostic only; never read as a number by anything that
+        # publishes.
+        "balance_sheet_fq_by_code": {
+            c: val_lookup[c].get(latest_d)
+            for c in val_lookup
+            # Two numbering schemes live side by side: the non-financial
+            # balance sheet runs 10000-19999 (assets 12700, cash 11100),
+            # and the bank one runs 100000-199999 (gross loans 112000).
+            # A range that covered only the first would have declared the
+            # loan book absent for every bank by construction.
+            if (10000 <= c < 20000 or 100000 <= c < 200000)
+            and val_lookup[c].get(latest_d) is not None
+        },
+        # {itemCode: its TTM value} for the cash flow statement. Same
+        # reason as the other two: fcf blocks more symbols than any other
+        # driver, the extractor reads codes [31000, 31100] for operating
+        # cash flow and [32100, 32110, 32010] for capex, and when those
+        # come back empty there is no way to tell a payload with no cash
+        # flow statement from one whose codes are read wrong. The balance
+        # sheet turned out to be the second of those; nobody has checked
+        # which this is.
+        # Diagnostic only; never read as a number by anything that
+        # publishes.
+        "cash_flow_ttm_by_code": {
+            c: _sum_ttm([c]) for c in val_lookup if 30000 <= c < 40000
+        },
+        # The same statement read as a balance rather than as a flow.
+        #
+        # Two of its lines are stocks, not flows: cash at the start of the
+        # period and cash at the end. Summing four quarters of a closing
+        # balance produces roughly four times the balance and means
+        # nothing, so the TTM export above cannot be compared against the
+        # cash line on the balance sheet - and that comparison is the one
+        # piece of independent evidence available here, because the two
+        # statements are filed separately and have to meet at that number.
+        # Diagnostic only; never read as a number by anything that
+        # publishes.
+        "cash_flow_fq_by_code": {
+            c: _latest([c]) for c in val_lookup if 30000 <= c < 40000
         },
         # {itemCode: the vendor's own name for it}, taken from the rows just
         # parsed. Diagnostic only; never read as a number.
@@ -747,6 +974,10 @@ _VIETCAP_STATS_URL = (
 #: A margin is a ratio. Multiplied by revenue we already hold, in units we
 #: already know, it yields EBIT in our units with no unit assumption at all,
 #: through the rung the ladder already has and already tests.
+#:
+#: "No unit assumption" was too strong: a ratio still has a scale, and this
+#: vendor states it as a fraction while the consumer expects a percent. The
+#: scaling is done in the fetch, not here - see fetch_vietcap_ebit_margin.
 _VIETCAP_EBIT_MARGIN_ALIASES = (
     "ebitMargin", "ebit_margin",
 )
@@ -760,19 +991,42 @@ def _vietcap_latest_period(payload: Any) -> Dict[str, Any]:
     pinned by any contract available here, so every plausible arrangement is
     accepted and anything else yields {} - never a guess.
     """
+    def _newest(series: List[Any]) -> Dict[str, Any]:
+        rows = [r for r in series if isinstance(r, dict) and r]
+        if not rows:
+            return {}
+        # Sort, never take the first. This function was written to take
+        # rows[0] under the assumption that the vendor serves newest-first,
+        # and the census disproved it outright: across 714 companies the
+        # median `year` on the first row is 2018. Every margin this route
+        # has ever returned was a seven-year-old period wearing the name of
+        # the latest one - the worst kind of wrong, because it is a real
+        # number from a real filing and nothing downstream can tell.
+        #
+        # Rows with no period at all sort last rather than being dropped:
+        # a single-record body still has to be returnable.
+        def key(row: Dict[str, Any]) -> Tuple[float, float]:
+            year = _safe_float(row.get("yearReport") or row.get("year"))
+            period = _safe_float(
+                row.get("lengthReport") or row.get("quarter")
+                or row.get("lengthReportYear")
+            )
+            return (year if year is not None else float("-inf"),
+                    period if period is not None else float("-inf"))
+
+        return max(rows, key=key)
+
     data = payload.get("data") if isinstance(payload, dict) else payload
     if isinstance(data, dict):
-        for key in ("quarters", "years"):
-            series = data.get(key)
+        for key_name in ("quarters", "years"):
+            series = data.get(key_name)
             if isinstance(series, list) and series:
-                for row in series:
-                    if isinstance(row, dict) and row:
-                        return row
+                newest = _newest(series)
+                if newest:
+                    return newest
         return data if all(not isinstance(v, (list, dict)) for v in data.values()) else {}
     if isinstance(data, list):
-        for row in data:
-            if isinstance(row, dict) and row:
-                return row
+        return _newest(data)
     return {}
 
 
@@ -791,15 +1045,374 @@ def fetch_vietcap_ebit_margin(symbol: str) -> Optional[float]:
         record = _vietcap_latest_period(resp.json())
     except ValueError:
         return None
-    margin = _safe_float(_first_alias(record, _VIETCAP_EBIT_MARGIN_ALIASES))
+    # Scaled inside the conversion, not after it. _safe_float rounds to two
+    # decimals, which is harmless for a figure in dong and destroys a
+    # fraction: 0.084 becomes 0.08 before anything can multiply it, and a
+    # 0.4% margin becomes zero. Its `scale` parameter exists for exactly
+    # this and multiplies before rounding, so 0.084 -> 8.4.
+    margin = _safe_float(
+        _first_alias(record, _VIETCAP_EBIT_MARGIN_ALIASES), scale=100.0)
     if margin is None:
         return None
-    # A margin outside this band is not a percentage - it is either a
-    # fraction the vendor labelled a percent, or a different quantity
-    # altogether. Either way it is discarded rather than reinterpreted.
+    # This route states the margin as a FRACTION, and said so all along.
+    #
+    # The band check below was written to catch a fraction wearing the name
+    # of a percent, and could not: 0.04 sits comfortably inside -100..100,
+    # so the guard passed every fraction it existed to stop. The consumer
+    # then computes revenue * (margin / 100), which for a real 4% margin
+    # yields an EBIT a hundred times too small - tier 2, through the gate,
+    # and indistinguishable downstream from a small company. Missing data
+    # is refused; this was answered, wrongly.
+    #
+    # Two independent witnesses fix the unit, neither of them a guess:
+    #
+    #   - The census measured ebit and revenue separately on this same
+    #     record and ebit/revenue = 0.0405, while the record's own
+    #     ebitMargin reads 0.04. A ratio of two dong figures is a fraction
+    #     by construction, so the field beside it carrying the same number
+    #     is a fraction too.
+    #   - fetch_vietcap_ebit_margin_graphql, feeding the SAME column from
+    #     the SAME vendor, computes ebit/revenue*100 and returns a percent.
+    #     One consumer was being fed two units under one name.
+    #
+    # So it is scaled at the boundary, and the band is applied after
+    # scaling where it can finally reject something.
     if not (-100.0 <= margin <= 100.0):
         return None
     return margin
+
+
+#: An operating line in raw dong, as this route serves it. The census
+#: measured both the coverage and the unit: ebit answers for 660 of the 720
+#: companies with no operating line at a median of 8.12e9, ebitda for 659 at
+#: 1.55e10, and dividing each by the revenue already held in dong gives
+#: 0.0405 and 0.0766 - the first of which equals the ebitMargin the same
+#: record reports independently. Two witnesses to the same unit.
+_VIETCAP_EBIT_ALIASES = ("ebit",)
+_VIETCAP_EBITDA_ALIASES = ("ebitda",)
+
+#: A VN listed company's operating line, in dong. Below a million the figure
+#: is in some other unit or is noise; above 1e15 it is larger than the whole
+#: exchange. Negative is ordinary and must survive - a loss-making company
+#: has an EBIT, and discarding it would silently turn a real loss into no
+#: data at all.
+_OPERATING_LINE_FLOOR = 1e6
+_OPERATING_LINE_CEILING = 1e15
+
+
+def _plausible_operating_line(value: Any) -> Optional[float]:
+    """The value if it can be an operating line in dong, else None."""
+    num = _safe_float(value)
+    if num is None or num == 0.0:
+        return None
+    return num if _OPERATING_LINE_FLOOR <= abs(num) <= _OPERATING_LINE_CEILING else None
+
+
+#: Return on invested capital, as this route states it.
+#:
+#: roic is the single largest blocking driver at 185 symbols and the most
+#: common reason in the refused list - APT, BT6, DFF and DAG are refused on
+#: roic alone, BOT, DSG, DTC and FTM on roic and fcf. Every one of them is
+#: tier-3 on its core data. They are not short of a vendor; they were short
+#: of a question nobody asked.
+#:
+#: Because the ladder read only TradingView's return_on_invested_capital_fq,
+#: and this route reports roic for 629 of 720 measured companies, named, at
+#: a median of 0.06 - measured, named, and connected to nothing. That is the
+#: fourteenth instance of this shape in the audit.
+#:
+#: Stated as a FRACTION, like every ratio on this record: the census read
+#: roe 0.08, roa 0.05, ebitMargin 0.04 alongside it, and ebitMargin was
+#: proved a fraction against ebit/revenue on the same record. The consumer
+#: wants a percentage in -100..100, so it is scaled through _safe_float's
+#: own `scale`, which multiplies before rounding - rounding first would turn
+#: 0.084 into 0.08 and a 0.4% return into nothing at all.
+_VIETCAP_ROIC_ALIASES = ("roic",)
+
+
+def fetch_vietcap_roic(symbol: str) -> Optional[float]:
+    """ROIC as a percentage for one symbol; None when unavailable.
+
+    Never raises; every failure shape yields None.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        return None
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return None
+    roic = _safe_float(_first_alias(record, _VIETCAP_ROIC_ALIASES), scale=100.0)
+    if roic is None or roic == 0.0:
+        return None
+    # The same band the consumer applies. A return outside it is not a
+    # return on capital that this vendor measured; it is discarded rather
+    # than reinterpreted.
+    return roic if -100.0 <= roic <= 100.0 else None
+
+
+def fetch_vietcap_operating_lines(symbol: str) -> Dict[str, float]:
+    """EBIT and EBITDA in dong for one symbol; {} when unavailable.
+
+    Preferred over the margin route wherever it answers, for a reason that
+    is about provenance rather than convenience. A margin has to be
+    multiplied by revenue, so the result can be no better than the revenue -
+    it inherits that tier, and for a company whose revenue is a sector
+    stand-in it is refused outright. A reported EBIT is the vendor stating
+    the line itself, which is tier 3 on its own and needs nothing else.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry("GET", _VIETCAP_STATS_URL.format(sym=symbol), timeout=10)
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+    out: Dict[str, float] = {}
+    ebit = _plausible_operating_line(_first_alias(record, _VIETCAP_EBIT_ALIASES))
+    if ebit is not None:
+        out["ebit"] = ebit
+    ebitda = _plausible_operating_line(_first_alias(record, _VIETCAP_EBITDA_ALIASES))
+    if ebitda is not None:
+        out["ebitda"] = ebitda
+    # roic comes off the record already in hand. The same request that
+    # answers for the operating line answers for the return on capital, so
+    # taking it here costs nothing and spares these symbols a second call.
+    roic = _safe_float(_first_alias(record, _VIETCAP_ROIC_ALIASES), scale=100.0)
+    if roic is not None and roic != 0.0 and -100.0 <= roic <= 100.0:
+        out["roic"] = roic
+    return out
+
+
+#: Vietcap's financial-statement route, the same one the census reads.
+#: statistics-financial states ratios and a handful of summary lines; this
+#: one states the statement itself, row by row, under the vendor's own VAS
+#: codes.
+_VIETCAP_STATEMENT_URL = (
+    "https://iq.vietcap.com.vn/api/iq-insight-service"
+    "/v1/company/{sym}/financial-statement"
+)
+
+#: The two cash-flow rows, named by the vendor rather than inferred.
+#:
+#: The census printed Vietcap's own label beside every code, and these two
+#: read:
+#:
+#:   cfa18  "Luu chuyen tien te rong tu cac hoat dong san xuat kinh doanh"
+#:          / "Net cash inflows/(outflows) from operating activities"
+#:   cfa19  "Tien chi de mua sam, xay dung TSCD va cac tai san dai han khac"
+#:          / "Purchase of fixed assets and other long term assets"
+#:
+#: which is operating cash flow and capital expenditure, stated. An earlier
+#: pass had noticed that cfa18 is non-zero for all 198 companies, positive,
+#: at +7.6% of revenue, and cfa19 negative for 165 at -3.2% - the shape of
+#: CFO and capex. That shape was deliberately not acted on, because shape is
+#: what the census exists to stop anyone acting on. These names are.
+_VIETCAP_CFO_ALIASES = ("cfa18",)
+_VIETCAP_CAPEX_ALIASES = ("cfa19",)
+
+
+def fetch_vietcap_cash_flow(symbol: str) -> Dict[str, float]:
+    """Operating cash flow and capex in dong; {} when unavailable.
+
+    Same plausibility bound and same latest-period rule as the operating
+    lines, for the same reasons: a figure below a million dong is in some
+    other unit, and the vendor does not serve newest-first.
+
+    Capex keeps whatever sign the vendor gave it. Every consumer downstream
+    takes abs() of it, so the sign carries no meaning here and inverting it
+    would only invent one.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATEMENT_URL.format(sym=symbol),
+        params={"section": "CASH_FLOW"}, timeout=10,
+    )
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+    out: Dict[str, float] = {}
+    cfo = _plausible_operating_line(_first_alias(record, _VIETCAP_CFO_ALIASES))
+    if cfo is not None:
+        out["cfo"] = cfo
+    capex = _plausible_operating_line(_first_alias(record, _VIETCAP_CAPEX_ALIASES))
+    if capex is not None:
+        out["capex"] = capex
+    return out
+
+
+#: The income-statement rows, named by the vendor rather than inferred.
+#:
+#: The census printed Vietcap's own label beside every code, and this
+#: statement turned out to carry, for 196-199 of the 200 companies that
+#: answered, every core line the gate was refusing them for:
+#:
+#:   isa3   "Doanh thu thuan"          / "Net sales"
+#:   isa20  "Lai/(lo) thuan sau thue"  / "Net profit/(loss) after tax"
+#:   isa23  "Lai co ban tren co phieu" / "EPS basic (VND)"
+#:   isa11  "Lai/(lo) tu HDKD"         / "Operating profit/(loss)"
+#:   isa8   "Chi phi lai vay"          / "Interest expenses"
+#:
+#: The census reported isa3 at 2.224x the revenue already held for these
+#: companies, which read at first like a misparsed revenue. It is not. The
+#: census divides by the revenue in the snapshot for symbols whose ebit tier
+#: is below 2 - which is very largely the tier-1 group, whose revenue is a
+#: sector median standing in for a number nobody had. A stand-in smaller
+#: than the truth is what a median looks like from the point of view of the
+#: companies above it. So isa3 is not contradicting a revenue we hold; it is
+#: supplying one we never had.
+#:
+#: That distinction decides how much this is worth. Revenue is a CORE
+#: driver, so unlike the cash-flow pair this does move the tier table: a
+#: company whose revenue goes from sector stand-in to vendor reported clears
+#: eps, sps, net_margin, roic and ebit in one step.
+_VIETCAP_IS_REVENUE_ALIASES = ("isa3",)
+_VIETCAP_IS_NET_INCOME_ALIASES = ("isa20",)
+_VIETCAP_IS_OPERATING_PROFIT_ALIASES = ("isa11",)
+_VIETCAP_IS_INTEREST_ALIASES = ("isa8",)
+
+#: EPS is in dong per share, not in dong, so the operating-line bound does
+#: not apply to it. A VN listed share earning less than one dong or more
+#: than a million is not an earnings figure.
+_VIETCAP_IS_EPS_ALIASES = ("isa23",)
+_EPS_FLOOR = 1.0
+_EPS_CEILING = 1e6
+
+
+def _plausible_eps(value: Any) -> Optional[float]:
+    """The value if it can be an EPS in dong per share, else None.
+
+    Zero is dropped rather than kept: the census found this column padded
+    with zeros for the companies that do not report it, so a zero here says
+    "not stated", not "earned nothing". A genuine loss arrives negative and
+    survives.
+    """
+    num = _safe_float(value)
+    if num is None or num == 0.0:
+        return None
+    return num if _EPS_FLOOR <= abs(num) <= _EPS_CEILING else None
+
+
+def fetch_vietcap_income_statement(symbol: str) -> Dict[str, float]:
+    """Core income-statement lines in dong for one symbol; {} when absent.
+
+    EBIT is reconstructed rather than read, because Vietnamese accounting
+    standards do not publish one. isa11 is operating profit after financial
+    expense, so adding back the interest expense isa8 - which the statement
+    states separately, and states negative - gives earnings before interest.
+    It is only offered when both halves are present; half a reconstruction
+    is not a smaller version of it.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATEMENT_URL.format(sym=symbol),
+        params={"section": "INCOME_STATEMENT"}, timeout=10,
+    )
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+
+    out: Dict[str, float] = {}
+    for key, aliases in (
+        ("revenue", _VIETCAP_IS_REVENUE_ALIASES),
+        ("net_income", _VIETCAP_IS_NET_INCOME_ALIASES),
+        ("operating_profit", _VIETCAP_IS_OPERATING_PROFIT_ALIASES),
+    ):
+        value = _plausible_operating_line(_first_alias(record, aliases))
+        if value is not None:
+            out[key] = value
+
+    eps = _plausible_eps(_first_alias(record, _VIETCAP_IS_EPS_ALIASES))
+    if eps is not None:
+        out["eps"] = eps
+
+    interest = _plausible_operating_line(
+        _first_alias(record, _VIETCAP_IS_INTEREST_ALIASES))
+    if "operating_profit" in out and interest is not None:
+        out["ebit"] = out["operating_profit"] + abs(interest)
+    return out
+
+
+#: The balance-sheet rows, named by the vendor rather than inferred.
+#:
+#: The census printed Vietcap's own label beside all 122 codes, and only one
+#: of them is wired here:
+#:
+#:   bsa2  "Tien va tuong duong tien" / "Cash and cash equivalents"
+#:
+#: which it reports for 71 of the 73 companies the gate is still refusing.
+#: cash is a CORE driver and the second-largest blocking driver at 150
+#: symbols, so this is a tier-table change rather than a cosmetic one.
+#:
+#: DEBT IS DELIBERATELY NOT WIRED, AND THE REASON CHANGED ON READING.
+#:
+#: This route was left unread for two runs on the grounds that debt could not
+#: be defined without the vendor's names for the borrowing lines. The names
+#: arrived - bsa56 "Vay ngan han" / short-term borrowings, bsa71 "Vay dai han"
+#: / long-term borrowings - and they do not help: bsa56 carries a figure for
+#: 25 of 73 companies and bsa71 for 17. Summing them would produce a real debt
+#: for about a third of this group and a zero for the rest, and a zero here is
+#: not "no borrowings", it is "not stated". That distinction is invisible
+#: downstream: zero is a valid number, it passes the provenance gate at the
+#: vendor's own tier, and it lowers enterprise value for every company it
+#: touches. Missing data is refused; a fabricated zero is answered, wrongly.
+#:
+#: The near-complete line beside them is bsa54 "NO PHAI TRA" / Liabilities, at
+#: 72 of 73 - but that is TOTAL liabilities, trade payables, taxes and wages
+#: included, and the models spend debt on enterprise value as
+#: market_cap + debt - cash. Substituting it would overstate EV for every
+#: company that buys on credit, which is most of them. It belongs to the
+#: resolver's separate total_liabilities field, not to this one.
+#:
+#: So the obstacle was never the missing name. It was missing data wearing a
+#: missing name, and reading the names is what told the two apart.
+_VIETCAP_BS_CASH_ALIASES = ("bsa2",)
+
+
+def fetch_vietcap_balance_sheet(symbol: str) -> Dict[str, float]:
+    """Cash and cash equivalents in dong; {} when unavailable.
+
+    Same plausibility bound and same latest-period rule as the other two
+    statements, for the same reasons: a figure below a million dong is in
+    some other unit, and this vendor does not serve newest-first.
+
+    Only cash is returned. See the note above for why debt is not.
+
+    Never raises; every failure shape yields {}.
+    """
+    symbol = symbol.upper().strip()
+    resp = _request_with_retry(
+        "GET", _VIETCAP_STATEMENT_URL.format(sym=symbol),
+        params={"section": "BALANCE_SHEET"}, timeout=10,
+    )
+    if resp is None:
+        return {}
+    try:
+        record = _vietcap_latest_period(resp.json())
+    except ValueError:
+        return {}
+
+    out: Dict[str, float] = {}
+    cash = _plausible_operating_line(
+        _first_alias(record, _VIETCAP_BS_CASH_ALIASES))
+    if cash is not None:
+        out["cash"] = cash
+    return out
 
 
 #: Vietcap's GraphQL ratio service. Confirmed twice over: vnstock's own
@@ -1311,6 +1924,12 @@ def reconstruct_financial_triangles(
     cash_equiv = _safe_float(tv_data.get("cash_n_short_term_invest_fq") or tv_data.get("cash_n_cash_equivalents_fq"), default=0.0)
     curr_assets_raw = _safe_float(tv_data.get("total_current_assets_fq"))
     curr_liab_raw = _safe_float(tv_data.get("total_current_liabilities_fq"))
+    # retained_earnings_fq is in TV_COLUMNS and was read by no line of code
+    # in the repository. It is a reported balance-sheet line and the sole
+    # real input Altman Z'' lacked; without it the score rested on an
+    # assertion that retained earnings are 20% of book equity for every
+    # company listed in Vietnam.
+    retained_earnings_raw = _safe_float(tv_data.get("retained_earnings_fq"))
     ppe_gross_raw = _safe_float(tv_data.get("ppe_total_gross_fq"))
     accum_dep_raw = _safe_float(tv_data.get("accum_deprec_total_fq"))
     goodwill_raw = _safe_float(tv_data.get("goodwill_fq"), default=0.0)
@@ -1344,6 +1963,16 @@ def reconstruct_financial_triangles(
     if s0_curr_liab is not None:
         curr_liab_raw = s0_curr_liab
         field_provenance["current_liabilities"] = 4
+    elif curr_liab_raw is not None:
+        # total_current_liabilities_fq has been requested from the vendor and
+        # read into curr_liab_raw since the beginning, and the only rung that
+        # ever tiered it was the Source-0 override above. Everywhere else the
+        # figure was a reported number with no provenance, which under the
+        # fail-closed rule is indistinguishable from a number nobody has -
+        # so current liabilities could never be published, and every identity
+        # standing on them (working capital first among them) had to fall
+        # back on a fabricated fraction of the balance sheet.
+        field_provenance["current_liabilities"] = 3
 
     # Calculate Net PPE using accumulated depreciation if reported
     if ppe_gross_raw is not None and accum_dep_raw is not None:
@@ -1401,6 +2030,15 @@ def reconstruct_financial_triangles(
         field_provenance["current_assets"] = 1
     else:
         curr_assets = None
+
+    # Retained earnings. Reported or nothing: a company's accumulated
+    # profits cannot be inferred from the rest of the balance sheet without
+    # assuming the very thing Altman Z'' is asked to measure, so there is no
+    # second rung here on purpose. Where the vendor is silent the line is
+    # not published, working_capital and retained_earnings resolve imputed,
+    # and the score is labelled unreliable - which is the honest answer.
+    if retained_earnings_raw is not None:
+        field_provenance["retained_earnings"] = 3
 
     # D/E and Net D/E
     raw_de = _safe_float(tv_data.get("debt_to_equity_fq"))
@@ -1815,6 +2453,40 @@ def reconstruct_financial_triangles(
         div_yield = 0.0
         field_provenance["dividend_yield"] = 0
 
+    # Dividend per share, from the yield that was already here.
+    #
+    # dividend_per_share is the largest blocking driver at 162 symbols, and
+    # nothing in this file has ever written it. The resolver asks
+    # res.resolve("dividend_per_share", ("dividend_per_share",)) - one key,
+    # no aliases - and no producer emits that key, so the ask has never once
+    # been answered and utilities_3stage_ddm has been suppressed for every
+    # company in the universe since it was written.
+    #
+    # The ingredient was never missing. div_yield is measured above, carries
+    # its own provenance tier, and is normalised to a percentage two lines
+    # up: the vendor sends either 5.0 or 0.05 for a 5% yield, and the
+    # `0 < abs(x) <= 1.0` branch settles which. So the dividend is
+    # price * yield / 100, in dong per share, from two figures already held.
+    # Measured, tiered, connected to nothing - the fifteenth time in this
+    # audit, and the purest: a consumer asking by a name no producer writes.
+    #
+    # Offered only for a yield that was actually reported and is positive.
+    # The else-branch above sets div_yield to 0.0 at tier 0, and a zero
+    # dividend is not a small dividend - it means the vendor said nothing.
+    # Emitting 0.0 would hand the DDM a number to divide by and turn a
+    # refusal into an answer, which is the failure this whole gate exists to
+    # prevent. Absent, the resolver imputes it and the model stays suppressed,
+    # exactly as it does today.
+    #
+    # price is an input, so the fabricated 10000.0 fallback poisons this the
+    # same way it poisons pe and eps above.
+    if div_yield_raw is not None and div_yield > 0 and price > 0:
+        dividend_per_share = round(price * div_yield / 100.0, 2)
+        _prop("dividend_per_share", 2,
+              field_provenance["dividend_yield"], price_tier)
+    else:
+        dividend_per_share = None
+
     # -------------------------------------------------------------
     # 6. CFO to PAT Ratio (Cash Conversion Ratio)
     # -------------------------------------------------------------
@@ -1849,6 +2521,23 @@ def reconstruct_financial_triangles(
         field_provenance["rev_1y_growth"] = 1  # Constant fill, not reported
     else:
         field_provenance["rev_1y_growth"] = 3
+
+    # Last year's revenue, recovered from this year's and the growth rate
+    # the vendor reports against it. Both numbers are already here; the
+    # engine's DCF asked for prev_revenue, no producer had ever written it,
+    # and the impute standing in its place was revenue * (1 - g) using the
+    # engine's OWN forecast growth - which makes the historical base a
+    # function of the forecast, and the forecast then reads as confirmed by
+    # history. Recovering it from the reported growth breaks that loop.
+    #
+    # Guarded below -100%: a growth rate of exactly -100% means revenue went
+    # to zero, and anything past it would produce a negative prior year.
+    if revenue is not None and revenue > 0 and rev_1y is not None and rev_1y > -100.0:
+        prev_revenue = round(revenue / (1.0 + rev_1y / 100.0), 2)
+        _prop("prev_revenue", 2,
+              field_provenance["revenue"], field_provenance["rev_1y_growth"])
+    else:
+        prev_revenue = None
 
     pat_1y = _tv_first(
         "net_income_yoy_growth_fq", "net_income_yoy_growth_fy",
@@ -2092,6 +2781,23 @@ def reconstruct_financial_triangles(
         # D&A and fell back on asserting D&A is 25% of EBIT for every
         # company on earth.
         "da": (calc_da, "da"),
+        # The current halves of the balance sheet. Both were reconstructed
+        # and tiered here from the start and neither was ever published, so
+        # working capital - a subtraction of two numbers already in this
+        # function - had no derivation available downstream and stood on
+        # (assets - liabilities) * 0.25.
+        "current_assets": (curr_assets, "current_assets"),
+        "current_liabilities": (curr_liab_raw, "current_liabilities"),
+        "retained_earnings": (retained_earnings_raw, "retained_earnings"),
+        "prev_revenue": (prev_revenue, "prev_revenue"),
+        # Working capital itself, so the identity is computed once, here,
+        # where both halves carry their tiers, rather than reassembled by
+        # each consumer.
+        "working_capital": (
+            None if curr_assets is None or curr_liab_raw is None
+            else curr_assets - curr_liab_raw,
+            "current_assets",
+        ),
     }
 
     # Tangible book equity, for p_tbv - the model tbvps blocks for all 1,177
@@ -2143,6 +2849,93 @@ def reconstruct_financial_triangles(
         absolute_lines[_name] = float(_value)
         field_provenance[_name] = field_provenance[_witness]
 
+    # working_capital stands on two witnesses, and the single-witness rule
+    # above can only copy one of them. A reconstruction is tier 2 at best,
+    # and it inherits the weaker of the two halves it was subtracted from -
+    # a current-assets figure guessed at 40% of total assets must not let a
+    # working capital derived from it read as observed.
+    if "working_capital" in absolute_lines:
+        _prop("working_capital", 2,
+              field_provenance["current_assets"],
+              field_provenance["current_liabilities"])
+
+    # -------------------------------------------------------------
+    # Close the system.
+    #
+    # Every ladder above has now run. Each knows the two or three routes
+    # somebody thought of while writing that field; none of them knows that
+    # the same number may be recoverable from a fourth direction that
+    # happens to be available for this particular company. The identity
+    # catalogue does, and it runs last so that it can only fill gaps: a
+    # field a ladder answered is never overwritten, because the ladder knew
+    # which vendor column to prefer and this table does not.
+    #
+    # It adds no information. Everything it produces was already implied by
+    # figures the vendors stated, and where an identity has two unknowns it
+    # declines - which is why fcf stays blocked for the companies whose
+    # payload carries neither cfo nor capex. See services/accounting_
+    # identities.py for the two guards that make a catalogue safe rather
+    # than merely complete: lineage, so a value can never help compute its
+    # own ancestor and a pair of identities cannot manufacture a balance
+    # sheet that balances by construction; and depth, so a figure recovered
+    # through a long chain degrades to a stand-in instead of inheriting the
+    # tier of the strongest evidence anywhere behind it.
+    # -------------------------------------------------------------
+    _solver_inputs = {
+        "total_assets": tot_assets,
+        "total_liabilities": tot_liab,
+        "total_equity": tot_eq,
+        "current_assets": curr_assets,
+        "current_liabilities": curr_liab_raw,
+        "working_capital": absolute_lines.get("working_capital"),
+        "ebit": calc_ebit,
+        "ebitda": calc_ebitda,
+        "da": calc_da,
+        "cfo": calc_cfo,
+        "capex": calc_capex,
+        "fcf_ttm": fcf_ttm,
+        "net_income": net_income,
+        "revenue": revenue,
+        "prev_revenue": prev_revenue,
+        "eps": eps,
+        "shares": shares_out,
+        "rev_1y_growth": rev_1y,
+    }
+    # A field with a value but no tier is not evidence and must not seed a
+    # derivation; dropping it here makes the solver inherit only from lines
+    # this service has already vouched for.
+    _solver_inputs = {
+        name: value for name, value in _solver_inputs.items()
+        if value is not None and name in field_provenance
+    }
+    _recovered = solve_accounting_identities(_solver_inputs, field_provenance)
+
+    #: Which published line each solver field is emitted as. A name absent
+    #: here is recovered for the sake of the identities that consume it and
+    #: is not itself a published statement line.
+    _SOLVED_LINE_NAMES = {
+        "total_assets": "total_assets",
+        "total_liabilities": "total_liabilities",
+        "total_equity": "equity",
+        "current_assets": "current_assets",
+        "current_liabilities": "current_liabilities",
+        "working_capital": "working_capital",
+        "ebit": "ebit",
+        "ebitda": "ebitda",
+        "da": "da",
+        "cfo": "cfo",
+        "capex": "capex",
+        "net_income": "net_income",
+        "revenue": "revenue",
+        "prev_revenue": "prev_revenue",
+    }
+    for _name, (_value, _tier, _depth, _note) in _recovered.items():
+        field_provenance[_name] = _tier
+        _line = _SOLVED_LINE_NAMES.get(_name)
+        if _line is not None and _line not in absolute_lines:
+            absolute_lines[_line] = float(_value)
+            field_provenance[_line] = _tier
+
     result = {
         "mcap": mcap,
         "shares_out": shares_out,
@@ -2153,6 +2946,11 @@ def reconstruct_financial_triangles(
         "peg_sales": peg_sales,
         "eps": eps,
         "dividend_yield": div_yield,
+        # Omitted entirely when the yield was not reported: the resolver
+        # treats an absent key as missing and imputes it, which is the
+        # behaviour a fabricated zero would destroy.
+        **({"dividend_per_share": dividend_per_share}
+           if dividend_per_share is not None else {}),
         "roe": roe,
         "roa": roa,
         "gross_margin": gross_margin,
@@ -2208,6 +3006,142 @@ def reconstruct_financial_triangles(
         if key not in _imputation_excluded
     }
     return result
+
+
+#: One parsed copy of the lake per process. It is tens of megabytes and
+#: does not change while the process runs; re-reading it per symbol would
+#: make a fallback more expensive than the fetch it stands in for.
+_FUNDAMENTALS_LAKE: Any = None
+_FUNDAMENTALS_LAKE_LOADED = False
+
+
+def _get_fundamentals_lake():
+    """The lake provider, loaded once. None when there is no lake."""
+    global _FUNDAMENTALS_LAKE, _FUNDAMENTALS_LAKE_LOADED
+    if _FUNDAMENTALS_LAKE_LOADED:
+        return _FUNDAMENTALS_LAKE
+    _FUNDAMENTALS_LAKE_LOADED = True
+    try:
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+        provider = PointInTimeFundamentals.from_lake()
+        _FUNDAMENTALS_LAKE = None if provider.is_empty else provider
+    except Exception as exc:
+        logger.debug("fundamentals lake unavailable: %s", exc)
+        _FUNDAMENTALS_LAKE = None
+    return _FUNDAMENTALS_LAKE
+
+
+# --- the quarterly lake as a fallback witness -----------------------------
+#: Lake field -> the key ``fetch_vndirect_financials`` publishes it under.
+#: Balance-sheet lines only: a balance is a balance whenever it was filed,
+#: so the latest quarter's figure is directly the ``_fq`` value.
+_LAKE_STOCK_KEYS: Dict[str, str] = {
+    "total_assets": "total_assets_fq",
+    "equity": "total_equity_fq",
+    "debt": "total_debt_fq",
+    "cash": "cash_fq",
+    "gross_ppe": "gross_ppe_fq",
+}
+
+#: Lake field -> the ``_ttm`` key, for lines that are a flow over the
+#: quarter rather than a balance at its end. These are summed over four
+#: consecutive quarters and published ONLY when all four are present.
+#: Annualising two quarters by doubling would put a number that never
+#: happened into a field whose name promises twelve months, and every
+#: multiple built on it would be wrong by whatever the business did in
+#: the quarters nobody had.
+_LAKE_FLOW_KEYS: Dict[str, str] = {
+    "revenue": "revenue_ttm",
+    "net_income": "net_income_ttm",
+    "ebit": "ebit_ttm",
+    "cfo": "cfo_ttm",
+    "capex": "capex_ttm",
+    "depreciation": "da_ttm",
+}
+
+_LAKE_TTM_QUARTERS = 4
+
+
+def _lake_quarter_order(code: str) -> Tuple[int, int]:
+    try:
+        year, quarter = str(code).split("-Q")
+        return int(year), int(quarter)
+    except (ValueError, AttributeError):
+        return (-1, -1)
+
+
+def _lake_quarters_are_consecutive(codes: List[str]) -> bool:
+    """True when ``codes`` (newest first) are four unbroken quarters.
+
+    A gap means the sum spans more than a year while claiming to be one.
+    """
+    orders = [_lake_quarter_order(c) for c in codes]
+    for newer, older in zip(orders, orders[1:]):
+        if newer == (-1, -1) or older == (-1, -1):
+            return False
+        expected = (newer[0], newer[1] - 1) if newer[1] > 1 else (newer[0] - 1, 4)
+        if older != expected:
+            return False
+    return True
+
+
+def load_lake_symbol_data(symbol: str) -> Dict[str, Any]:
+    """The quarterly lake's view of one symbol, shaped like ``vnd``.
+
+    The lake is built by scripts/build_historical_fundamentals.py from
+    api-finfo.vndirect.com.vn/v4/financial_statements - the same URL
+    fetch_vndirect_financials calls, reading the same item-code table.
+    So this is not a new source and must not be described as one: it is
+    the same vendor's answer, fetched earlier and kept.
+
+    What it adds is availability. A live fetch that times out, is rate
+    limited, or exhausts its retries returns {} and every statement line
+    for that company is gone for the whole request. The lake still has
+    the last quarter that was successfully fetched, and a figure filed
+    three months ago is a filed figure - unlike a sector median, which
+    is a figure about other companies.
+
+    Returns {} when the lake is absent, has nothing for the symbol, or
+    has too little of a quarter to be worth reading.
+    """
+    try:
+        from services.point_in_time_fundamentals import PointInTimeFundamentals
+    except Exception:
+        return {}
+
+    provider = _get_fundamentals_lake()
+    if provider is None:
+        return {}
+    quarters = provider.quarters_for(symbol)
+    if not quarters:
+        return {}
+
+    ordered = sorted(quarters, key=_lake_quarter_order, reverse=True)
+    latest = quarters.get(ordered[0]) or {}
+
+    out: Dict[str, Any] = {}
+    for field, key in _LAKE_STOCK_KEYS.items():
+        value = _safe_float(latest.get(field))
+        if value is not None:
+            out[key] = value
+
+    window = ordered[:_LAKE_TTM_QUARTERS]
+    if (len(window) == _LAKE_TTM_QUARTERS
+            and _lake_quarters_are_consecutive(window)):
+        for field, key in _LAKE_FLOW_KEYS.items():
+            values = [_safe_float((quarters.get(c) or {}).get(field))
+                      for c in window]
+            if all(v is not None for v in values):
+                total = sum(values)
+                out[key] = abs(total) if key == "capex_ttm" else total
+        out["ttm_quarters_used"] = _LAKE_TTM_QUARTERS
+
+    if not out:
+        return {}
+    out["latest_fiscal_date"] = latest.get("fiscal_date") or ordered[0]
+    out["lake_quarter"] = ordered[0]
+    return out
+
 
 def load_source0_symbol_data(symbol: str) -> Optional[Dict[str, Any]]:
     """
@@ -2323,7 +3257,30 @@ def normalize_stock_data(
     tv = tv_data or {}
     vn = vnstock_data or {}
     yf = yf_data or {}
-    vnd = vndirect_data or {}
+    # Copied, not aliased: the lake fill below writes into this dict, and
+    # fetch_vndirect_financials hands out the object it caches. Mutating
+    # it would write lake figures into the cache under the live fetch's
+    # name, where the next request could not tell them apart.
+    vnd = dict(vndirect_data or {})
+
+    # The lake stands in for lines this request's live VNDIRECT fetch did
+    # not return. It fills gaps only - a key vnd already answered is left
+    # alone, because the live fetch is this quarter and the lake is as
+    # old as the last build. Same vendor, same endpoint, same item-code
+    # table; the tier does not change, only the availability does.
+    lake = load_lake_symbol_data(symbol)
+    if lake:
+        filled = [k for k, v in lake.items()
+                  if v is not None and vnd.get(k) is None
+                  and k not in ("latest_fiscal_date", "lake_quarter",
+                                "ttm_quarters_used")]
+        for key in filled:
+            vnd[key] = lake[key]
+        if filled:
+            vnd.setdefault("latest_fiscal_date", lake.get("latest_fiscal_date"))
+            vnd["lake_quarter"] = lake.get("lake_quarter")
+            vnd["lake_filled_fields"] = sorted(filled)
+            sources_used.append("fundamentals_lake")
 
     s0 = source0_data
     if s0 is None:
@@ -2387,9 +3344,27 @@ def normalize_stock_data(
         # a reported EBIT into EBITDA. Measured on a symbol with no
         # TradingView statements, adding them takes the overlay from 2
         # published models to a full sector house.
-        if not tv.get("cash_n_short_term_invest_fq") and vnd.get("cash_fq"):
+        # cash. The cash flow statement ends at a closing balance and the
+        # balance sheet carries the same figure; they are filed
+        # separately and met for 1,183 of 1,193 companies (99.2%). The
+        # record disagreed with that corroborated pair for 657. Two
+        # statements that agree with each other outrank one that agrees
+        # with neither.
+        if vnd.get("cash_fq"):
             tv["cash_n_short_term_invest_fq"] = vnd["cash_fq"]
-        if not tv.get("cash_f_operating_activities_ttm") and vnd.get("cfo_ttm"):
+        # cfo and cash are the two lines where the cascade is overridden:
+        # VNDIRECT wins even when TradingView answered, because a third
+        # witness says TradingView is describing something else.
+        #
+        # cfo. The three section totals sum to the net change in cash.
+        # Over 1,285 companies that identity closed for 1,283 of them
+        # using VNDIRECT's operating cash flow (99.8%) and for 47 using
+        # the figure TradingView supplies (3.7%). The two disagree for
+        # 92.4% of the universe, and this is what settles which is right:
+        # a number that breaks an identity the rest of the statement
+        # keeps is not a second opinion about operating cash flow, it is
+        # a different quantity.
+        if vnd.get("cfo_ttm"):
             tv["cash_f_operating_activities_ttm"] = vnd["cfo_ttm"]
         if not tv.get("depreciation_and_amortization_ttm") and vnd.get("da_ttm"):
             tv["depreciation_and_amortization_ttm"] = vnd["da_ttm"]
@@ -2414,12 +3389,79 @@ def normalize_stock_data(
     )
 
     # Attach granular VNDIRECT metrics directly to normalized record if present
+    #
+    # These three lines are parsed by fetch_vndirect_financials from item
+    # codes 11420/12510, 112000 and 12110/12100, attached to the record here,
+    # and given NO provenance tier - so the copy to the top level, which
+    # admits a line only on the evidence of a tier, dropped every one of
+    # them. The engine asks for them by exactly these names:
+    #
+    #   landbank_fq   -> res.resolve("landbank",  ("landbank_fq",))    reit_affo_dcf
+    #   bank_loans_fq -> res.resolve("rwa", ("bank_loans_fq", "rwa"))  bank_equity_cash_flow
+    #   gross_ppe_fq  -> res.resolve("gross_ppe", ("gross_ppe_fq", ...))
+    #
+    # landbank blocks 123 symbols and rwa 41. Both were reported as
+    # sector-specific data no route carries, on the evidence of the blocking
+    # table - which cannot tell "nobody has this" apart from "somebody has
+    # this and it was never wired". A census of every company in both
+    # sectors has since separated them, and the two answers are different:
+    #
+    #   landbank  the vendor carries it, under item codes nobody here had
+    #             read correctly. See the decoding note at fetch time.
+    #   rwa       the vendor does NOT carry it. 28 of the 41 companies in
+    #             these sectors return roughly ten top-level aggregates and
+    #             no asset-side detail at all, and no code in any of the 41
+    #             payloads sits anywhere near the 60-75% of total assets a
+    #             loan book occupies. Not wired, and not guessed at: the
+    #             model stays refused for want of a figure that is genuinely
+    #             absent, which is the correct outcome.
+    #
+    # Tier 3 for a line the vendor states outright. Fail-closed by
+    # construction - a code the payload does not carry comes back None, is
+    # not tiered, and is not published, so the model stays refused rather
+    # than valuing a company on an absent land bank.
+    # Say so on the record when a line came from the lake rather than from
+    # this request's fetch. The figures are the same vendor's and carry the
+    # same tier, but they are as old as the last lake build, and a reader
+    # who cannot tell has no way to notice a lake that stopped being
+    # rebuilt.
+    if vnd.get("lake_filled_fields"):
+        tri["lake_filled_fields"] = vnd["lake_filled_fields"]
+        tri["lake_quarter"] = vnd.get("lake_quarter")
+
     if vnd:
-        tri["delta_working_capital"] = vnd.get("delta_working_capital", 0.0)
-        tri["landbank_fq"] = vnd.get("landbank_fq")
-        tri["bank_loans_fq"] = vnd.get("bank_loans_fq")
-        tri["gross_ppe_fq"] = vnd.get("gross_ppe_fq")
         tri["capex_ttm"] = vnd.get("capex_ttm")
+        # delta_working_capital was attached untiered and read straight off
+        # the record by the engine as
+        #   float(fundamental_data.get("delta_working_capital") or 0.0)
+        # so it was never refused - it silently read as zero for every
+        # company, in
+        #   owners' earnings = NI + D&A - maintenance capex - dWC
+        # which overstates the earnings of any company whose receivables and
+        # inventory are growing. Not a refusal: a wrong number, published.
+        #
+        # It is computed by the vendor fetch only when at least one of the
+        # three working-capital deltas is present, so a None here means the
+        # payload could not support it and the engine's own zero stands - as
+        # an admitted fallback rather than as a figure.
+        _delta_wc = _safe_float(vnd.get("delta_working_capital"))
+        if _delta_wc is not None:
+            tri["delta_working_capital"] = _delta_wc
+            tri["field_provenance"]["delta_working_capital"] = 3
+        for _key in ("landbank_fq", "bank_loans_fq", "gross_ppe_fq"):
+            _value = _safe_float(vnd.get(_key))
+            if _value is not None and _value > 0:
+                tri[_key] = _value
+                # Tier 2, not 3, for the land bank alone. The vendor states
+                # an inventory balance; reading that balance as the land
+                # bank is this project's inference, sound for a developer
+                # and not something the vendor asserted. Tier 2 still
+                # clears the resolver's gate, so the distinction costs no
+                # coverage - it records that a judgement was made here,
+                # where tier 3 would claim the vendor made it.
+                tri["field_provenance"][_key] = (
+                    2 if _key == "landbank_fq" else 3
+                )
 
     mcap = tri["mcap"]
     if mcap >= 30000:
@@ -2456,14 +3498,43 @@ def normalize_stock_data(
     # triangles published instead, so a line added upstream arrives here on
     # its own rather than waiting to be noticed.
     # ---------------------------------------------------------------
+    # The copy is mechanical now, not a list. A triangle key reaches the top
+    # level when it is a number that carries a tier, and it stops there when
+    # a key of the same name is already spelled out in the record below -
+    # the explicit spelling always wins, so nothing here can quietly
+    # redefine a field the record already publishes.
+    #
+    # Requiring a tier is what makes this safe rather than merely automatic.
+    # An untiered value copied up would read as observed, which is the one
+    # failure this whole gate exists to prevent; field_provenance membership
+    # is the same admission test reconstruct_financial_triangles() already
+    # applies to its own absolute lines.
+    #
+    # Measured against the hand-written list it replaces, this carries up
+    # exactly two lines that were being dropped, both consumed by models
+    # that were refusing for want of them:
+    #   da              -> ebitda = ebit + da, which the engine otherwise
+    #                      approximates by asserting D&A is 25% of EBIT
+    #   tangible_equity -> tbvps, a declared driver of p_tbv
+    #
+    # _NOT_A_TOP_LEVEL_LINE is not a convenience. "mcap" is tiered and
+    # numeric, so it passes every test above, and it is denominated in
+    # BILLIONS while every other absolute line here is in raw VND. It
+    # already reaches the record as "market_cap" (billions, for the
+    # screener UI) and as "market_cap_vnd" (raw, for the engine). Letting a
+    # third spelling through in a third place is how a unit error gets
+    # made, so it is named and excluded here rather than left to be
+    # noticed later.
+    _NOT_A_TOP_LEVEL_LINE = {"mcap"}
     absolute_lines = {
-        key: tri[key]
-        for key in (
-            "total_assets", "total_liabilities", "equity", "debt", "cash",
-            "revenue", "net_income", "ebit", "ebitda", "cfo", "capex",
-            "shares_out",
-        )
-        if tri.get(key) is not None
+        key: value
+        for key, value in tri.items()
+        if key not in _NOT_A_TOP_LEVEL_LINE
+        and not key.startswith("_")
+        and value is not None
+        and not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and key in tri["field_provenance"]
     }
 
     # "market_cap" below is in BILLIONS - it is a display field, read by the
@@ -2478,6 +3549,12 @@ def normalize_stock_data(
     is_imputed["market_cap_vnd"] = is_imputed.get("market_cap", True)
 
     return {
+        # Absolute statement lines, raw VND, each tiered in field_provenance.
+        # First, so that every explicit key below overrides it: the spread is
+        # a floor of whatever the triangles published, never a replacement
+        # for a field this record spells out on its own terms.
+        **absolute_lines,
+
         "symbol": symbol,
         "name": resolved_name,
         "exchange": resolved_ex,
@@ -2533,8 +3610,6 @@ def normalize_stock_data(
         "size_category": size_category,
         "size_damper": size_damper,
 
-        # Absolute statement lines, raw VND, each tiered in field_provenance.
-        **absolute_lines,
         "market_cap_vnd": market_cap_vnd,
 
         # Provenance at the top level, where every consumer reads it:
@@ -2542,6 +3617,15 @@ def normalize_stock_data(
         # The copies under "_metadata" stay for backwards compatibility.
         "field_provenance": tri["field_provenance"],
         "is_imputed": is_imputed,
+
+        # Which statement lines came from the lake rather than from this
+        # request's fetch, and how old they are. Top level rather than
+        # buried in _metadata because the coverage audit reads from here,
+        # and "how much of this universe is being carried by a lake that
+        # may have stopped being rebuilt" is a question it should be able
+        # to ask without knowing where to dig.
+        "lake_filled_fields": tri.get("lake_filled_fields") or [],
+        "lake_quarter": tri.get("lake_quarter"),
 
         "_metadata": {
             "sources_used": sources_used,
@@ -2575,9 +3659,24 @@ _VND_BACKFILL_KEYS = (
 )
 
 #: The TradingView fields whose absence makes a symbol worth a VNDIRECT call.
+#: A TradingView row missing any of these sends the symbol to VNDIRECT.
+#:
+#: The cash-flow pair was absent from this list for the whole life of the
+#: overlay, and the audit measured what that cost: fcf blocks 306 symbols
+#: and cfo 166, together the two largest remaining drivers, while the
+#: VNDIRECT payload has carried cfo_ttm and capex_ttm all along. A company
+#: whose TradingView row held all six income and balance lines but no cash
+#: flow was never asked - the one vendor that could answer was skipped
+#: because the other six questions had already been answered.
+#:
+#: Adding them widens the overlay towards asking every company rather than
+#: only the visibly incomplete ones. That is the intended direction: a
+#: second opinion on a line already held is not waste, it is the only way
+#: two sources can ever disagree in front of us.
 _TV_REQUIRED_LINES = (
     "total_revenue_ttm", "net_income_ttm", "ebit_ttm",
     "total_assets_fq", "total_equity_fq", "total_debt_fq",
+    "cash_f_operating_activities_ttm", "capital_expenditures_ttm",
 )
 
 
@@ -2621,6 +3720,12 @@ def recover_item_code_relations(
     step rather than subtracting once and moving on, so no single term has
     to justify itself alone. It recovers that same relation with
     coefficients of 1.000 and a 100% hit rate.
+
+    A fourth correction came from the first run against real payloads
+    rather than a synthetic statement: a candidate column that is
+    negligible at the target's scale is dropped before selection. See the
+    comment at that step - it is the difference between a search and a
+    curve fit.
 
     Returns (target, [(code, coefficient)], hit rate as a percentage, n).
     Coefficients are returned as found: one that is not close to a whole
@@ -2667,6 +3772,34 @@ def recover_item_code_relations(
             pool.pop()
         if matrix is None:
             continue
+
+        # Drop candidates that are negligible at the target's scale before
+        # any of them can be selected.
+        #
+        # This is not tidiness, it is a defect the first real run exposed.
+        # 23001 is a fraction of a millionth of the statement's scale for
+        # every company that reports it, and least squares handed it
+        # coefficients of 724675, 893536 and -644184 across five different
+        # targets. A column that small cannot explain a statement line; it
+        # can only act as a free parameter with no cost, absorbing whatever
+        # the real terms left over. Every relation it appeared in was noise
+        # wearing the shape of an answer.
+        #
+        # The test is scale, not centre. A column whose *median* is zero is
+        # ordinary - most companies report no other income - and 23900 is
+        # median-zero while participating in two exact relations. So this
+        # asks how large the column ever gets: if its 95th percentile is
+        # below a ten-thousandth of the target's typical magnitude, it has
+        # no accounting content at this scale and is removed from the pool
+        # rather than left available to be fitted.
+        scale = float(np.median(np.abs(y)))
+        if scale > 0:
+            big_enough = (
+                np.percentile(np.abs(matrix), 95, axis=0) >= 1e-4 * scale
+            )
+            if 3 <= int(big_enough.sum()) < len(pool):
+                pool = [c for c, k in zip(pool, big_enough) if k]
+                matrix = matrix[:, big_enough]
 
         selected: List[int] = []
         resid = y.copy()
@@ -2721,12 +3854,71 @@ def _has_no_ebit_rung(entry: Optional[Dict[str, Any]]) -> bool:
                 or entry.get("operating_margin_fy") is not None)
 
 
-def _needs_vndirect_backfill(tv_entry: Optional[Dict[str, Any]]) -> bool:
-    """True when TradingView left at least one statement line empty.
+#: Sectors whose valuation model needs a line TradingView has no column for
+#: at all. ICB 8600 real estate is valued on its land bank and ICB 8300/8500
+#: banks and insurers on their gross loans, and neither figure exists
+#: anywhere in TV_COLUMNS - only VNDIRECT parses them, from item codes
+#: 11420/12510 and 112000.
+#:
+#: The completeness test below cannot see that. It asks whether TradingView
+#: filled the eight general statement lines, and for a real estate company
+#: whose income statement and balance sheet are fully covered the answer is
+#: yes, so the one vendor that could state its land bank is never called.
+#: The company is then refused for want of a number nobody asked for.
+#:
+#: This is the same shape as the cash-flow pair that was missing from
+#: _TV_REQUIRED_LINES: a question not asked, read downstream as an answer of
+#: no. Membership here does not assert the vendor has the line - a symbol
+#: whose payload lacks the item code comes back with nothing, is not tiered,
+#: and stays refused.
+_SECTORS_NEEDING_A_LINE_TRADINGVIEW_LACKS = frozenset({
+    "VNREAL", "VNREA", "8600",          # land bank -> reit_affo_dcf, p_affo
+    "VNFIN", "VNBNK", "VNINS", "8300", "8500",  # gross loans -> bank_equity_cash_flow
+})
 
-    A symbol TradingView covers fully costs no second request; one it covers
-    partially is exactly the case the overlay exists for.
+
+#: The VNDIRECT keys the overlay lets win outright, whatever TradingView
+#: holds. Kept here rather than only in the overlay because this gate has
+#: to know about them, and a test pins the two lists together by parsing
+#: the overlay: a third reversal added there and not here would be
+#: unreachable in exactly the population it was written for.
+_LINES_THE_VENDOR_WINS_OUTRIGHT = ("cfo_ttm", "cash_fq")
+
+
+def _needs_vndirect_backfill(
+    tv_entry: Optional[Dict[str, Any]],
+    sector_code: Optional[str] = None,
+) -> bool:
+    """True when VNDIRECT has something to add for this symbol.
+
+    Either TradingView left one of the general statement lines empty, or the
+    symbol's sector is valued on a line TradingView does not carry at any
+    level of completeness - see the frozenset above - or the overlay
+    reverses the cascade for a line, which is the case that makes this
+    unconditional.
+
+    It used to ask only about symbols whose TradingView row was visibly
+    incomplete, and that was right while the overlay was purely a cascade:
+    a complete row meant a vendor could add nothing that would be read.
+    Two lines are now decided in VNDIRECT's favour whatever TradingView
+    carries, and the moment that became true a complete row stopped being
+    evidence of anything - but this gate still skipped those symbols, so
+    the payload was never fetched, the overlay block never ran, and both
+    overrides were unreachable for precisely the companies they were
+    written to correct. Measured: the cash flow identity closed for the
+    published figure on 58.3% of the universe rather than the 99.8% the
+    override should have produced, and the whole shortfall was symbols
+    TradingView had answered in full.
+
+    A question not asked, read downstream as an answer of no - the same
+    shape as the missing cash flow pair and the unasked land bank, wearing
+    the clothes of an optimisation this time.
     """
+    if _LINES_THE_VENDOR_WINS_OUTRIGHT:
+        return True
+    if sector_code and str(sector_code).strip().upper() in \
+            _SECTORS_NEEDING_A_LINE_TRADINGVIEW_LACKS:
+        return True
     if not tv_entry:
         return True
     return any(tv_entry.get(key) is None for key in _TV_REQUIRED_LINES)
@@ -2857,8 +4049,11 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # -----------------------------------------------------------------
     vnd_by_symbol: Dict[str, Dict[str, Any]] = {}
     needs_vnd = [
-        sym.upper().strip() for sym in master_symbols_map
-        if _needs_vndirect_backfill(tv_batch.get(sym.upper().strip()))
+        sym.upper().strip() for sym, meta in master_symbols_map.items()
+        if _needs_vndirect_backfill(
+            tv_batch.get(sym.upper().strip()),
+            (meta or {}).get("sector_code"),
+        )
     ]
     if needs_vnd:
         print(f"  🔎 {len(needs_vnd)} symbols missing statement lines; querying VNDIRECT Finfo...")
@@ -3040,10 +4235,40 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
     # -----------------------------------------------------------------
     needs_margin = [
         sym.upper().strip() for sym in master_symbols_map
-        if _has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
-        and _safe_float(
-            (tv_batch.get(sym.upper().strip()) or {}).get("total_revenue_ttm")
-        ) is not None
+        # An EBIT rung is not the only thing this route answers for.
+        #
+        # Gating on the EBIT rung alone made the probe unreachable for every
+        # company that has an operating line and no EBITDA - and Vietcap
+        # reports an EBITDA for 659 of the 720 measured. ebitda blocked 134
+        # symbols after the route serving it was already being called, for
+        # companies it was never asked about. Same shape as the fcf gate
+        # below: a question narrower than the thing it was built to fix.
+        if (_has_no_ebit_rung(tv_batch.get(sym.upper().strip()))
+            or _safe_float(
+                (tv_batch.get(sym.upper().strip()) or {}).get("ebitda_ttm")
+            ) is None)
+        # Revenue from either source, because the rung multiplies the
+        # margin by whatever revenue the triangle resolves - and that
+        # resolution already reads the VNDIRECT overlay.
+        #
+        # Gating on TradingView's revenue alone made this probe unreachable
+        # for exactly the companies it was built for. A company with no
+        # EBIT rung is, overwhelmingly, a company TradingView carries
+        # nothing for; its revenue arrives from VNDIRECT, which by this
+        # point is sitting in vnd_by_symbol. The census measured what that
+        # cost: Vietcap reports a non-zero EBIT margin for 615 of the 720
+        # companies with no operating line, at a median of 4%, and not one
+        # of them was ever asked.
+        and (
+            _safe_float(
+                (tv_batch.get(sym.upper().strip()) or {}).get(
+                    "total_revenue_ttm")
+            ) is not None
+            or _safe_float(
+                (vnd_by_symbol.get(sym.upper().strip()) or {}).get(
+                    "revenue_ttm")
+            ) is not None
+        )
     ]
     if needs_margin:
         print(f"  🔎 {len(needs_margin)} symbols have no EBIT rung but do have"
@@ -3060,6 +4285,22 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
             needs_margin = []
 
         def _margin_worker(sym: str):
+            # The reported line first, the margin only as a fallback. The
+            # census settled the order: this route states ebit and ebitda
+            # outright in dong for 660 and 659 of these companies. A
+            # reported line is tier 3 on its own; a margin has to be
+            # multiplied by revenue and can be no better than that revenue,
+            # which for a sector stand-in means refused. Same request,
+            # strictly better answer.
+            if use_stats:
+                try:
+                    lines = fetch_vietcap_operating_lines(sym)
+                except Exception:
+                    logger.debug("Vietcap operating lines failed for %s", sym,
+                                 exc_info=True)
+                    lines = {}
+                if lines:
+                    return sym, lines
             for enabled, fetch in ((use_graphql, fetch_vietcap_ebit_margin_graphql),
                                    (use_stats, fetch_vietcap_ebit_margin)):
                 if not enabled:
@@ -3071,24 +4312,279 @@ def sync_unified_screener_universe(master_symbols_map: Dict[str, Any]) -> Dict[s
                                  sym, fetch.__name__, exc_info=True)
                     continue
                 if margin is not None:
-                    return sym, margin
+                    return sym, {"margin": margin}
             return sym, None
 
         margin_filled = 0
+        line_filled = 0
+        ebitda_filled = 0
         with ThreadPoolExecutor(max_workers=6) as executor:
             futures = [executor.submit(_margin_worker, s) for s in needs_margin]
             for fut in as_completed(futures):
-                sym, margin = fut.result()
-                if margin is None:
+                sym, answer = fut.result()
+                if not answer:
                     continue
-                # Written under TradingView's own column name so the ladder
-                # reads it through the rung already in place and already
+                # Written under TradingView's own column names so the ladder
+                # reads them through the rungs already in place and already
                 # tested, rather than through a second code path.
-                tv_batch.setdefault(sym, {})["operating_margin_ttm"] = margin
-                margin_filled += 1
+                row = tv_batch.setdefault(sym, {})
+                # Now that this probe also serves companies that already
+                # have an operating line - asked for their EBITDA - it must
+                # not overwrite the line they came with.
+                if "ebit" in answer and _safe_float(
+                        row.get("ebit_ttm")) is None:
+                    row["ebit_ttm"] = answer["ebit"]
+                    line_filled += 1
+                if "ebitda" in answer and _safe_float(
+                        row.get("ebitda_ttm")) is None:
+                    row["ebitda_ttm"] = answer["ebitda"]
+                    ebitda_filled += 1
+                if "margin" in answer and _safe_float(
+                        row.get("operating_margin_ttm")) is None:
+                    row["operating_margin_ttm"] = answer["margin"]
+                    margin_filled += 1
+                if "roic" in answer and _safe_float(
+                        row.get("return_on_invested_capital_fq")) is None:
+                    row["return_on_invested_capital_fq"] = answer["roic"]
         if needs_margin:
-            print(f"  ✓ Vietcap answered an EBIT margin for {margin_filled}"
-                  f"/{len(needs_margin)} of them")
+            print(f"  ✓ Vietcap answered for {len(needs_margin)} asked:"
+                  f" {line_filled} reported an EBIT outright,"
+                  f" {ebitda_filled} an EBITDA,"
+                  f" {margin_filled} only a margin")
+
+    # ROIC, on its own gate, because the existing one asks the wrong
+    # question for it.
+    #
+    # needs_margin selects symbols with no EBIT rung. A company with a
+    # perfectly good operating line and no return on capital is invisible to
+    # it, and that is most of the 185 symbols roic blocks - they are tier-3
+    # companies refused, or stripped of models, over one derived ratio. Four
+    # of the first twenty refusals are blocked by roic alone.
+    #
+    # Symbols already asked above arrive here with the column filled, so
+    # this gate naturally covers only the remainder.
+    needs_roic = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "return_on_invested_capital_fq")
+        ) is None
+    ]
+    if needs_roic and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_roic)} symbols have no ROIC; probing Vietcap"
+              " statistics-financial...")
+
+        def _roic_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_roic(sym)
+            except Exception:
+                logger.debug("Vietcap roic failed for %s", sym, exc_info=True)
+                return sym, None
+
+        roic_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_roic_worker, s) for s in needs_roic]
+            for fut in as_completed(futures):
+                sym, roic = fut.result()
+                if roic is None:
+                    continue
+                tv_batch.setdefault(sym, {})[
+                    "return_on_invested_capital_fq"] = roic
+                roic_filled += 1
+        print(f"  ✓ Vietcap answered a ROIC for {roic_filled} of"
+              f" {len(needs_roic)} asked")
+
+    # The income statement, asked first because it feeds the core.
+    #
+    # 205 symbols are refused on a tier-1 core driver - a sector median
+    # standing in for a number nobody had - and that is now the largest
+    # remaining pool by a distance. The census found this route answering
+    # for 200 of 203 such companies with net sales, net profit, a reported
+    # EPS in dong per share, and an operating profit, each under the
+    # vendor's own name.
+    #
+    # Unlike the cash-flow pair, these are CORE drivers, so a company moved
+    # here moves the tier table itself and clears eps, sps, net_margin,
+    # roic and ebit together.
+    #
+    # Nothing already held is overwritten. A value present in tv_batch came
+    # from TradingView, which is a vendor stating its own figure; replacing
+    # it with a second vendor's would not raise the tier and would silently
+    # decide a disagreement neither of them knows about. This fills holes
+    # only.
+    needs_income = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get("total_revenue_ttm")
+        ) is None
+        and _safe_float(
+            (vnd_by_symbol.get(sym.upper().strip()) or {}).get("revenue_ttm")
+        ) is None
+    ]
+    if needs_income and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_income)} symbols have no revenue from any"
+              " source; probing Vietcap income-statement...")
+
+        def _income_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_income_statement(sym)
+            except Exception:
+                logger.debug("Vietcap income statement failed for %s", sym,
+                             exc_info=True)
+                return sym, {}
+
+        #: answer key -> TradingView column the ladder already reads.
+        _INCOME_COLUMNS = (
+            ("revenue", "total_revenue_ttm"),
+            ("net_income", "net_income_ttm"),
+            ("eps", "earnings_per_share_basic_ttm"),
+            ("ebit", "ebit_ttm"),
+        )
+        income_filled = {name: 0 for _, name in _INCOME_COLUMNS}
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_income_worker, s) for s in needs_income]
+            for fut in as_completed(futures):
+                sym, answer = fut.result()
+                if not answer:
+                    continue
+                row = tv_batch.setdefault(sym, {})
+                for key, column in _INCOME_COLUMNS:
+                    if key in answer and _safe_float(row.get(column)) is None:
+                        row[column] = answer[key]
+                        income_filled[column] += 1
+        print(f"  ✓ Vietcap income statement answered for {len(needs_income)}"
+              " asked: "
+              + ", ".join(f"{n} {income_filled[n]}"
+                          for _, n in _INCOME_COLUMNS))
+
+    # The cash-flow statement, asked separately and gated separately.
+    #
+    # Reading Vietcap's reported operating line moved ebit and ebitda off
+    # the top of the blocking table and left fcf (304 symbols) and cfo (166)
+    # as the two largest, with no route serving either. VNDIRECT's cash flow
+    # was already wired and answers for almost none of them - widening the
+    # required-lines set to include the pair moved fcf by two symbols, which
+    # is what "the path works, the vendor simply has nothing" looks like.
+    #
+    # This is a different gate from the EBIT one on purpose. A company can
+    # have a perfectly good operating line and no cash flow at all, so
+    # reusing needs_margin would ask the wrong companies and skip the right
+    # ones.
+    # Either half missing, not just the first.
+    #
+    # As first written this gate asked "has no operating cash flow", and a
+    # company holding a CFO but no capex was never asked - while fcf, which
+    # is cfo minus capex, needs both. The gate asked a question narrower
+    # than the thing it was built to fix, so fcf stayed the second-largest
+    # blocker at 149 symbols after the route that answers it was wired.
+    #
+    # Same defect shape as the one this audit keeps finding, and this one
+    # was introduced by the audit rather than found by it.
+    needs_cash_flow = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "cash_f_operating_activities_ttm")
+        ) is None
+        or _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "capital_expenditures_ttm")
+        ) is None
+    ]
+    if needs_cash_flow and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_cash_flow)} symbols have no operating cash"
+              " flow; probing Vietcap financial-statement...")
+
+        def _cash_flow_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_cash_flow(sym)
+            except Exception:
+                logger.debug("Vietcap cash flow failed for %s", sym,
+                             exc_info=True)
+                return sym, {}
+
+        cfo_filled = 0
+        capex_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_cash_flow_worker, s)
+                       for s in needs_cash_flow]
+            for fut in as_completed(futures):
+                sym, answer = fut.result()
+                if not answer:
+                    continue
+                # TradingView's column names again, so the ladder reads these
+                # through the rungs already in place rather than a second
+                # code path. Neither is overwritten if already present: this
+                # gate only fires where CFO is absent, but capex may not be.
+                row = tv_batch.setdefault(sym, {})
+                if "cfo" in answer and _safe_float(
+                        row.get("cash_f_operating_activities_ttm")) is None:
+                    row["cash_f_operating_activities_ttm"] = answer["cfo"]
+                    cfo_filled += 1
+                if "capex" in answer and _safe_float(
+                        row.get("capital_expenditures_ttm")) is None:
+                    row["capital_expenditures_ttm"] = answer["capex"]
+                    capex_filled += 1
+        print(f"  ✓ Vietcap cash flow answered for {len(needs_cash_flow)}"
+              f" asked: {cfo_filled} an operating cash flow,"
+              f" {capex_filled} a capex")
+
+    # Cash, from the balance sheet the census finally named.
+    #
+    # cash is a CORE driver and blocks 150 symbols, second only to
+    # dividend_per_share, and no route asked for it: the balance sheet was
+    # added to the census two runs ago and deliberately left unread until the
+    # vendor's own labels arrived. bsa2 "Tien va tuong duong tien" / "Cash and
+    # cash equivalents" carries a figure for 71 of the 73 companies still
+    # being refused.
+    #
+    # It is written to cash_n_cash_equivalents_fq rather than to
+    # cash_n_short_term_invest_fq, which the ladder tries first. The two are
+    # not the same quantity - the first column is cash, the second is cash
+    # PLUS short-term investments, which this vendor states separately as
+    # bsa5 - and writing a narrower figure into the wider column would report
+    # a number that is quietly missing a leg. The narrow column is read as
+    # the fallback it is.
+    #
+    # The gate asks for both columns, not one. A symbol holding the wide
+    # column already has a cash figure and does not need this.
+    needs_cash = [
+        sym.upper().strip() for sym in master_symbols_map
+        if _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "cash_n_short_term_invest_fq")
+        ) is None
+        and _safe_float(
+            (tv_batch.get(sym.upper().strip()) or {}).get(
+                "cash_n_cash_equivalents_fq")
+        ) is None
+    ]
+    if needs_cash and vietcap_stats_probe():
+        print(f"  🔎 {len(needs_cash)} symbols have no cash figure; probing"
+              " Vietcap balance-sheet...")
+
+        def _cash_worker(sym: str):
+            try:
+                return sym, fetch_vietcap_balance_sheet(sym)
+            except Exception:
+                logger.debug("Vietcap balance sheet failed for %s", sym,
+                             exc_info=True)
+                return sym, {}
+
+        cash_filled = 0
+        with ThreadPoolExecutor(max_workers=6) as executor:
+            futures = [executor.submit(_cash_worker, s) for s in needs_cash]
+            for fut in as_completed(futures):
+                sym, answer = fut.result()
+                if not answer:
+                    continue
+                row = tv_batch.setdefault(sym, {})
+                if "cash" in answer and _safe_float(
+                        row.get("cash_n_cash_equivalents_fq")) is None:
+                    row["cash_n_cash_equivalents_fq"] = answer["cash"]
+                    cash_filled += 1
+        print(f"  ✓ Vietcap balance sheet answered for {len(needs_cash)}"
+              f" asked: {cash_filled} a cash figure")
 
     unified_stocks = {}
     missing_symbols = []
