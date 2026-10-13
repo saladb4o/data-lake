@@ -64,6 +64,16 @@ def main():
         except Exception:
             logger.debug("main: swallowed Exception", exc_info=True)
 
+    if not all_symbols:
+        # vnstock is quarantined on PyPI, so CI has no Listing. CafeF's company
+        # directory covers the same three exchanges (1 HOSE, 2 HNX, 9 UPCOM);
+        # without it every shard fell back to the 30-symbol map below.
+        try:
+            from services.stock_service import fetch_cafef_listed_symbols
+            all_symbols = fetch_cafef_listed_symbols()
+        except Exception:
+            logger.warning("CafeF company directory unavailable", exc_info=True)
+
     if not all_symbols and ALL_SYMBOLS_MAP:
         all_symbols = list(ALL_SYMBOLS_MAP.keys())
 
