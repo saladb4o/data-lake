@@ -3331,6 +3331,76 @@ def classify_report_type(title: str) -> Dict[str, str]:
         "badge_class": "badge-report-other"
     }
 
+def fetch_cafef_listed_symbols() -> List[str]:
+    """Every ticker CafeF lists on HOSE, HNX and UPCOM (its OTC centre, 8, is left out)."""
+    url = "https://cafef.vn/du-lieu/ajax/pagenew/databusiness/congtyniemyet.ashx?centerid=0&skip=0&take=5000&major=0"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0', 'Referer': 'https://cafef.vn/'})
+    with urllib.request.urlopen(req, context=ssl_ctx, timeout=20.0) as resp:
+        rows = json.loads(resp.read().decode('utf-8', errors='ignore')).get("Data") or []
+    return sorted({str(r.get("Symbol") or "").strip().upper() for r in rows if r.get("TradeCenterId") in (1, 2, 9)} - {""})
+
+
+def fetch_cafef_bctc_filings(symbol: str, annual_only: bool = False) -> List[Dict[str, Any]]:
+    """Lists a company's financial-statement PDFs from CafeF's document index.
+
+    The news feed get_company_reports scrapes carries announcements *about*
+    statements, never the statements, so a crawl over it finds nothing. This
+    index (the "Báo cáo tài chính" tab of a CafeF company page) returns every
+    filed statement with a direct PDF link in one response, so it is asked
+    instead.
+
+    One filing is kept per period, newest first: consolidated over parent-only
+    (the parent's books leave out the subsidiaries a valuation needs), and an
+    audited or reviewed version over the draft it replaces.
+    """
+    symbol = symbol.upper().strip()
+    url = f"https://cafef.vn/du-lieu/Ajax/PageNew/FileBCTC.ashx?Symbol={urllib.parse.quote(symbol)}&Type=1&Page=1&PageSize=500"
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://cafef.vn/'}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, context=ssl_ctx, timeout=15.0) as resp:
+            payload = json.loads(resp.read().decode('utf-8', errors='ignore'))
+    except Exception as e:
+        logger.warning(f"fetch_cafef_bctc_filings({symbol}) failed: {e}")
+        return []
+
+    def _rank(name: str) -> int:
+        n = name.lower()
+        return (2 if "hợp nhất" in n else (0 if "công ty mẹ" in n or "riêng" in n else 1)) * 2 + (1 if ("kiểm toán" in n or "soát xét" in n) else 0)
+
+    best: Dict[Tuple[int, int], Dict[str, Any]] = {}
+    for item in (payload or {}).get("Data") or []:
+        link, name = item.get("Link") or "", (item.get("Name") or "").strip()
+        try:
+            year, quarter = int(item.get("Year")), int(item.get("Quarter"))
+        except (TypeError, ValueError):
+            continue
+        if not link.lower().split("?")[0].endswith(".pdf") or not name:
+            continue
+        if annual_only and quarter != 5:
+            continue
+        key = (year, quarter)
+        if key not in best or _rank(name) > _rank(best[key]["title"]):
+            audited = "kiểm toán" in name.lower() or "soát xét" in name.lower()
+            best[key] = {
+                "id": f"rep_{stable_hash(link)}",
+                "symbol": symbol,
+                "title": name,
+                "clean_title": name,
+                "date": item.get("Time") or "",
+                "year": str(year),
+                "fiscal_year": str(year),
+                "quarter": None if quarter == 5 else quarter,
+                "timestamp": 0,
+                "detail_url": link,
+                "pdf_url": link,
+                "has_pdf": True,
+                "type_code": "bctc",
+                "audit_badge": "Kiểm toán" if audited else None,
+            }
+    return [best[k] for k in sorted(best, reverse=True)]
+
+
 def fetch_single_detail_pdf(detail_url: str) -> str:
     """Fetches the disclosure detail page and extracts the direct PDF download link."""
     if not detail_url: return ""
