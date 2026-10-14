@@ -10,6 +10,7 @@ Persists extracted artifacts to:
   - `data/pdf_lake/extracted_bctc_lake.json` (Structured JSON L2 Cache)
 """
 
+import gzip
 import os
 import re
 import json
@@ -124,13 +125,21 @@ def _get_lake_data() -> Dict[str, Any]:
     """Reads L2 persistent extracted lake cache with in-memory mtime caching, Google Colab Drive sync, and shard auto-merging."""
     global _lake_cache_mem, _lake_cache_mtime
     file_path = _resolve_lake_file("extracted_bctc_lake.json")
+    # CI commits the lake gzipped once it outgrows GitHub's 100 MB limit;
+    # read whichever copy is newer (the .gz on a tie, as after a checkout).
+    gz_path = _resolve_lake_file("extracted_bctc_lake.json.gz")
+    if os.path.exists(gz_path) and (
+        not os.path.exists(file_path) or os.path.getmtime(gz_path) >= os.path.getmtime(file_path)
+    ):
+        file_path = gz_path
     data = {}
     if os.path.exists(file_path):
         try:
             mtime = os.path.getmtime(file_path)
             if _lake_cache_mem and _lake_cache_mtime == mtime:
                 return _lake_cache_mem
-            with open(file_path, "r", encoding="utf-8") as f:
+            opener = gzip.open if file_path.endswith(".gz") else open
+            with opener(file_path, "rt", encoding="utf-8") as f:
                 data = json.load(f)
             _lake_cache_mem = data
             _lake_cache_mtime = mtime

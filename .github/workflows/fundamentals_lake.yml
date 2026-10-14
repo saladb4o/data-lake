@@ -238,7 +238,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Universe and screener snapshot
-        timeout-minutes: 40
+        timeout-minutes: 120
+        continue-on-error: true
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
@@ -253,6 +254,7 @@ jobs:
       # have killed it every time, at the two-thirds mark.
       - name: Historical prices
         timeout-minutes: 180
+        if: ${{ !cancelled() }}
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
@@ -262,6 +264,7 @@ jobs:
 
       - name: Fundamentals lake and code probe
         timeout-minutes: 60
+        if: ${{ !cancelled() }}
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
           GOOGLE_DRIVE_DATA_DIR: ${{ github.workspace }}/no-such-drive
