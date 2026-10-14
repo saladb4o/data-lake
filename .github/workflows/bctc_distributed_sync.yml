@@ -123,5 +123,6 @@ jobs:
             if [ "$size" -lt 95000000 ]; then git add "$f"; else echo "::warning::$f is $size bytes; not committing (see artifact)"; fi
           done
           git commit -m "chore(data): auto-update BCTC & Corporate Data Lakes from 20-worker supercluster [skip ci]" || echo "No changes to commit"
+          git checkout -- data/pdf_lake/  # drop lakes too large to commit; they are in the artifact
           git pull --rebase origin main
           git push origin main || (git pull --rebase origin main && git push origin main)
