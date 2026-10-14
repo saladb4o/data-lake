@@ -96,6 +96,10 @@ jobs:
 
       - name: Merge Shards to data/pdf_lake/
         run: |
+          # Start from the gzipped lake when one is committed; it is newer than the stale .json.
+          if [ -f data/pdf_lake/extracted_bctc_lake.json.gz ]; then
+            gunzip -c data/pdf_lake/extracted_bctc_lake.json.gz > data/pdf_lake/extracted_bctc_lake.json
+          fi
           python scripts/merge_shards.py \
             --input-dir ./all_shards \
             --output-file ./data/pdf_lake/extracted_bctc_lake.json \
@@ -117,12 +121,20 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          # GitHub rejects files over 100 MB; skip any lake that is too large (it is still in the artifact).
+          # GitHub rejects files over 100 MB: commit an oversized lake gzipped instead.
           for f in data/pdf_lake/extracted_bctc_lake.json data/pdf_lake/extracted_corporate_actions.json; do
             size=$(stat -c%s "$f")
-            if [ "$size" -lt 95000000 ]; then git add "$f"; else echo "::warning::$f is $size bytes; not committing (see artifact)"; fi
+            if [ "$size" -lt 95000000 ]; then
+              git add "$f"
+            else
+              gzip -9 -n -c "$f" > "$f.gz"
+              gz_size=$(stat -c%s "$f.gz")
+              echo "$f is $size bytes; committing $f.gz ($gz_size bytes)"
+              if [ "$gz_size" -lt 95000000 ]; then git add "$f.gz"; else echo "::warning::$f.gz is still too large; see artifact"; fi
+            fi
           done
           git commit -m "chore(data): auto-update BCTC & Corporate Data Lakes from 20-worker supercluster [skip ci]" || echo "No changes to commit"
-          git checkout -- data/pdf_lake/  # drop lakes too large to commit; they are in the artifact
+          git checkout -- data/pdf_lake/  # drop uncommitted lake changes; they are in the artifact
+          git clean -fdq data/pdf_lake/
           git pull --rebase origin main
           git push origin main || (git pull --rebase origin main && git push origin main)
