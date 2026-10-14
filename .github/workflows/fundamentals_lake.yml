@@ -27,7 +27,7 @@ on:
       limit:
         description: 'Giới hạn số mã khi chạy universe (0 = tất cả)'
         required: false
-        default: '40'
+        default: '0'
       merge:
         description: 'Giữ lại các mã đã có trong lake (true/false)'
         required: false
@@ -263,7 +263,7 @@ jobs:
         run: bash scripts/run_the_measurement_pass.sh prices
 
       - name: Fundamentals lake and code probe
-        timeout-minutes: 60
+        timeout-minutes: 180
         if: ${{ !cancelled() }}
         env:
           DATA_LOCAL_DIR: ${{ github.workspace }}/data
